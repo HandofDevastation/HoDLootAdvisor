@@ -1,0 +1,35 @@
+## Interface: 120100
+## Title: Loot Advisor
+## Notes: What dropped, how big an upgrade it is for everyone present, and what it would cost — at the moment the boss dies.
+## Author: Gloom
+## Version: @project-version@
+## SavedVariables: HoDLootAdvisorDB
+## SavedVariablesPerCharacter: HoDLootAdvisorCharDB
+
+# Load order matters: the baked data table must exist before anything reads it,
+# and Scoring must be on the namespace before Loot drives it.
+LootData.lua
+# Style.lua before anything that draws: it owns the fonts, the DS 2.0 palette and
+# the surface primitives every window builds on. Pure data + helpers, no frames,
+# so it is safe this early.
+Style.lua
+Scoring.lua
+Core.lua
+Settings.lua
+Payload.lua
+Diagnostics.lua
+# Comms after Payload (it stores what it receives) and after Diagnostics (it
+# logs what it cannot verify about itself). Everything it reads from the rest of
+# the namespace is read at CALL time, so nothing below needs to precede it.
+Comms.lua
+# Roster after Comms: it asks Comms who is already reporting live, so it never
+# inspects someone whose own client is telling us the same facts for free.
+Roster.lua
+Journal.lua
+Targets.lua
+Tooltip.lua
+Record.lua
+Loot.lua
+LoadWindow.lua
+RecordWindow.lua
+Panel.lua

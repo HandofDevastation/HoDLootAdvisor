@@ -1,0 +1,602 @@
+-- test/roster.lua — a raid full of strangers, none of them in the export.
+--
+--   cd loot-advisor-addon
+--   lua test/roster.lua
+--
+-- Models the hardest real case there is, and the one an LFR wing produces
+-- exactly: twenty-odd people in a raid instance, NONE on the raid-night export,
+-- NONE running the addon. Everything has to come from the group roster and from
+-- inspection, and inspection has to cope with the three ways it fails.
+--
+-- ⚠️ THE FAILURES ARE THE POINT. A harness where every inspect succeeds proves
+-- only that the happy path compiles. The fixture below deliberately contains
+-- someone out of range, someone offline, someone whose client never answers at
+-- all (NotifyInspect succeeds and INSPECT_READY never fires — the failure mode
+-- with no callback), and someone who answers with an empty cache. Each has a
+-- different correct response and a different reason string.
+--
+-- What this CANNOT prove is whether Blizzard lets you inspect a stranger in
+-- LFR, how far inspect range really is, or whether hero talents are readable
+-- for another player. Those are facts about the client. /la roster probe and a
+-- real LFR wing answer them; this proves the queue behaves whatever they say.
+
+package.path = "./?.lua;./test/?.lua;" .. package.path
+
+local stub = require("wow-stub")
+
+local failures, checks = {}, 0
+local function check(label, ok, detail)
+  checks = checks + 1
+  if not ok then
+    failures[#failures + 1] = label .. (detail and ("  — " .. tostring(detail)) or "")
+  end
+  io.write(ok and "  ok   " or "  FAIL ", label, "\n")
+  if not ok and detail then io.write("       ", tostring(detail), "\n") end
+end
+
+local function header(text)
+  io.write("\n", ("─"):rep(72), "\n", text, "\n", ("─"):rep(72), "\n")
+end
+
+stub.Install()
+
+local realPrint = _G.print
+local muted = true
+_G.print = function(...)
+  local parts = {}
+  for i = 1, select("#", ...) do parts[#parts + 1] = tostring((select(i, ...))) end
+  local line = table.concat(parts, " ")
+  stub.printed[#stub.printed + 1] = line
+  if not muted then realPrint((line:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))) end
+end
+
+local ns = stub.LoadAddon({
+  "LootData.lua", "Style.lua", "Scoring.lua", "Core.lua", "Settings.lua",
+  "Payload.lua", "Diagnostics.lua", "Comms.lua", "Roster.lua", "Journal.lua",
+  "Targets.lua", "Tooltip.lua", "Record.lua", "Loot.lua",
+})
+stub.Fire("ADDON_LOADED", "HoDLootAdvisor")
+
+local Roster = ns.Roster
+
+-- ── The wing ────────────────────────────────────────────────────────────────
+-- Named for what each one is TESTING, so a failure says which case broke.
+
+local function stranger(name, opts)
+  opts = opts or {}
+  local e = {
+    name = name, realm = "Area 52",
+    class = opts.class or "Hunter", classToken = opts.classToken or "HUNTER",
+    guid = "Player-" .. name, role = "DAMAGER",
+    connected = opts.connected ~= false,
+    inspectable = opts.inspectable ~= false,
+    silent = opts.silent or false,
+    specId = opts.specId, specName = opts.specName,
+    equipped = opts.equipped or {},
+  }
+  return e
+end
+
+-- ⚠️ DETERMINISTIC ON PURPOSE. The first version walked pairs(stub.SLOTS) and
+-- took the first N, which is hash order — so "give them one slot" sometimes
+-- picked INVSLOT_BODY or INVSLOT_TABARD, neither of which the addon tracks as
+-- gear. The partial read then contained NOTHING, took a different branch, and
+-- the test failed roughly one run in twenty. A fixture whose contents depend on
+-- hash order is not a fixture.
+local GEAR_SLOTS = {}
+for name, inv in pairs(stub.SLOTS) do
+  if name ~= "INVSLOT_BODY" and name ~= "INVSLOT_TABARD" then
+    GEAR_SLOTS[#GEAR_SLOTS + 1] = inv
+  end
+end
+table.sort(GEAR_SLOTS)
+
+local function gearSet(ilvl, only)
+  local eq = {}
+  for i, inv in ipairs(GEAR_SLOTS) do
+    if not only or i <= only then eq[inv] = { itemID = 270160, ilvl = ilvl } end
+  end
+  return eq
+end
+
+stub.group = {
+  stranger("Normalguy",  { specId = 254, specName = "Marksmanship", equipped = gearSet(308) }),
+  stranger("Faraway",    { inspectable = false }),
+  stranger("Loggedoff",  { connected = false }),
+  stranger("Neveranswers", { silent = true }),
+  stranger("Coldcache",  { specId = 254, specName = "Marksmanship", equipped = {} }),
+  -- ⚠️ THE CASE A LIVE LFR FOUND. The client answers INSPECT_READY as soon as
+  -- it has ANYTHING and fills the rest in as its item cache warms, so a first
+  -- read of two slots out of seventeen is completely normal. Treating that as
+  -- resolved is what left twenty-four strangers half-read and never asked
+  -- again.
+  stranger("Warmingup",  { specId = 254, specName = "Marksmanship",
+                           equipped = gearSet(308, 2) }),
+  -- A base-item-level read from a cold cache: far below anything this season
+  -- can drop. Live, this became "+160 ilvl" on a 279 helm.
+  stranger("Basegear",   { specId = 254, specName = "Marksmanship",
+                           equipped = gearSet(9) }),
+  -- Deliberately UNDERGEARED: `ranked` holds upgrades only, so a stranger in
+  -- better gear than the drop is correctly absent from it and would make the
+  -- ad-hoc ranking check below pass or fail for the wrong reason.
+  stranger("Alsofine",   { specId = 253, specName = "Beast Mastery", equipped = gearSet(280) }),
+}
+stub.inRaid, stub.inGroup = true, false
+
+local function pump(rounds, maxDelay)
+  local ran = 0
+  for _ = 1, rounds or 200 do
+    local n = stub.RunTimers(maxDelay)
+    if n == 0 then break end
+    ran = ran + n
+  end
+  return ran
+end
+
+--- Drive ONE inspection of one person through the real path: clear their
+--- backoff, move the clock past the pacing gap, let Step issue the request, and
+--- run the timer that delivers INSPECT_READY.
+---
+--- Deliberately NOT calling OnInspectReady directly — it ignores an answer it
+--- never asked for, which is correct (a stale reply must not be filed against
+--- whoever is being inspected now) and means a direct call proves nothing.
+local function inspectOnce(entry)
+  -- ⚠️ CLEAR PENDING TIMERS FIRST. The background pump is still scheduled from
+  -- earlier sections, and running it here would inspect this person several
+  -- more times — converging exactly the partial state being examined. The point
+  -- is to see ONE answer, not the settled result of many.
+  stub.timers = {}
+  if stub.active then stub.active.timers = stub.timers end
+
+  entry.nextTry = 0
+  stub.clock = stub.clock + 10
+  Roster.Step()
+  pump(20)
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+header("seeing who is here")
+-- ═══════════════════════════════════════════════════════════════════════════
+
+do
+  local tokens = Roster.UnitTokens()
+  check("a raid enumerates raid tokens", tokens[1] == "raid1", tokens[1])
+  check("...one per member, including yourself", #tokens == #stub.group + 1, #tokens)
+
+  Roster.Scan()
+  local here = 0
+  for _, e in pairs(Roster.seen) do if e.unit then here = here + 1 end end
+  check("everyone in the instance is seen, with no addon and no export",
+        here == #stub.group + 1, here)
+
+  local entry = Roster.seen["normalguy"]
+  check("class comes free from the group roster",
+        entry ~= nil and entry.class == "Hunter", entry and entry.class)
+  check("...and so does a GUID, which is how an inspect result is matched back",
+        entry.guid == "Player-Normalguy", entry.guid)
+
+  -- ⚠️ A PARTY DOES NOT INCLUDE YOU IN ITS TOKENS. "party1" is the OTHER
+  -- person, so a scan that walks party1..N and stops silently omits whoever is
+  -- running the addon — and they are the one person always present.
+  stub.inRaid, stub.inGroup = false, true
+  local partyTokens = Roster.UnitTokens()
+  check("a party scan includes the player explicitly", partyTokens[1] == "player")
+  check("...and does not run off the end", #partyTokens == #stub.group + 1, #partyTokens)
+  stub.inRaid, stub.inGroup = true, false
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+header("nobody here is on the export")
+-- ═══════════════════════════════════════════════════════════════════════════
+
+do
+  -- No payload loaded at all, which is the LFR case exactly.
+  check("with no export, nobody is 'in the payload'", Roster.InPayload("Normalguy") == false)
+  -- Everyone EXCEPT you: in a raid the player is raidN rather than "player", so
+  -- an addon that identifies itself by token lists its own character as a
+  -- stranger and then tries to inspect it.
+  check("...so every OTHER person present is ad-hoc",
+        #Roster.AdHoc() == #stub.group, #Roster.AdHoc())
+  check("...and that is everyone the wing contains", #stub.group == 8, #stub.group)
+
+  -- ⚠️ AND NOBODY IS RANKED YET, because we know nothing about their gear.
+  -- Ranking them now would put strangers in the list at ilvl 0, which the
+  -- scorer reads as an empty slot — making every drop a maximum upgrade for
+  -- every one of them.
+  check("an ad-hoc raider with no gear is NOT ranked",
+        #ns.Payload.EffectiveRoster() == 0, #ns.Payload.EffectiveRoster())
+  check("...but IS listed as unresolved, so they are visible rather than absent",
+        #Roster.Unresolved() == #stub.group, #Roster.Unresolved())
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+header("the pump has to survive being started with no group")
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- ⚠️ THE DEFECT THIS PINS COST A WHOLE LFR WING. The pump exits without
+-- rescheduling when there is no group — which is the state at almost every
+-- login — so the Kick at load ran once, found nothing, and the pump was dead
+-- from then on. GROUP_ROSTER_UPDATE only rescanned; it never restarted it. In
+-- the live run that read as "0 resolved of 0 attempted" with twenty-four people
+-- listed as unresolved, and only a manual scan revived it.
+
+do
+  -- Login, solo. Exactly the order the real client produces.
+  stub.inRaid, stub.inGroup = false, false
+  ns.Roster.Kick()
+  pump(50)
+  check("with no group the pump stops rather than spinning", true)
+
+  -- The raid assembles.
+  stub.inRaid = true
+  Roster.stats.attempted = 0
+  stub.Fire("GROUP_ROSTER_UPDATE")
+  pump(30)
+
+  check("joining a group restarts the pump by itself",
+        Roster.stats.attempted > 0, Roster.stats.attempted)
+
+  -- Reset for the sections below, which drive it deliberately.
+  for _, e in pairs(Roster.seen) do
+    e.gear, e.spec, e.attempts, e.nextTry, e.lastResult = nil, nil, 0, 0, nil
+  end
+  Roster.stats.attempted, Roster.stats.resolved, Roster.stats.tried = 0, 0, 0
+  Roster.stats.outOfRange, Roster.stats.timedOut, Roster.stats.refused = 0, 0, 0
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+header("the inspect queue, including all three ways it fails")
+-- ═══════════════════════════════════════════════════════════════════════════
+
+do
+  Roster.Kick()
+  pump(600)
+
+  local seen = Roster.seen
+
+  check("someone in range and connected resolves",
+        seen["normalguy"].gear ~= nil and seen["normalguy"].spec == "Marksmanship",
+        seen["normalguy"].lastResult)
+  check("...and a second one does too, so the queue moves on rather than sticking",
+        seen["alsofine"].gear ~= nil, seen["alsofine"].lastResult)
+  check("...with the item level actually read off them, not defaulted to zero",
+        (seen["alsofine"].gear.CHEST or {}).ilvl == 280,
+        seen["alsofine"].gear.CHEST and seen["alsofine"].gear.CHEST.ilvl)
+
+  -- Each failure gets its OWN reason. "It did not work" is not a diagnosis, and
+  -- these four need four different responses from a runner.
+  check("out of range is named as such",
+        seen["faraway"].lastResult == "out of range", seen["faraway"].lastResult)
+  check("offline is named as such",
+        seen["loggedoff"].lastResult == "offline", seen["loggedoff"].lastResult)
+  check("a request that never answers times out rather than stalling the queue",
+        seen["neveranswers"].lastResult == "no answer", seen["neveranswers"].lastResult)
+  check("an answer with an empty cache is distinguished from no answer at all",
+        seen["coldcache"].lastResult == "answered with no gear", seen["coldcache"].lastResult)
+
+  -- ⚠️ THE STALL IS THE FAILURE THAT MATTERS. NotifyInspect on someone out of
+  -- range never fires INSPECT_READY and there is no error callback, so without
+  -- a timeout the queue stops on the first such person and NOBODY after them is
+  -- ever tried. Both people who CAN resolve sit after the silent one in the
+  -- fixture, so if the timeout were removed they would still be unknown.
+  check("people queued BEHIND a silent target still got their turn",
+        seen["alsofine"].gear ~= nil)
+
+  -- ⚠️ THE ADDON MUST NEVER INSPECT ITS OWN CHARACTER. In a raid you are raidN,
+  -- not "player", so a self-check written against the token identifies you only
+  -- in a PARTY — and in a raid the queue would fire an inspect at yourself,
+  -- which answers nothing, and then retry it forever on the ladder.
+  local meKey = ns.Comms.Normalize(stub.player.name)
+  check("your own entry is marked as you", Roster.seen[meKey].isSelf == true)
+  check("...so you are never queued for inspection",
+        Roster.NeedsInspect(Roster.seen[meKey]) == false,
+        select(2, Roster.NeedsInspect(Roster.seen[meKey])))
+  local inspectedSelf = false
+  for _, unit in ipairs(stub.inspectCalls) do
+    local e = stub.UnitEntry(unit)
+    if e and e.name == stub.player.name then inspectedSelf = true end
+  end
+  check("...and no inspect was ever actually sent at you", inspectedSelf == false)
+
+  check("everything that failed is scheduled to be retried, not written off",
+        (seen["faraway"].nextTry or 0) > 0 and (seen["neveranswers"].nextTry or 0) > 0)
+  check("...and nobody is ever permanently given up on",
+        Roster.NeedsInspect(seen["faraway"]) == true)
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+header("a partial read is not a finished one")
+-- ═══════════════════════════════════════════════════════════════════════════
+
+do
+  -- Driven ONE READ AT A TIME. Left to the pump this converges — a read that
+  -- stops improving is accepted, which is the design — so the state to inspect
+  -- is the one immediately after the FIRST answer, before the retries settle.
+  local warm = Roster.seen["warmingup"]
+  warm.gear, warm.gearCount, warm.gearStable, warm.lastResult = nil, nil, nil, nil
+  warm.attempts, warm.nextTry = 0, 0
+  inspectOnce(warm)
+
+  check("a partial read is recorded", (warm.gearCount or 0) > 0, warm.gearCount)
+  check("...but is NOT treated as resolved",
+        Roster.NeedsInspect(warm) == true,
+        select(2, Roster.NeedsInspect(warm)))
+  check("...and says so, naming how much it got",
+        (warm.lastResult or ""):find("partial") ~= nil, warm.lastResult)
+  check("...and is scheduled to be asked again", (warm.nextTry or 0) > 0)
+
+  -- The cache warms; the next read is complete.
+  local partial = warm.gearCount
+  for _, inv in pairs(stub.SLOTS) do
+    stub.group[6].equipped[inv] = { itemID = 270160, ilvl = 308 }
+  end
+  inspectOnce(warm)
+  check("a later, fuller read completes it",
+        Roster.NeedsInspect(warm) == false, warm.lastResult)
+  check("...and the fuller reading is the one kept",
+        (warm.gearCount or 0) > partial and warm.gearCount >= 12, warm.gearCount)
+
+  -- ⚠️ A WORSE LATER READ MUST NOT UNDO A GOOD ONE. The cache can go cold
+  -- again, and overwriting seventeen slots with two would throw away exactly
+  -- the retry that just paid off.
+  -- ⚠️ THE REGRESSION CASE HAS TO BE ONE THAT CAN ACTUALLY OCCUR. A person
+  -- already marked resolved is never re-inspected, so making the stub answer
+  -- thinner for THEM proves nothing — the first version of this check passed
+  -- with the fix reverted for exactly that reason. What really happens is a
+  -- PARTIAL read being retried and the retry coming back with less, because the
+  -- item cache went cold again. Put them back in that state.
+  warm.gearCount, warm.gearStable = 5, 0
+  warm.lastResult, warm.attempts, warm.nextTry = "partial (5 slots)", 0, 0
+  local before = warm.gearCount
+  check("...and they are back in a state that gets retried",
+        Roster.NeedsInspect(warm) == true)
+
+  stub.group[6].equipped = gearSet(308, 1)
+  inspectOnce(warm)
+  check("a thinner later read does not replace a fuller one",
+        warm.gearCount == before, warm.gearCount)
+  check("...and a read that did not improve counts toward settling",
+        (warm.gearStable or 0) > 0, warm.gearStable)
+
+  -- Put them back together for the sections below, which expect a raid where
+  -- the resolvable people are resolved.
+  for _, inv in pairs(stub.SLOTS) do
+    stub.group[6].equipped[inv] = { itemID = 270160, ilvl = 308 }
+  end
+  inspectOnce(warm)
+  check("...and a full read afterwards still resolves them",
+        Roster.NeedsInspect(warm) == false, warm.lastResult)
+
+  -- The impossible reading.
+  local base = Roster.seen["basegear"]
+  check("an item level below this season's ladder is discarded, not ranked",
+        base.gear == nil or next(base.gear) == nil,
+        base.gear and base.gearCount)
+  check("...and counted as suspect rather than silently dropped",
+        (base.suspect or 0) > 0, base.suspect)
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+header("what a resolved stranger becomes")
+-- ═══════════════════════════════════════════════════════════════════════════
+
+do
+  local gear = Roster.GearFor("Normalguy", "CHEST")
+  check("their gear is readable by slot", gear ~= nil and gear.ilvl == 308,
+        gear and gear.ilvl)
+  check("...with a track resolved off the item level, same as everyone else",
+        gear.track ~= nil, gear and tostring(gear.track))
+
+  local ident = Roster.IdentityFor("Normalguy")
+  check("their identity resolves from the inspection",
+        ident ~= nil and ident.spec == "Marksmanship" and ident.source == "inspected",
+        ident and ident.source)
+
+  check("someone we could not inspect has class but no spec",
+        (Roster.IdentityFor("Faraway") or {}).spec == nil)
+  check("...and is still named, because class comes free",
+        (Roster.IdentityFor("Faraway") or {}).class == "Hunter")
+
+  check("a resolved stranger now HAS gear by the roster's own test",
+        Roster.HasGear("Normalguy") == true)
+  check("...and an unresolved one does not", Roster.HasGear("Faraway") == false)
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+header("a self-report always beats an inspection")
+-- ═══════════════════════════════════════════════════════════════════════════
+
+do
+  -- Their own client speaks. Fed through the REAL comms path from a sender
+  -- named as them, so the sender normalization is part of what is under test.
+  ns.Comms.Handle(
+    ns.Comms.Encode("GEAR", 1, 1, "@,Hunter,Beast Mastery,Pack Leader;CHEST,321,Myth"),
+    "RAID", "Normalguy")
+
+  local ident = Roster.IdentityFor("Normalguy")
+  -- NOT on recency: their own client reads its own specialization directly,
+  -- while ours reads it across the network and can answer from a cold cache.
+  check("a self-reported identity outranks the inspected one",
+        ident.spec == "Beast Mastery" and ident.source == "reported", ident.source)
+  check("...including the hero tree, which inspection may not be able to give at all",
+        ident.heroTree == "Pack Leader", ident.heroTree)
+
+  check("and we stop inspecting someone who is telling us directly",
+        Roster.NeedsInspect(Roster.seen["normalguy"]) == false,
+        select(2, Roster.NeedsInspect(Roster.seen["normalguy"])))
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+header("an ad-hoc raider reaching a real ranking")
+-- ═══════════════════════════════════════════════════════════════════════════
+
+do
+  -- Now load the export. Nobody in the wing is on it — which is the whole point.
+  local fh = io.open("test/payload.txt", "r")
+  local encoded = fh and fh:read("*a") or nil
+  if fh then fh:close() end
+  if not encoded then
+    io.stderr:write("test/payload.txt missing — see test/make-payload.ts\n")
+    os.exit(2)
+  end
+  local data = ns.Payload.Decode(encoded)
+  ns.Payload.Store(data, encoded)
+
+  local base = #data.roster
+  local effective = ns.Payload.EffectiveRoster()
+  check("the export's own roster is all there", base == 24, base)
+  check("...plus the strangers we managed to resolve",
+        #effective > base, ("%d vs %d"):format(#effective, base))
+
+  -- Only the resolved ones. A stranger we cannot describe stays out of the
+  -- ranking and stays IN the unresolved list.
+  local adhocInRanking = {}
+  for _, r in ipairs(effective) do
+    if r.adhoc then adhocInRanking[#adhocInRanking + 1] = r.n end
+  end
+  table.sort(adhocInRanking)
+  check("exactly the resolvable strangers were added",
+        table.concat(adhocInRanking, ",") == "Alsofine,Normalguy,Warmingup",
+        table.concat(adhocInRanking, ","))
+
+  local unresolvedNames = {}
+  for _, u in ipairs(Roster.Unresolved()) do unresolvedNames[#unresolvedNames + 1] = u.name end
+  table.sort(unresolvedNames)
+  -- Basegear is here because every reading it produced was impossible for this
+  -- season, so nothing survived — which is the correct outcome, and visible.
+  check("and the rest are named as unresolved rather than dropped",
+        table.concat(unresolvedNames, ",") == "Basegear,Coldcache,Faraway,Loggedoff,Neveranswers",
+        table.concat(unresolvedNames, ","))
+
+  -- The end of the whole chain: a stranger, resolved in game, ranked for a real
+  -- item out of the real payload, by the real scorer.
+  local dataT = _G.HoDLootAdvisorData
+  local chestId
+  for id, it in pairs(dataT.items) do
+    if it.slot == "CHEST" and it.classes and it.classes["Hunter"] then chestId = id break end
+  end
+  check("the payload has a chest a Hunter can use", chestId ~= nil)
+
+  local ranked = ns.Loot.RankRaiders(chestId, { difficulty = "h" })
+  local found
+  for _, row in ipairs(ranked or {}) do
+    if row.name == "Alsofine" then found = row end
+  end
+  check("a stranger who was invisible an hour ago now appears in the ranking",
+        found ~= nil, ranked and (#ranked .. " ranked"))
+  found = found or {}
+  check("...marked as ad-hoc, so the panel can say they are not on the export",
+        found and found.adhoc == true)
+  check("...scored from gear read off them in game",
+        found and found.equipped and found.equipped.source == "inspected",
+        found and found.equipped and found.equipped.source)
+  check("...and carrying NO priority, because EPGP only exists on the website",
+        found and found.pr == nil)
+  check("the panel gets a distinct provenance tag for it",
+        (ns.ProvenanceTag(found.equipped)) == "seen")
+
+  -- The ranking row carries everything the panel needs to mark them. Asserted
+  -- on the ROW rather than on the drawing, since Panel.lua is frame
+  -- construction and the harness deliberately does not load it.
+  check("...and the row says they are not on the export",
+        found.adhoc == true)
+  check("...while a raider FROM the export is not marked",
+        (function()
+          for _, row in ipairs(ranked or {}) do
+            if row.adhoc ~= true then return true end
+          end
+          return false
+        end)())
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+header("the manual retry, and the spec discrepancy report")
+-- ═══════════════════════════════════════════════════════════════════════════
+
+do
+  -- The automatic ladder has pushed the failures out to a later rung. A human
+  -- asking is a different thing from the pump hammering, so a deliberate press
+  -- clears the backoff — otherwise the manual trigger is useless in exactly the
+  -- moment somebody reaches for it.
+  local far = Roster.seen["faraway"]
+  far.nextTry = 999999
+  muted = true
+  local before = #stub.printed
+  Roster.Command("scan")
+  check("a manual scan clears the backoff so it retries now", far.nextTry == 0, far.nextTry)
+
+  -- ⚠️ AND IT SAYS HOW LONG IT WILL TAKE. The live version answered "retrying
+  -- 24 raiders now" and then never spoke again, because the work happens in the
+  -- background over the following minute — so from outside, a sweep that was
+  -- working looked identical to one that did nothing at all.
+  local said = table.concat(stub.printed, "\n", before + 1, #stub.printed)
+  check("...and says roughly how long it will take", said:find("takes about") ~= nil, said)
+
+  -- A sweep that scheduled nothing cannot finish. Pinning this separately so a
+  -- failure says WHICH half broke — the kick, or the completion report.
+  check("...and the scan actually scheduled a pass",
+        #stub.timers > 0, ("%d timers queued"):format(#stub.timers))
+
+  before = #stub.printed
+  pump(600)
+  local done = (#stub.printed > before)
+    and table.concat(stub.printed, "\n", before + 1, #stub.printed) or "(nothing printed)"
+  -- ⚠️ "DONE" IS NOT "EVERYONE RESOLVED". Four of these six genuinely cannot be
+  -- inspected, so waiting for the list to empty waits forever. A pass is
+  -- finished when there is nobody left to TRY.
+  local pend = {}
+  for k in pairs((Roster.sweep or {}).pending or {}) do pend[#pend+1] = k end
+  check("...and reports ONCE when the sweep has done all it can",
+        done:find("done for now") ~= nil,
+        ("%s | announce=%s pending=[%s] tried=%d"):format(
+          done, tostring(Roster.announceWhenDone), table.concat(pend, ","),
+          Roster.stats.tried))
+  check("...naming what is still out of reach, by reason",
+        done:find("out of range") ~= nil and done:find("offline") ~= nil, done)
+
+  -- Only when somebody asked. A background sweep that narrates itself every
+  -- time the raid re-forms is the spam this addon is otherwise careful about.
+  before = #stub.printed
+  Roster.announceWhenDone = nil
+  Roster.Kick()
+  pump(600)
+  local quiet = (#stub.printed > before)
+    and table.concat(stub.printed, "\n", before + 1, #stub.printed) or "(nothing printed)"
+  check("an automatic sweep finishes silently",
+        quiet:find("everyone here is resolved") == nil, quiet)
+
+  -- Someone on the export, playing something else. REPORTED, never applied:
+  -- rules/HoD_Rules_Loot-Gear.txt scores the spec they RAID, and a live
+  -- observation is exactly what that rule exists to distrust.
+  local first = ns.Payload.Current().roster[1]
+  Roster.seen[ns.Comms.Normalize(first.n)] = {
+    name = first.n, unit = "raid9", class = first.c,
+    spec = (first.s == "Marksmanship") and "Survival" or "Marksmanship",
+  }
+  local drift = Roster.SpecDiscrepancies()
+  check("a raider specced differently to the roster is reported", #drift == 1, #drift)
+  check("...naming both what the roster says and what they are playing",
+        drift[1] and drift[1].roster == first.s and drift[1].observed ~= first.s,
+        drift[1] and (drift[1].roster .. " vs " .. drift[1].observed))
+
+  -- REVERT-PROOF for the rule: the ranking must still use the ROSTER's spec.
+  local roster = ns.Payload.byName[ns.Comms.Normalize(first.n)]
+  check("...and the export's spec is what still reaches the scorer",
+        roster.s == first.s, roster.s)
+end
+
+-- ── Result ──────────────────────────────────────────────────────────────────
+
+muted = false
+_G.print = realPrint
+io.write("\n")
+ns.Roster.Status()
+
+io.write("\n", ("═"):rep(72), "\n")
+if #failures == 0 then
+  io.write(("PASS — %d checks, a raid of strangers\n"):format(checks))
+  os.exit(0)
+end
+io.write(("FAIL — %d of %d checks\n\n"):format(#failures, checks))
+for _, f in ipairs(failures) do io.write("  · ", f, "\n") end
+os.exit(1)

@@ -1,0 +1,1178 @@
+-- Core.lua — Loot Advisor
+--
+-- The in-game half of hodguild.com's Loot Advisor page. This file is the
+-- plumbing every other file draws on:
+--   • the saved-variables database and the addon namespace
+--   • access to the baked static payload (LootData.lua) with a loud failure
+--   • resolving THIS character's class / spec / hero tree into the emitted keys
+--   • item-link parsing, gear-track resolution and equipped-slot state
+--   • the /la slash command router
+--
+-- Scoring lives in Scoring.lua (parity-proven against the website), the raw
+-- event capture in Diagnostics.lua, and the loot path itself in Loot.lua.
+--
+-- STANDING RULE, worth restating at the top of the addon: the WEBSITE IS THE
+-- ORACLE. Nothing here may quietly disagree with app/lib/loot-advisor.ts or
+-- app/lib/gear-tracks.ts. Where this file mirrors site logic it says so and
+-- names the source, so the two can be diffed by hand.
+
+local ADDON_NAME, ns = ...
+_G.HoDLootAdvisor = ns
+
+ns.ADDON_NAME = ADDON_NAME
+
+local PREFIX = "|cffF3C56BLoot Advisor|r"
+ns.PREFIX = PREFIX
+
+-- ---------------------------------------------------------------------------
+-- Output
+-- ---------------------------------------------------------------------------
+
+function ns.Print(text)
+  print(PREFIX .. ": " .. tostring(text))
+end
+
+--- Print without the prefix — for the indented continuation lines of a report,
+--- where repeating the prefix on every row is just noise.
+function ns.Line(text)
+  print("  " .. tostring(text))
+end
+
+function ns.Warn(text)
+  print(PREFIX .. ": |cffff4444" .. tostring(text) .. "|r")
+end
+
+function ns.Version()
+  local v
+  if C_AddOns and C_AddOns.GetAddOnMetadata then
+    v = C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version")
+  end
+  -- Running unpackaged (a dev symlink into AddOns), the BigWigs packager has
+  -- not substituted its token, so the .toc still reads the literal
+  -- "@project-version@". Report that honestly as a dev build.
+  if not v or v:find("@") then return "dev" end
+  return v
+end
+
+-- ---------------------------------------------------------------------------
+-- Saved variables
+-- ---------------------------------------------------------------------------
+--
+-- DIAGNOSTICS DEFAULT TO ON. That is deliberate for v1: the addon shows nothing
+-- yet, so the only thing a raid night can produce is observations, and every
+-- night without the logger installed is one we cannot replay. It costs a table
+-- append per loot event.
+
+local DB_DEFAULTS = {
+  schema      = 1,
+  diagnostics = true,
+  logCap      = 3000,
+  log         = {},
+  -- frame name -> { left, top }, so a window opens where it was last left.
+  windows     = {},
+}
+
+local function applyDefaults(db, defaults)
+  for k, v in pairs(defaults) do
+    if db[k] == nil then
+      if type(v) == "table" then db[k] = {} else db[k] = v end
+    end
+  end
+  return db
+end
+
+-- ---------------------------------------------------------------------------
+-- The static payload
+-- ---------------------------------------------------------------------------
+
+--- The payload schema this build knows how to read.
+---
+--- ⚠️ DECLARED IN ONE PLACE ON PURPOSE. It is what makes a schema bump safe:
+--- the release workflow refuses a payload the COMMITTED addon cannot read
+--- rather than letting it half-read one, so the emitter and the addon's read
+--- side land in the same release. CI greps this line; the packaged-copy test
+--- asserts against it. Bump it in the same change that teaches the addon the
+--- new shape, never before.
+ns.EXPECTED_SCHEMA = 2
+
+--- The baked game-data table from LootData.lua, or nil if it failed to load.
+--- Every caller must handle nil: an addon that silently scores against no data
+--- is worse than one that says it has none (Data Contract §0, degrade loudly).
+function ns.Data()
+  return _G.HoDLootAdvisorData
+end
+
+function ns.DataSummary()
+  local data = ns.Data()
+  if not data then return nil end
+  local counts = { bosses = 0, items = 0, specs = 0, rankings = 0, ladder = 0 }
+  for _ in pairs(data.bosses or {}) do counts.bosses = counts.bosses + 1 end
+  for _ in pairs(data.items or {}) do counts.items = counts.items + 1 end
+  for _ in pairs(data.specs or {}) do counts.specs = counts.specs + 1 end
+  -- Two different numbers, and they read as a discrepancy against the emitter's
+  -- headers if only one is shown: `rankedItems` is how many ITEMS carry a
+  -- tier, `rankings` is how many spec-level tiers those items carry between
+  -- them (the emitter's X-Trinkets count).
+  -- Schema 2: `rankings` replaced `trinkets`, and an entry is now a TABLE of
+  -- signals rather than a bare letter. Grades and BIS listings are counted apart
+  -- because they come from different sources and fail differently — a harvest
+  -- that silently dropped one of them shows up here as a zero rather than as a
+  -- slightly smaller total.
+  counts.rankedItems, counts.grades, counts.bis = 0, 0, 0
+  for _, byKey in pairs(data.rankings or {}) do
+    counts.rankedItems = counts.rankedItems + 1
+    for _, e in pairs(byKey) do
+      counts.rankings = counts.rankings + 1
+      if e.g then counts.grades = counts.grades + 1 end
+      if e.b then counts.bis = counts.bis + 1 end
+    end
+  end
+  counts.ladder = #((data.tracks or {}).ladder or {})
+  counts.season = (data.meta or {}).seasonName
+  counts.schema = (data.meta or {}).schema
+  counts.generatedAt = (data.meta or {}).generatedAt
+  return counts
+end
+
+-- ---------------------------------------------------------------------------
+-- Who is this character
+-- ---------------------------------------------------------------------------
+--
+-- The emitted spec keys are "Class/Spec" using ENGLISH names as the website's
+-- Blizzard sync stores them ("Death Knight/Blood"). UnitClass's second return is
+-- a locale-independent TOKEN, so the class half maps exactly. The spec half uses
+-- GetSpecializationInfo's name, which is localized — correct on an enUS client
+-- and wrong on any other. Rather than invent a spec-id table from memory (the
+-- standing rule on WoW data: no recall, verified sources only), a miss is
+-- reported loudly by ResolveCharacter and the real spec id is recorded in the
+-- diagnostic log, so a verified id→name map can be built from observation later.
+
+ns.CLASS_NAME = {
+  DEATHKNIGHT = "Death Knight",
+  DEMONHUNTER = "Demon Hunter",
+  DRUID       = "Druid",
+  EVOKER      = "Evoker",
+  HUNTER      = "Hunter",
+  MAGE        = "Mage",
+  MONK        = "Monk",
+  PALADIN     = "Paladin",
+  PRIEST      = "Priest",
+  ROGUE       = "Rogue",
+  SHAMAN      = "Shaman",
+  WARLOCK     = "Warlock",
+  WARRIOR     = "Warrior",
+}
+
+--- The active hero talent tree's NAME ("Dark Ranger"), or nil.
+--- nil is the NORMAL case, not an error: hero-tree stat overrides are opt-in per
+--- spec and only 8 exist across all 40, so falling back to the spec's base
+--- ranking is right far more often than not.
+function ns.HeroTreeName()
+  if not (C_ClassTalents and C_Traits) then return nil end
+  local ok, configID = pcall(C_ClassTalents.GetActiveConfigID)
+  if not ok or not configID then return nil end
+  local ok2, subTreeIDs = pcall(C_ClassTalents.GetHeroTalentSpecsForClassSpec, configID)
+  if not ok2 or type(subTreeIDs) ~= "table" then return nil end
+  for _, stID in ipairs(subTreeIDs) do
+    local ok3, info = pcall(C_Traits.GetSubTreeInfo, configID, stID)
+    if ok3 and type(info) == "table" and info.isActive then
+      return info.name
+    end
+  end
+  return nil
+end
+
+--- The player's specialization index (1-4), plus which API answered.
+---
+--- INSTRUMENTED, THEN FIXED BY THE INSTRUMENT (Session 243). The first real logs
+--- showed specId = 0 and specKnown = false on 18 of 18 logins: GetSpecialization()
+--- answered 0, and because ZERO IS TRUTHY IN LUA the old `if idx then` guard
+--- waved it through to GetSpecializationInfo(0), which returns nothing usable. So
+--- the spec silently never resolved and every item was scored against an UNKNOWN
+--- spec — a neutral value instead of the character's real stat ranking. Nothing
+--- errored; the badges just quietly meant less than they claimed.
+---
+--- Blizzard has been moving these calls into C_SpecializationInfo, so both are
+--- tried in turn and the one that answered is recorded rather than assumed.
+function ns.SpecIndex()
+  -- Built by appending, for the same nil-hole reason as ns.SpecInfo below.
+  local sources = {}
+  if C_SpecializationInfo and C_SpecializationInfo.GetSpecialization then
+    sources[#sources + 1] = { "C_SpecializationInfo.GetSpecialization",
+                              C_SpecializationInfo.GetSpecialization }
+  end
+  if _G.GetSpecialization then
+    sources[#sources + 1] = { "GetSpecialization", _G.GetSpecialization }
+  end
+
+  for _, src in ipairs(sources) do
+    if type(src[2]) == "function" then
+      local ok, idx = pcall(src[2])
+      -- A spec index is 1-4. Anything else is "no answer" — including 0, which
+      -- is exactly what slipped through before.
+      if ok and type(idx) == "number" and idx >= 1 and idx <= 8 then
+        return idx, src[1]
+      end
+    end
+  end
+  return nil, nil
+end
+
+--- id, name for a spec index, from whichever namespace has the function.
+function ns.SpecInfo(idx)
+  if not idx then return nil, nil end
+
+  -- Appended one at a time, never written as a table literal: a literal whose
+  -- FIRST entry is nil — which it is whenever C_SpecializationInfo does not
+  -- exist — makes ipairs stop before it starts, and the whole lookup silently
+  -- does nothing. Exactly the nil-hole trap that truncated GetLootRollItemInfo's
+  -- returns in Session 242.
+  local fns = {}
+  if C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo then
+    fns[#fns + 1] = C_SpecializationInfo.GetSpecializationInfo
+  end
+  if _G.GetSpecializationInfo then
+    fns[#fns + 1] = _G.GetSpecializationInfo
+  end
+
+  for _, fn in ipairs(fns) do
+    local ok, id, name = pcall(fn, idx)
+    if ok and type(name) == "string" and name ~= "" then return id, name end
+  end
+  return nil, nil
+end
+
+--- { className, specName, heroTree, specId, known } for the player.
+--- `known` is false when the resolved Class/Spec key is absent from the emitted
+--- spec table — which is the signal that the localization assumption above has
+--- broken, or that the emitter skipped a spec for having no stat ranking.
+function ns.ResolveCharacter()
+  local _, classToken = UnitClass("player")
+  local className = ns.CLASS_NAME[classToken or ""]
+
+  local idx, specSource = ns.SpecIndex()
+  local specId, specName = ns.SpecInfo(idx)
+
+  local heroTree = ns.HeroTreeName()
+
+  local data = ns.Data()
+  local known = false
+  if data and className and specName then
+    known = (data.specs or {})[className .. "/" .. specName] ~= nil
+  end
+
+  return {
+    className  = className,
+    specName   = specName,
+    heroTree   = heroTree,
+    specId     = specId,
+    specIndex  = idx,
+    specSource = specSource,
+    classToken = classToken,
+    known      = known,
+  }
+end
+
+-- ── The item-quality tag ────────────────────────────────────────────────────
+--
+-- WHY THIS IS SHOWN AT ALL (Jason): a trinket needs simming to know whether it
+-- is an upgrade, so a published grade carries information the score cannot. And
+-- without it BIS is worse than invisible — it silently makes some badges bigger,
+-- changing the advice without showing its reasoning.
+--
+-- SHORT ON PURPOSE. A strip chip is 88px wide and a ranking row has ~26px
+-- between the name and the badge, so this has to read at a glance in almost no
+-- space. The full wording lives in the tooltip.
+--
+-- BIS OUTRANKS A GRADE, matching the scorer: they are one axis and the strongest
+-- wins, so showing both would imply a sum that is not happening.
+local QUALITY_MUTED = { 0.533, 0.533, 0.600 }
+local QUALITY_GOLD  = { 0.953, 0.773, 0.420 }
+local GRADE_COLOR = {
+  s = { 1.000, 0.420, 0.420 }, a = { 0.980, 0.640, 0.320 },
+  b = { 0.784, 0.588, 0.180 }, c = { 0.627, 0.627, 0.690 },
+  d = { 0.533, 0.533, 0.600 }, f = { 0.533, 0.533, 0.600 },
+  defensive = { 0.470, 0.700, 0.900 },
+}
+local BIS_SHORT = { overall = "BIS", raid = "R-BIS", mplus = "M-BIS" }
+local BIS_LONG  = { overall = "Overall BIS", raid = "Raid BIS", mplus = "M+ BIS" }
+ns.BIS_LONG = BIS_LONG
+
+--- The compact tag for one resolved quality entry, or nil when there is none.
+--- Returns text plus colour so every surface renders it identically.
+local function qualityTag(q)
+  if not q then return nil end
+  if q.bis then return BIS_SHORT[q.bis] or "BIS", QUALITY_GOLD end
+  if q.grade then
+    return q.grade == "defensive" and "DEF" or q.grade:upper(),
+           GRADE_COLOR[q.grade] or QUALITY_MUTED
+  end
+  return nil
+end
+ns.QualityTag = qualityTag
+
+-- Where a raider's gear reading came from, for the panel's provenance marker.
+-- The SNAPSHOT case deliberately returns nil rather than a label: it is the
+-- normal state for almost every row, and tagging all twenty of them turns the
+-- signal into wallpaper. What matters is which rows are BETTER than the
+-- snapshot, not that the rest are ordinary.
+-- The SHORT form has to fit a 36px column, which is why it is not the sentence.
+-- The sentence goes in the tooltip, where there is room for it — the same split
+-- the quality tag already makes between its compact tag and its full wording.
+-- {r,g,b} triples, matching GRADE_COLOR above rather than hex strings: the
+-- panel's SetTextColor takes three numbers, and one convention per file beats
+-- two. Green is --hue-green (#20ba56), gold is the brand accent (#F3C56B).
+local PROVENANCE = {
+  live      = { text = "live", color = { 0.125, 0.729, 0.337 },
+                help = "Reported live by this raider's own client — exact, not a snapshot." },
+  corrected = { text = "won",  color = QUALITY_GOLD,
+                help = "Patched from an item they were seen winning tonight." },
+  -- Read off their character in game. Exact when it worked, and it is allowed
+  -- to have not worked — which is why the unresolved list exists.
+  inspected = { text = "seen", color = { 0.470, 0.700, 0.900 },
+                help = "Read from this raider in game just now, not from the export." },
+}
+
+--- Returns short, colorHex, help — or nil for the snapshot tier.
+--- In Core rather than Panel.lua so the headless harness can reach it: pure
+--- logic in Panel is untestable, which this project has now got wrong three
+--- times (Sessions 245 Parts 5 and 10).
+function ns.ProvenanceTag(state)
+  local entry = state and state.source and PROVENANCE[state.source]
+  if not entry then return nil end
+  return entry.text, entry.color, entry.help
+end
+
+--- Who in tonight's roster is reporting live gear and who is not.
+--- Returns { reporting, total, missing = { names } }.
+---
+--- THE GAP HAS TO BE VISIBLE. A non-reporting raider is scored from the site
+--- snapshot and is NEVER silently omitted, but "ranked from possibly-stale
+--- data" and "ranked from what they are wearing right now" are different
+--- claims, and the runner is the person who needs to know which is which. The
+--- missing list is capped by the caller, not here — this answers the question,
+--- it does not decide how to say it.
+function ns.GearReportingSummary()
+  local raid = ns.Payload and ns.Payload.Current()
+  if not raid then return nil end
+
+  local reporting, missing = 0, {}
+  for _, r in ipairs(raid.roster) do
+    local live = ns.Comms and ns.Comms.gear[ns.Comms.Normalize(r.n or "")]
+    if live and next(live) then
+      reporting = reporting + 1
+    else
+      missing[#missing + 1] = r.n
+    end
+  end
+  table.sort(missing)
+  return { reporting = reporting, total = #raid.roster, missing = missing }
+end
+
+--- How many drops are on a BIS list for THIS character, for EVERY boss at once,
+--- keyed by journal encounter id.
+---
+--- The point of putting these on the pickers: "which of these should I care
+--- about" is the question you actually have when choosing where to look, and a
+--- bare list of names cannot answer it. Counting ITEMS, not listings — an item
+--- on two of your BIS lists is still one thing to win.
+---
+--- Counted from OUR payload rather than from the journal, deliberately: this is
+--- a question about our BIS data, so an item we have no listing for contributes
+--- nothing and there is nothing to degrade about it.
+---
+--- ALL of them in one pass, because three pickers now ask: the boss list wants
+--- nine answers and the browse lists want one per encounter and per instance, so
+--- the per-boss form would re-walk the whole payload a few dozen times a refresh
+--- to produce the same table.
+function ns.BisCountsByBoss()
+  local out = {}
+  local data = ns.Data()
+  if not (data and data.items and data.rankings) then return out end
+  local char = ns.ResolveCharacter and ns.ResolveCharacter()
+  if not (char and char.className and char.specName) then return out end
+  local scope = ns.CurrentContentScope and ns.CurrentContentScope() or nil
+
+  for itemID, rec in pairs(data.items) do
+    if rec.boss then
+      local q = ns.Scoring.resolveQuality(
+        data.rankings, itemID, char.className, char.specName, char.heroTree, scope)
+      if q and q.bis then out[rec.boss] = (out[rec.boss] or 0) + 1 end
+    end
+  end
+  return out
+end
+
+--- The same count for a single boss.
+function ns.BisCountForBoss(bossID)
+  if not bossID then return 0 end
+  return ns.BisCountsByBoss()[bossID] or 0
+end
+
+--- The same counts rolled up to journal INSTANCES, keyed by instance id.
+---
+--- Inverted deliberately. The obvious shape — walk every instance, ask what its
+--- encounters hold — makes the browse picker pay for a full Encounter Journal
+--- catalogue walk on every refresh, including for the dungeons and world bosses
+--- our payload does not cover at all. This starts from the handful of bosses
+--- that actually have a BIS item and asks the journal where each one lives, so
+--- when there is nothing to count it never touches the journal.
+function ns.BisCountsByInstance()
+  local out = {}
+  if not (ns.Journal and ns.Journal.InstanceForEncounter) then return out end
+  for bossID, n in pairs(ns.BisCountsByBoss()) do
+    local instanceID = ns.Journal.InstanceForEncounter(bossID)
+    if instanceID then out[instanceID] = (out[instanceID] or 0) + n end
+  end
+  return out
+end
+
+--- Which body of content the player is in right now: "raid", "mplus", or nil
+--- when it is neither or cannot be told.
+---
+--- Three specs split their GRADE table by Raid vs Mythic+ (Blood DK, Prot
+--- Warrior, Aug Evoker) and grade the same trinket differently in each, so the
+--- right letter depends on where you are standing. Everywhere else this returns
+--- nil and the unscoped key resolves, which is the overwhelmingly common case.
+---
+--- nil ON DOUBT, deliberately: an unscoped grade is the spec's general answer,
+--- while a WRONGLY scoped one is a confident answer to a question nobody asked.
+function ns.CurrentContentScope()
+  if type(GetInstanceInfo) ~= "function" then return nil end
+  local ok, _, instanceType, difficultyID = pcall(GetInstanceInfo)
+  if not ok then return nil end
+  if instanceType == "raid" then return "raid" end
+  -- 8 is Mythic Keystone. A non-keystone 5-man is neither bucket: the guides
+  -- mean KEYSTONE content by "Mythic+", and a normal dungeon run is not that.
+  if instanceType == "party" and difficultyID == 8 then return "mplus" end
+  return nil
+end
+
+--- The spec table Scoring.scoreCandidate expects, or nil for an UNKNOWN spec.
+--- That distinction is load-bearing and is not a style choice: the engine scores
+--- an unknown spec a neutral 15 and a known spec with nothing worth weighting a
+--- 0. Collapsing the two diverged 3,840 parity cases when the port was written.
+function ns.SpecFor(char)
+  local data = ns.Data()
+  if not (data and char and char.className and char.specName) then return nil end
+  local ranks = ns.Scoring.resolveSpecRanks(
+    data.specs, char.className, char.specName, char.heroTree
+  )
+  if not ranks then return nil end
+  return { ranks = ranks }
+end
+
+-- ---------------------------------------------------------------------------
+-- Slots
+-- ---------------------------------------------------------------------------
+--
+-- Mirrors extractSlotState() in app/loot-advisor/page.tsx, which maps a LOOT
+-- slot onto the equipment slots that actually compete with it and compares
+-- against the WORST of them (the piece you would replace). ONE_HAND competes
+-- with both hands; TWO_HAND and RANGED occupy MAIN_HAND (Blizzard reports
+-- two-handers there — a fix that had to be made twice on the site).
+
+ns.SLOT_INV = {
+  HEAD     = { INVSLOT_HEAD },
+  NECK     = { INVSLOT_NECK },
+  SHOULDER = { INVSLOT_SHOULDER },
+  BACK     = { INVSLOT_BACK },
+  CHEST    = { INVSLOT_CHEST },
+  WRIST    = { INVSLOT_WRIST },
+  HANDS    = { INVSLOT_HAND },
+  WAIST    = { INVSLOT_WAIST },
+  LEGS     = { INVSLOT_LEGS },
+  FEET     = { INVSLOT_FEET },
+  FINGER   = { INVSLOT_FINGER1, INVSLOT_FINGER2 },
+  TRINKET  = { INVSLOT_TRINKET1, INVSLOT_TRINKET2 },
+  MAIN_HAND = { INVSLOT_MAINHAND },
+  OFF_HAND  = { INVSLOT_OFFHAND },
+  ONE_HAND  = { INVSLOT_MAINHAND, INVSLOT_OFFHAND },
+  TWO_HAND  = { INVSLOT_MAINHAND },
+  RANGED    = { INVSLOT_MAINHAND },
+}
+
+-- The five slots a tier token can resolve to. Used for the set-piece count.
+ns.TIER_SLOTS = { "HEAD", "SHOULDER", "CHEST", "HANDS", "LEGS" }
+
+--- The gear slot an emitted item actually competes for. For a tier token that
+--- is the slot its NAME encodes, resolved by the emitter (never by a copy of
+--- TOKEN_SLOT_MAP here — that map changes every season and belongs to the site).
+--- Returns nil for an omni-token, which has no single slot to compare against.
+function ns.ItemSlot(rec)
+  if not rec then return nil end
+  if rec.slot == "TOKEN" then return rec.tokenSlot end
+  return rec.slot
+end
+
+-- ---------------------------------------------------------------------------
+-- Item links and gear tracks
+-- ---------------------------------------------------------------------------
+
+local function detailedIlvl(link)
+  local fn = (C_Item and C_Item.GetDetailedItemLevelInfo) or GetDetailedItemLevelInfo
+  if not fn then return nil end
+  local ok, ilvl = pcall(fn, link)
+  if ok and type(ilvl) == "number" and ilvl > 0 then return ilvl end
+  return nil
+end
+ns.DetailedIlvl = detailedIlvl
+
+--- itemID + bonus IDs out of an item link or item string.
+--- Field order in an item link is fixed:
+---   item : id : enchant : gem1-4 : suffix : unique : level : specID :
+---   modifiersMask : itemContext : numBonusIDs : bonusID...
+--- so the bonus list is numBonusIDs entries starting one field later.
+function ns.ParseItemLink(link)
+  if type(link) ~= "string" then return nil end
+  local itemString = link:match("|Hitem:([%-%d:]*)") or link:match("^item:([%-%d:]*)")
+  if not itemString then return nil end
+
+  local parts = {}
+  for field in (itemString .. ":"):gmatch("([^:]*):") do
+    parts[#parts + 1] = field
+  end
+
+  local itemID = tonumber(parts[1])
+  if not itemID then return nil end
+
+  local bonusIDs = {}
+  local numBonus = tonumber(parts[13]) or 0
+  for i = 1, numBonus do
+    local id = tonumber(parts[13 + i])
+    if id then bonusIDs[#bonusIDs + 1] = id end
+  end
+
+  return { itemID = itemID, bonusIDs = bonusIDs }
+end
+
+-- Ladder order, lowest track first. Mirrors TRACK_ORDER in gear-tracks.ts.
+ns.TRACK_ORDER = { "Adventurer", "Veteran", "Champion", "Hero", "Myth" }
+
+local TRACK_INDEX = {}
+for i, t in ipairs(ns.TRACK_ORDER) do TRACK_INDEX[t] = i end
+
+--- The scorer only knows four tracks; Adventurer folds into Veteran, exactly as
+--- toScoringTrack() does on the site.
+function ns.ScoringTrack(track)
+  if track == "Adventurer" then return "Veteran" end
+  return track
+end
+
+local function bonusListHasTrack(bonusIDs, track)
+  local data = ns.Data()
+  local block = ((data or {}).tracks or {}).bonus
+  block = block and block[track]
+  if not block then return false end
+  for _, id in ipairs(bonusIDs or {}) do
+    for _, want in ipairs(block) do
+      if id == want then return true end
+    end
+  end
+  return false
+end
+
+--- Item level + bonus IDs -> scoring track, LADDER-FIRST.
+---
+--- This is resolveGearTrack() from app/lib/gear-tracks.ts, not
+--- resolveDisplayTrack(). The two exist on purpose and must not be collapsed:
+--- SCORING wants a piece expressed in CURRENT-season power, so that last
+--- season's Myth gear does not make this season's tier token look like no
+--- upgrade at all. Bonus IDs only break a tie between two tracks that share an
+--- item level.
+---
+--- Returns scoringTrack, rank, rawTrack — or nil when the item level is not on
+--- this season's ladder at all (off-season or crafted gear).
+function ns.ResolveTrack(ilvl, bonusIDs)
+  local data = ns.Data()
+  local ladder = ((data or {}).tracks or {}).ladder
+  if not ladder then return nil end
+
+  local candidates = {}
+  for _, e in ipairs(ladder) do
+    if e.ilvl == ilvl then candidates[#candidates + 1] = e end
+  end
+  if #candidates == 0 then return nil end
+  if #candidates == 1 then
+    return ns.ScoringTrack(candidates[1].track), candidates[1].rank, candidates[1].track
+  end
+
+  for _, track in ipairs(ns.TRACK_ORDER) do
+    if bonusListHasTrack(bonusIDs, track) then
+      for _, c in ipairs(candidates) do
+        if c.track == track then
+          return ns.ScoringTrack(track), c.rank, track
+        end
+      end
+      -- The matched track is not among the candidates at this item level. The
+      -- site returns null here rather than guessing; so do we.
+      return nil
+    end
+  end
+
+  -- No bonus ID matched — assume the LOWER track. This understates gear and so
+  -- inflates apparent upgrade size, which is the site's current behaviour at the
+  -- overlapping item levels. Same trade-off, same direction, deliberately.
+  table.sort(candidates, function(a, b)
+    return (TRACK_INDEX[a.track] or 99) < (TRACK_INDEX[b.track] or 99)
+  end)
+  return ns.ScoringTrack(candidates[1].track), candidates[1].rank, candidates[1].track
+end
+
+-- ---------------------------------------------------------------------------
+-- Eligibility — can this character use the item at all
+-- ---------------------------------------------------------------------------
+--
+-- This is a SEPARATE question from scoring, and asking it is not optional: the
+-- scorer will happily rate a Cloth tier token a Major upgrade for a Hunter,
+-- because "how big an upgrade is this" has no opinion about armor types.
+--
+-- The hard part is NOT reimplemented here. The website's canUseItem() branches
+-- over armor types, weapon subtypes, shields vs held off-hands and token armor
+-- types; the emitter runs THAT function per class and ships the answer as the
+-- item's `classes` set. All that is left in Lua is two lookups.
+--
+-- Returns usable, reason.
+
+function ns.CanUse(rec, className, specName)
+  if not rec then return true end
+
+  -- Fail OPEN on a payload that predates the field. An over-broad list is
+  -- visibly wrong and fixable; an empty one reads as the addon being broken.
+  if type(rec.classes) == "table" then
+    if not className or not rec.classes[className] then
+      return false, ("your class cannot use this%s"):format(
+        rec.armor and (" (" .. rec.armor .. ")") or "")
+    end
+  end
+
+  -- The finer spec gate, which needs the viewer's spec and so cannot be
+  -- pre-resolved: a Strength weapon is useless to an Agility spec of a class
+  -- that can otherwise equip it. An item with no detectable primary stat, or
+  -- one carrying two (shared-primary plate), emits no primaryStat and is never
+  -- excluded here — same benefit of the doubt the website gives.
+  local data = ns.Data()
+  local want = rec.primaryStat
+  if want and specName and data and data.specPrimary then
+    local mine = data.specPrimary[(className or "") .. "/" .. specName]
+    if mine and mine ~= want then
+      return false, ("wrong primary stat for %s (%s)"):format(specName, want)
+    end
+  end
+
+  return true
+end
+
+-- Raid difficulty -> the gear track that difficulty drops on. Core §7.7's
+-- DIFFICULTY_TRACK map, unchanged since the Loot Advisor was built.
+ns.DIFFICULTY_TRACK = { n = "Champion", h = "Hero", m = "Myth" }
+
+--- The bonus IDs a drop WOULD carry at a given difficulty and drop rank.
+--- Only used when there is no item link to read them from — the dev-injection
+--- path, and a live drop whose link we failed to parse. Deriving them keeps
+--- those paths on the same track-resolution code as a real drop instead of a
+--- shortcut that could quietly disagree with it.
+function ns.BonusIdsFor(difficultyKey, dropRank)
+  local data = ns.Data()
+  local blocks = ((data or {}).tracks or {}).bonus
+  local track = ns.DIFFICULTY_TRACK[difficultyKey or ""]
+  local block = blocks and track and blocks[track]
+  if not block then return {} end
+  local id = block[(dropRank or 1)]
+  if not id then return {} end
+  return { id }
+end
+
+--- An item string the GAME can render a real tooltip from, carrying the bonus
+--- IDs for a given difficulty.
+---
+--- A bare "item:270910" tooltips at the item's BASE item level, which for raid
+--- loot is wildly wrong — the whole point of a bonus ID is that it tells the
+--- client which upgraded version this is. So the difficulty's block is attached
+--- and the client computes the real item level and stats itself, rather than us
+--- re-deriving numbers we would then have to keep in step with Blizzard's.
+---
+--- Field order is fixed:
+---   item : id : enchant : gem1-4 : suffix : unique : level : specID :
+---   modifiersMask : itemContext : numBonusIDs : bonusID...
+function ns.ItemLinkFor(itemID, difficultyKey)
+  if not itemID then return nil end
+  local data = ns.Data()
+  local rec = data and (data.items or {})[itemID]
+  if not rec then return ("item:%d"):format(itemID) end
+
+  local bonus = ns.BonusIdsFor(difficultyKey or ns.DifficultyKey(), rec.dropRank)
+  if #bonus == 0 then return ("item:%d"):format(itemID) end
+
+  return ("item:%d:0:0:0:0:0:0:0:0:0:0:0:%d:%s")
+    :format(itemID, #bonus, table.concat(bonus, ":"))
+end
+
+--- What the player is wearing in a loot slot: { ilvl, track, link, empty }.
+--- An empty slot is ilvl 0 with no track, which the scorer reads as "anything is
+--- an upgrade" — correct, and the same thing the site does with a missing piece.
+function ns.EquippedSlotState(lootSlot)
+  local invSlots = ns.SLOT_INV[lootSlot]
+  if not invSlots then return nil end
+
+  local worstIlvl, worstLink
+  for _, inv in ipairs(invSlots) do
+    local link = GetInventoryItemLink("player", inv)
+    if link then
+      local ilvl = detailedIlvl(link) or 0
+      if not worstIlvl or ilvl < worstIlvl then
+        worstIlvl, worstLink = ilvl, link
+      end
+    end
+  end
+
+  if not worstLink then
+    return { ilvl = 0, track = nil, empty = true }
+  end
+
+  local parsed = ns.ParseItemLink(worstLink)
+  local track = ns.ResolveTrack(worstIlvl, parsed and parsed.bonusIDs)
+  return { ilvl = worstIlvl, track = track, link = worstLink, empty = false }
+end
+
+--- Does the player already have this exact item equipped in the given slot, and
+--- at what item level. Only meaningful for the two-slot slots — you cannot wear
+--- two of the same trinket, which is why the scorer excludes those candidates.
+function ns.EquippedCopy(lootSlot, itemID)
+  local invSlots = ns.SLOT_INV[lootSlot]
+  if not invSlots then return false, nil end
+  local bestIlvl
+  for _, inv in ipairs(invSlots) do
+    local link = GetInventoryItemLink("player", inv)
+    local parsed = link and ns.ParseItemLink(link)
+    if parsed and parsed.itemID == itemID then
+      local ilvl = detailedIlvl(link) or 0
+      if not bestIlvl or ilvl > bestIlvl then bestIlvl = ilvl end
+    end
+  end
+  return bestIlvl ~= nil, bestIlvl
+end
+
+--- How many tier set pieces the player is wearing, for the set-completion
+--- factor. INSTRUMENTED, NOT TRUSTED: this reads the set id off equipped items,
+--- which Blizzard has historically left empty for modern tier sets. `known` is
+--- false when nothing reported a set id at all, and the raw ids go into the
+--- diagnostic log, so the first raid night tells us whether this works rather
+--- than us assuming either way. F4 only applies to tier tokens, so a wrong 0
+--- costs at most the set bonus on token scoring.
+function ns.TierPieceCount()
+  local getInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+  if not getInfo then return 0, false, {} end
+
+  local setIds, counts, best, bestCount = {}, {}, nil, 0
+  for _, slotName in ipairs(ns.TIER_SLOTS) do
+    local inv = ns.SLOT_INV[slotName][1]
+    local itemID = GetInventoryItemID("player", inv)
+    if itemID then
+      local ok, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, setID = pcall(getInfo, itemID)
+      if ok and setID then
+        setIds[slotName] = setID
+        counts[setID] = (counts[setID] or 0) + 1
+        if counts[setID] > bestCount then best, bestCount = setID, counts[setID] end
+      end
+    end
+  end
+
+  if not best then return 0, false, setIds end
+  return bestCount, true, setIds
+end
+
+-- ---------------------------------------------------------------------------
+-- Raid difficulty
+-- ---------------------------------------------------------------------------
+--
+-- Only ever a FALLBACK for the candidate item level: a real drop carries a link,
+-- and the link's bonus IDs give the item level that actually dropped, which is
+-- better data than the difficulty table. This exists for the dev-injection path
+-- and for a drop whose link we could not parse.
+
+ns.DIFFICULTY_KEY = {
+  [14] = "n", -- Normal
+  [15] = "h", -- Heroic
+  [16] = "m", -- Mythic
+  [17] = "n", -- Raid Finder: below our table, floored to Normal
+}
+
+--- "n" | "h" | "m", plus the raw difficulty id for the log.
+---
+--- An explicit SETTING wins over detection. Auto-detect is right in a raid but
+--- useless everywhere else — planning next week's loot from a city returns no
+--- instance at all, and silently scoring everything as Heroic with no way to say
+--- otherwise is wrong for a Mythic team. Every consumer funnels through here, so
+--- the setting reaches the panel, the chat lines and the slash commands alike.
+local SETTING_KEY = { NORMAL = "n", HEROIC = "h", MYTHIC = "m" }
+
+function ns.DifficultyKey()
+  local id = select(3, GetInstanceInfo())
+  local forced = ns.Settings and SETTING_KEY[ns.Settings.Get("difficulty") or "AUTO"]
+  if forced then return forced, id end
+  local key = ns.DIFFICULTY_KEY[id or 0]
+  return key or "h", id
+end
+
+-- ---------------------------------------------------------------------------
+-- Window placement
+-- ---------------------------------------------------------------------------
+--
+-- Every secondary window used to anchor itself CENTER, and the panel anchors
+-- CENTER+260 — so each one opened squarely on top of the panel, two title bars
+-- and two sets of footer buttons interleaved and unreadable. It happened once
+-- with the loot log and again with settings, which is the signal it belongs in
+-- ONE place rather than being fixed per window.
+--
+-- Sides are assigned so the two that can be open together are not on the same
+-- one: the loot log and the paste window take the LEFT, settings the RIGHT.
+-- Clamped to screen, so docking can never push a window off a narrow display,
+-- and every window stays movable — wherever the user drags it is theirs.
+
+--- Make a frame behave like a WINDOW: on top when it is shown, and brought to
+--- the front when it is clicked.
+---
+--- Every one of these frames is in the DIALOG strata, and within one strata the
+--- frame LEVEL decides who draws over whom. Unmanaged, they INTERLEAVE — the
+--- panel's text drew straight through the settings window's background, which is
+--- what "the windows overlap" actually looked like on screen. Docking them apart
+--- (below) only hid that for the default position; it could never survive the
+--- user dragging one over another, which is the normal thing to do.
+---
+--- SetToplevel is Blizzard's own answer to this: a top-level frame is raised
+--- within its strata automatically on click. Raise() covers the show.
+--- Remember where a window was dragged to, across opens AND across sessions.
+---
+--- SCREEN COORDINATES, not the anchor as found. A window that has never been
+--- moved is anchored TO THE PANEL by DockBesidePanel, and persisting that
+--- relationship would drag it around whenever the panel moved — and on the next
+--- login it would point at a frame that has not been built yet.
+function ns.SaveWindowPosition(frame)
+  local name = frame and frame.GetName and frame:GetName()
+  if not (name and ns.db) then return end
+  local left, top = frame:GetLeft(), frame:GetTop()
+  if not (left and top) then return end
+  ns.db.windows = ns.db.windows or {}
+  ns.db.windows[name] = { left = left, top = top }
+end
+
+--- Restore a saved position. Returns false when there is none, which is the
+--- signal to fall back to the default placement.
+function ns.RestoreWindowPosition(frame)
+  local name = frame and frame.GetName and frame:GetName()
+  local saved = name and ns.db and ns.db.windows and ns.db.windows[name]
+  if not saved then return false end
+  frame:ClearAllPoints()
+  frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", saved.left, saved.top)
+  return true
+end
+
+function ns.ResetWindowPositions()
+  if ns.db then ns.db.windows = {} end
+end
+
+function ns.MakeWindow(frame)
+  if not frame then return end
+
+  -- Appearance first, so every window picks up the DS 2.0 skin from ONE call
+  -- site. All five windows already route through here for drag/escape handling,
+  -- which makes this the cheapest place to make them look like one product —
+  -- and the cheapest place to change that decision later.
+  if ns.Style and ns.Style.Window then pcall(ns.Style.Window, frame) end
+
+  if frame.SetToplevel then frame:SetToplevel(true) end
+  if frame.SetClampedToScreen then frame:SetClampedToScreen(true) end
+
+  -- Wrap whatever OnDragStop the window already set rather than replacing it —
+  -- every window here happens to use the plain StopMovingOrSizing, but a window
+  -- that needed its own teardown would otherwise lose it silently. MakeWindow is
+  -- called AFTER the drag scripts in all five, which is what makes this safe.
+  if frame.GetScript and frame.SetScript then
+    local prior = frame:GetScript("OnDragStop")
+    frame:SetScript("OnDragStop", function(self, ...)
+      if prior then prior(self, ...) elseif self.StopMovingOrSizing then self:StopMovingOrSizing() end
+      ns.SaveWindowPosition(self)
+    end)
+  end
+
+  -- ESCAPE CLOSES IT, the way every other window in WoW works. Blizzard's
+  -- CloseSpecialWindows() walks UISpecialFrames and hides every shown frame in
+  -- it, so ONE press closes the whole addon rather than one window per press.
+  --
+  -- ⚠️ The list holds GLOBAL NAMES, not frame references, so an anonymous frame
+  -- registers nothing and fails silently. Every window here is deliberately
+  -- named for this reason — check GetName() before adding a new one.
+  --
+  -- Registering is idempotent: MakeWindow runs once per frame at build time, but
+  -- a duplicate entry would make Blizzard hide the same frame twice per press,
+  -- and that is the kind of thing that only shows up as a weird interaction with
+  -- someone else's addon months later.
+  local name = frame.GetName and frame:GetName()
+  if not (name and UISpecialFrames) then return end
+  for _, existing in ipairs(UISpecialFrames) do
+    if existing == name then return end
+  end
+  table.insert(UISpecialFrames, name)
+end
+
+function ns.DockBesidePanel(frame, side)
+  if not frame then return end
+  ns.MakeWindow(frame)
+  frame:Raise()
+
+  -- A position the user chose OUTRANKS the default placement, always. Docking
+  -- is only ever the answer to "where should this go the first time".
+  if ns.RestoreWindowPosition(frame) then return end
+
+  frame:ClearAllPoints()
+  local panel = _G.HoDLootAdvisorPanel
+  if panel and panel:IsShown() then
+    if side == "RIGHT" then
+      frame:SetPoint("TOPLEFT", panel, "TOPRIGHT", 8, 0)
+    else
+      frame:SetPoint("TOPRIGHT", panel, "TOPLEFT", -8, 0)
+    end
+  else
+    frame:SetPoint("CENTER")
+  end
+end
+
+-- ---------------------------------------------------------------------------
+-- Startup
+-- ---------------------------------------------------------------------------
+
+local loader = CreateFrame("Frame")
+loader:RegisterEvent("ADDON_LOADED")
+loader:SetScript("OnEvent", function(_, event, name)
+  if event ~= "ADDON_LOADED" or name ~= ADDON_NAME then return end
+
+  HoDLootAdvisorDB = applyDefaults(HoDLootAdvisorDB or {}, DB_DEFAULTS)
+  ns.db = HoDLootAdvisorDB
+
+  -- Settings are merged per KEY, not wholesale: a saved table from an older
+  -- version is missing any setting added since, and replacing it would discard
+  -- the runner's choices while leaving it alone would leave new keys nil.
+  ns.db.settings = applyDefaults(ns.db.settings or {}, ns.Settings.Defaults())
+
+  ns.Payload.BuildIndex()
+
+  local summary = ns.DataSummary()
+  if not summary then
+    ns.Warn("LootData.lua did not load — no item data. Scoring is unavailable.")
+  elseif summary.items == 0 then
+    ns.Warn("LootData.lua loaded but carries no items. Scoring is unavailable.")
+  elseif summary.schema ~= ns.EXPECTED_SCHEMA then
+    -- Half-reading a payload from a different schema produces advice that looks
+    -- right and is not, which is the failure this whole addon is most careful
+    -- about. Say so plainly rather than carrying on.
+    ns.Warn(("LootData.lua is schema %s but this build reads schema %d — "
+      .. "update the addon. Scoring may be wrong."):format(
+      tostring(summary.schema), ns.EXPECTED_SCHEMA))
+  end
+
+  if ns.Diagnostics then ns.Diagnostics.Start() end
+
+  -- Comms after the database exists (it persists the runner flag) and after
+  -- Diagnostics (it logs whether its prefix registration was even accepted).
+  if ns.Comms then
+    ns.Comms.Start()
+    -- Announce, and ask for tonight's data if we have none. Both are no-ops
+    -- outside a group, which is the state at almost every login — the real
+    -- trigger is GROUP_ROSTER_UPDATE, and this covers the /reload-mid-raid case
+    -- that would otherwise wait for the next roster change to catch up.
+    if ns.Comms.Channel() then
+      ns.Comms.Announce(true)
+      if not ns.Payload.Current() then ns.Comms.RequestPayload() end
+    end
+  end
+
+  -- Roster after Comms, since it asks Comms who is already reporting live and
+  -- never inspects those people. Kicking is cheap and self-limiting: the pump
+  -- stops the moment there is nobody left to resolve, and never starts at all
+  -- outside a group.
+  if ns.Roster then
+    ns.Roster.Start()
+    ns.Roster.Kick()
+  end
+
+  -- The targeted-item tooltip line. Registers once, for every item tooltip in
+  -- the game — which is the entire point of it, since a target matters where the
+  -- panel is not.
+  if ns.Tooltip then ns.Tooltip.Start() end
+
+  ns.Print(("v%s loaded. |cff888888/la|r opens the panel, |cff888888/la help|r lists commands."):format(ns.Version()))
+  loader:UnregisterEvent("ADDON_LOADED")
+end)
+
+-- ---------------------------------------------------------------------------
+-- Slash commands
+-- ---------------------------------------------------------------------------
+
+local function cmdStatus()
+  local summary = ns.DataSummary()
+  ns.Print(("v%s"):format(ns.Version()))
+
+  if not summary then
+    ns.Warn("no static data loaded (LootData.lua missing or broken).")
+  else
+    ns.Line(("Data: %s · schema %s · %d items · %d bosses · %d specs"):format(
+      tostring(summary.season), tostring(summary.schema),
+      summary.items, summary.bosses, summary.specs))
+    ns.Line(("Quality: %d rated items · %d entries (%d grades, %d best-in-slot)"):format(
+      summary.rankedItems or 0, summary.rankings or 0,
+      summary.grades or 0, summary.bis or 0))
+    ns.Line(("Generated: %s"):format(tostring(summary.generatedAt)))
+  end
+
+  local char = ns.ResolveCharacter()
+  local specLabel = ("%s/%s"):format(tostring(char.className), tostring(char.specName))
+  if char.heroTree then specLabel = specLabel .. " (" .. char.heroTree .. ")" end
+  if char.known then
+    ns.Line("You: " .. specLabel .. " |cff20ba56— stat ranking found|r")
+  else
+    ns.Line("You: " .. specLabel .. " |cffff4444— NO stat ranking for this spec|r")
+    ns.Line("     Items would score against a neutral value. Spec id: " .. tostring(char.specId))
+  end
+
+  local pieces, known = ns.TierPieceCount()
+  ns.Line(("Tier pieces: %d%s"):format(pieces, known and "" or " (no set ids reported — see /la diag)"))
+
+  local key, diffId = ns.DifficultyKey()
+  ns.Line(("Difficulty: %s (id %s)"):format(key, tostring(diffId)))
+
+  local raid = ns.Payload and ns.Payload.Summary()
+  if raid then
+    ns.Line(("Raid night: %d raiders · %d with standings · %s"):format(
+      raid.raiders, raid.ranked, tostring(raid.seasonName)))
+    ns.Line(("     Exported %s · gear synced %s"):format(
+      ns.Payload.AgeText(), ns.Payload.GearAgeText()))
+  else
+    ns.Line("Raid night: |cff888899nothing imported|r — |cffF3C56B/la load|r to paste tonight's export.")
+    ns.Line("     Without it, scoring answers 'is this for me' but not 'who is it for'.")
+  end
+
+  if ns.Record then
+    local _, gi = ns.Record.Counts(ns.Record.GUILD)
+    local _, pi = ns.Record.Counts(ns.Record.PERSONAL)
+    ns.Line(("Loot log: %d guild · %d personal items — |cffF3C56B/la loot|r to review"):format(gi, pi))
+  end
+
+  if ns.Targets then
+    -- The TOOLTIP MECHANISM is reported because it can be absent, and a tooltip
+    -- line that silently never appears is indistinguishable from one nobody
+    -- flagged anything for. Tooltip.lua's own header claimed this line existed
+    -- before it did — the claim is now true.
+    local method = ns.Tooltip and ns.Tooltip.method
+    ns.Line(("Targets: %d on this character — |cffF3C56B/la targets|r"):format(
+      ns.Targets.Count()))
+    if method then
+      ns.Line(("     Tooltip line: on (%s)"):format(method))
+    else
+      ns.Line("     Tooltip line: |cffff4444unavailable|r — no tooltip hook on this client.")
+    end
+  end
+
+  if ns.Diagnostics then ns.Diagnostics.Status() end
+end
+
+local function cmdHelp()
+  ns.Print("commands:")
+  ns.Line("|cffF3C56B/la|r — open the panel")
+  ns.Line("|cffF3C56B/la status|r — data, your spec, raid data, diagnostics")
+  ns.Line("|cffF3C56B/la load|r — import tonight's raid export from the website")
+  ns.Line("|cffF3C56B/la who <itemID|itemLink> [n|h|m]|r — rank the whole roster for an item")
+  ns.Line("|cffF3C56B/la score <itemID|itemLink> [n|h|m]|r — score one item for you")
+  ns.Line("|cffF3C56B/la test <itemID|itemLink> [n|h|m]|r — fake a loot roll through the real handler")
+  ns.Line("|cffF3C56B/la drops|r — what dropped, with a Post button per item")
+  ns.Line("|cffF3C56B/la loot|r — the loot log: every drop and roll, reviewable and exportable")
+  ns.Line("     |cff888888/la loot status · scan · clear [guild|personal]|r")
+  ns.Line("     |cff888888/la loot fake|r — pretend a drop landed HERE, through the real path")
+  ns.Line("|cffF3C56B/la post <itemID|itemLink>|r — post one item's ranking to chat")
+  ns.Line("|cffF3C56B/la config|r — settings (names per line, channel, auto-open)")
+  ns.Line("|cffF3C56B/la set <key> <value>|r — change one setting; |cffF3C56B/la set|r lists them")
+  ns.Line("|cffF3C56B/la targets|r — what this character is going after (|cff888888clear|r empties it)")
+  ns.Line("     |cff888888right-click any item in the panel to flag it|r")
+  ns.Line("|cffF3C56B/la roster|r — who is actually here, and who we cannot describe yet")
+  ns.Line("     |cff888888/la roster scan · probe|r")
+  ns.Line("|cffF3C56B/la comms|r — who else is running it, and what has been sent/received")
+  ns.Line("     |cff888888/la comms push · want · gear · hello · loop · flush|r")
+  ns.Line("|cffF3C56B/la journal|r — probe the Adventure Guide's loot catalogue (diagnostic)")
+  ns.Line("|cffF3C56B/la windows|r — forget where windows were dragged to")
+  ns.Line("|cffF3C56B/la diag|r — diagnostic logging: |cff888888on / off / clear / dump / events|r")
+end
+
+SLASH_HODLOOTADVISOR1 = "/la"
+SLASH_HODLOOTADVISOR2 = "/lootadvisor"
+SlashCmdList["HODLOOTADVISOR"] = function(msg)
+  msg = tostring(msg or "")
+  -- The remainder is passed through RAW, not split on whitespace: an item link
+  -- pasted by shift-clicking carries "[Item Name With Spaces]" and splitting it
+  -- would tear the link apart.
+  local cmd, rest = msg:match("^%s*(%S*)%s*(.*)$")
+  cmd = (cmd or ""):lower()
+
+  -- Bare /la opens the PANEL; the text status moved to /la status. The panel is
+  -- the primary surface now, and the same convention Build Barn uses (/gbb
+  -- opens the window, /gbb status is the text smoke test).
+  if cmd == "" then
+    if ns.Panel then ns.Panel.Toggle() else ns.Warn("panel did not load.") end
+  elseif cmd == "status" then
+    cmdStatus()
+  elseif cmd == "help" then
+    cmdHelp()
+  elseif cmd == "diag" then
+    if ns.Diagnostics then
+      local sub, arg = rest:match("^(%S*)%s*(%S*)$")
+      ns.Diagnostics.Command(sub, arg)
+    else
+      ns.Warn("diagnostics module did not load.")
+    end
+  elseif cmd == "score" then
+    if ns.Loot then ns.Loot.ScoreCommand(rest) else ns.Warn("loot module did not load.") end
+  elseif cmd == "who" then
+    if ns.Loot then ns.Loot.WhoCommand(rest) else ns.Warn("loot module did not load.") end
+  elseif cmd == "test" then
+    if ns.Loot then ns.Loot.TestCommand(rest) else ns.Warn("loot module did not load.") end
+  elseif cmd == "load" then
+    if ns.LoadWindow then ns.LoadWindow.Toggle() else ns.Warn("load window did not load.") end
+  elseif cmd == "loot" then
+    if ns.Record then ns.Record.Command(rest) else ns.Warn("loot recorder did not load.") end
+  elseif cmd == "drops" or cmd == "panel" then
+    if ns.Panel then ns.Panel.Toggle() else ns.Warn("panel did not load.") end
+  elseif cmd == "config" or cmd == "settings" then
+    ns.Settings.Toggle()
+  elseif cmd == "set" then
+    ns.Settings.Command(rest)
+  elseif cmd == "post" then
+    local itemID = tonumber(rest:match("|Hitem:(%d+)")) or tonumber(rest:match("^%s*(%d+)"))
+    if itemID then ns.Loot.PostToChat(itemID) else ns.Warn("usage: /la post <itemID or item link>") end
+  elseif cmd == "targets" or cmd == "target" then
+    if ns.Targets then ns.Targets.Command(rest) else ns.Warn("targets module did not load.") end
+  elseif cmd == "roster" then
+    if ns.Roster then
+      local sub, arg = rest:match("^(%S*)%s*(.*)$")
+      ns.Roster.Command(sub, arg)
+    else
+      ns.Warn("roster module did not load.")
+    end
+  elseif cmd == "comms" then
+    if ns.Comms then
+      local sub, arg = rest:match("^(%S*)%s*(.*)$")
+      ns.Comms.Command(sub, arg)
+    else
+      ns.Warn("comms module did not load.")
+    end
+  elseif cmd == "journal" then
+    if ns.Journal then ns.Journal.Probe() else ns.Warn("journal probe did not load.") end
+  elseif cmd == "windows" then
+    ns.ResetWindowPositions()
+    ns.Print("window positions reset — each one returns to its default place next time it opens.")
+  elseif cmd == "unload" then
+    ns.Payload.Clear()
+    ns.Print("raid data cleared.")
+  else
+    ns.Warn("unknown command: " .. cmd)
+    cmdHelp()
+  end
+end

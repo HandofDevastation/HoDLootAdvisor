@@ -1,0 +1,125 @@
+name: Loot data refresh
+
+# Pull the freshly emitted LootData.lua from hodguild.com, and if it changed,
+# commit it, tag a dated release and package it — so WoWUp updates every
+# installer automatically.
+#
+# This job PACKAGES THE RELEASE ITSELF rather than relying on the tag push to
+# trigger release.yml: tags pushed by the built-in GITHUB_TOKEN do not trigger
+# other workflows. Learned once already on Gloom's Build Barn; do not "simplify"
+# it back.
+on:
+  schedule:
+    - cron: "0 13 * * 2" # Tuesdays 13:00 UTC, an hour after Build Barn's
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: loot-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone project
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch the latest LootData.lua from the site
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://www.hodguild.com/api/loot-advisor/emit" -o LootData.lua
+
+      # ── The guards ────────────────────────────────────────────────────────
+      #
+      # A failed guard means NO RELEASE THIS WEEK. That is the system working:
+      # shipping a hollow payload scores every item against nothing, silently,
+      # in front of the raid.
+      #
+      # ⚠️ THE BOUNDS ARE FOR SCHEMA 2. The Data Contract's original floor was
+      # sized against a 31 KB schema-1 emit; the payload is ~136 KB since BIS
+      # landed (Session 245), and the UPPER bound was never re-tuned at all —
+      # it was carried as an open item. Both are set here from the real emit.
+      - name: Sanity-check the payload
+        run: |
+          set -euo pipefail
+          bytes=$(wc -c < LootData.lua)
+          echo "payload: $bytes bytes"
+
+          # Floor: roughly half the real emit. Catches a collapse while still
+          # allowing a genuinely lean tier.
+          test "$bytes" -gt 60000 || {
+            echo "::error::Payload is only $bytes bytes — expected ~136 KB. Aborting."
+            exit 1
+          }
+          # Ceiling: a runaway query or a duplicated table, which is the shape a
+          # silent bug takes when it grows rather than shrinks.
+          test "$bytes" -lt 600000 || {
+            echo "::error::Payload is $bytes bytes — implausibly large. Aborting."
+            exit 1
+          }
+
+          head -n1 LootData.lua | grep -q "GENERATED"
+          grep -q "HoDLootAdvisorData" LootData.lua
+
+          # ⚠️ THE SCHEMA GUARD IS WHAT MAKES A SCHEMA BUMP SAFE. It refuses a
+          # payload the COMMITTED addon cannot read, rather than letting it
+          # half-read one. The emitter and the addon's read side must therefore
+          # land in the same release. Read from Core.lua rather than hardcoded
+          # here, so the two cannot drift apart.
+          want=$(grep -oE 'ns\.EXPECTED_SCHEMA = [0-9]+' Core.lua | grep -oE '[0-9]+$')
+          test -n "$want" || { echo "::error::Could not read EXPECTED_SCHEMA from Core.lua"; exit 1; }
+          grep -qE "schema = ${want}\b" LootData.lua || {
+            echo "::error::Emit is not schema ${want} — the addon cannot read it. Aborting."
+            exit 1
+          }
+
+          # A payload with no items is the failure that looks most like success.
+          grep -q "items = {" LootData.lua
+
+      - name: Stop if nothing changed
+        id: diff
+        run: |
+          if git diff --quiet -- LootData.lua; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "LootData.lua unchanged — no release needed."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The harnesses run against the NEW payload before anything is tagged.
+      # They are the only thing standing between a bad emit and every installer.
+      - name: Run the harnesses against the new payload
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq lua5.4
+          lua5.4 test/smoke.lua
+          lua5.4 test/comms.lua
+          lua5.4 test/roster.lua
+
+      - name: Commit, tag, and push
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          TAG="v$(date -u +%Y.%m.%d)"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            TAG="${TAG}-$(date -u +%H%M)"
+          fi
+          git add LootData.lua
+          git commit -m "Loot data refresh ${TAG}"
+          git tag "$TAG"
+          git push origin HEAD:main
+          git push origin "$TAG"
+
+      - name: Package and publish the release
+        if: steps.diff.outputs.changed == 'true'
+        uses: BigWigsMods/packager@v2
+        env:
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}

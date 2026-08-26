@@ -1,0 +1,27 @@
+name: Package and release
+
+# Cut a release whenever a version tag is pushed. Mirrors Gloom's Build Barn,
+# which has been running this shape since June.
+on:
+  push:
+    tags:
+      - "**"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone project
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Package and create GitHub release
+        uses: BigWigsMods/packager@v2
+        env:
+          # Only the built-in token — no CurseForge/Wago/WowInterface secrets,
+          # so the packager publishes a GitHub Release and nothing else.
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,24 @@
+# BigWigs packager config. GitHub Releases ONLY — no CurseForge, no Wago. WoWUp
+# installs and auto-updates from those releases via the repo URL, which is the
+# same model all the guild's other addons use.
+
+package-as: HoDLootAdvisor
+
+enable-nolib-creation: no
+
+# NO EXTERNALS, and that is a decision rather than an omission. LibDeflate would
+# halve the pasted raid payload and is GPL v3 — vendoring it would relicense a
+# public repo that is not ours to relicense. The LA1: version prefix on the
+# payload makes adding compression later a decoder branch, not a flag day. See
+# handoff/HoD_LootAddon_Data_Contract.md §3.3.
+
+# ⚠️ test/ IS THE IMPORTANT ONE HERE. test/fixtures.lua alone is 140 MB of
+# parity cases; packaging it would produce a release nobody could download.
+ignore:
+  - test
+  - dist
+  - package.sh
+  - README.md
+  - .github
+  - .gitignore
+  - .pkgmeta
