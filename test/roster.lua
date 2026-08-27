@@ -585,6 +585,155 @@ do
         roster.s == first.s, roster.s)
 end
 
+-- ═══════════════════════════════════════════════════════════════════════════
+header("the OTHER spec's grade, carried but never applied")
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- A trinket's grade is per SPEC, so a raider playing something other than what
+-- the roster says can be an A where they are ranked and an S where they are
+-- standing. The ranking does not move — that is settled — but the alternative
+-- is carried so the person running loot can see it before deciding.
+--
+-- Reuses the divergence the previous section set up: roster[1] is on the export
+-- as Marksmanship and has just been seen playing Survival.
+
+do
+  local data = _G.HoDLootAdvisorData
+  local first = ns.Payload.Current().roster[1]
+  local key = ns.Comms.Normalize(first.n)
+
+  --- Find a Hunter trinket whose tag DIFFERS between the two specs, and one
+  --- where it does not. Chosen from the real tables rather than hardcoded: a
+  --- literal id here would rot the first time a tier's grades are refreshed,
+  --- and would do it silently by simply never diverging again.
+  local differing, agreeing
+  for id, it in pairs(data.items) do
+    if it.slot == "TRINKET" and it.classes and it.classes["Hunter"] then
+      local a = ns.QualityTag(ns.Scoring.resolveQuality(data.rankings, id, "Hunter", "Marksmanship", nil))
+      local b = ns.QualityTag(ns.Scoring.resolveQuality(data.rankings, id, "Hunter", "Survival", nil))
+      if a ~= b then differing = differing or id
+      elseif a ~= nil then agreeing = agreeing or id end
+    end
+  end
+  check("the tier has a Hunter trinket graded differently for the two specs",
+        differing ~= nil, tostring(differing))
+  check("...and one graded the same for both", agreeing ~= nil, tostring(agreeing))
+
+  local rows = ns.Loot.RankRaiders(differing, { difficulty = "h" })
+  local row
+  for _, r in ipairs(rows or {}) do if r.name == first.n then row = r end end
+  check("the diverged raider is still ranked", row ~= nil)
+
+  check("the row carries the spec they were seen in",
+        row and row.altSpec and row.altSpec.spec == "Survival",
+        row and row.altSpec and row.altSpec.spec)
+
+  -- ⚠️ THE POINT OF THE WHOLE FEATURE. Ranked as one, graded differently as the
+  -- other, and the ranking is unmoved.
+  check("...ranked as the ROSTER's spec regardless", row and row.spec == "Marksmanship",
+        row and row.spec)
+
+  local mark, title, help = ns.SpecSplitTag(row)
+  check("the panel gets a marker for it", mark == "*", tostring(mark))
+  check("...and a sentence naming both specs",
+        help and help:find("Marksmanship") ~= nil and help:find("Survival") ~= nil, help)
+  check("...which says the ranking follows the roster",
+        help and help:find("follows the roster") ~= nil)
+  check("...with a title to hang it on", title ~= nil and title ~= "")
+
+  -- ⚠️ SILENT WHERE IT DOES NOT MATTER. Most of a tier grades the same for both
+  -- of a class's specs; a marker on every row of every item would mean nothing
+  -- by the third one. Without this check the feature passes as "always speaks",
+  -- which is the version that makes the panel useless.
+  local same = ns.Loot.RankRaiders(agreeing, { difficulty = "h" })
+  local sameRow
+  for _, r in ipairs(same or {}) do if r.name == first.n then sameRow = r end end
+  check("the same raider on an item both specs grade alike", sameRow ~= nil)
+  check("...still carries the observed spec",
+        sameRow and sameRow.altSpec ~= nil)
+  check("...but gets NO marker, because nothing about this item changes",
+        (ns.SpecSplitTag(sameRow)) == nil, tostring((ns.SpecSplitTag(sameRow))))
+
+  -- And a raider who has NOT been seen in a different spec never gets one.
+  local other
+  for _, r in ipairs(rows or {}) do
+    if r.name ~= first.n and not r.adhoc and r.eligible then other = r break end
+  end
+  check("a raider with no observed divergence carries no alternative",
+        other ~= nil and other.altSpec == nil, other and other.name)
+  check("...and no marker", other ~= nil and (ns.SpecSplitTag(other)) == nil)
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+header("the guild-run gate — the only thing the raid can actually see")
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Every other message this addon sends is a hidden addon message that nobody
+-- without the addon can observe. Auto-posting writes REAL chat lines, so this
+-- gate is the one that has to be right, and it has to fail closed.
+
+do
+  local savedGroup, savedRaid, savedIn = stub.group, stub.inRaid, stub.inGroup
+
+  local function party(n, guildmates)
+    local g = {}
+    for i = 1, n do
+      g[i] = { name = "Stranger" .. i, className = "Hunter", classToken = "HUNTER",
+               guid = "G" .. i, connected = true, equipped = {},
+               inGuild = i <= guildmates }
+    end
+    stub.group, stub.inRaid, stub.inGroup = g, true, false
+    return g
+  end
+
+  -- Solo. Not a run of any kind.
+  stub.group, stub.inRaid, stub.inGroup = {}, false, false
+  check("solo is not a guild run", (ns.IsGuildRun()) == false)
+
+  -- LFR: twenty-four strangers, none of them guildmates. The case that started
+  -- this whole conversation.
+  party(24, 0)
+  local isRun, mates, total = ns.IsGuildRun()
+  check("an LFR of strangers is not a guild run", isRun == false, isRun)
+  check("...and it counts only the player as a guildmate", mates == 1, mates)
+  check("...out of the whole group", total == 25, total)
+
+  -- A raid night: nearly everyone is a guildmate.
+  party(19, 17)
+  isRun, mates, total = ns.IsGuildRun()
+  check("a raid of guildmates IS a guild run", isRun == true, isRun)
+  check("...counting the player among them", mates == 18, mates)
+
+  -- ⚠️ THE CASE THE "was it formed by the finder?" TEST GOT WRONG. A pug raid
+  -- joined by INVITE looks exactly like a guild raid to any test based on how
+  -- the group was assembled. Jason joins both the same way, so this is the one
+  -- that had to stop guessing.
+  party(19, 3)
+  check("a pug raid joined by invite is NOT a guild run", (ns.IsGuildRun()) == false)
+
+  -- FAILS CLOSED at the boundary. Exactly half guildmates stays quiet: a chat
+  -- line nobody got is cheap, the addon talking to strangers is not.
+  party(9, 4)   -- 4 mates + the player = 5 of 10, not a majority
+  isRun, mates, total = ns.IsGuildRun()
+  check("an exactly-half group stays quiet", isRun == false,
+        ("%d of %d"):format(mates, total))
+  party(9, 5)   -- 5 + player = 6 of 10
+  check("...and one more guildmate tips it", (ns.IsGuildRun()) == true)
+
+  stub.group, stub.inRaid, stub.inGroup = savedGroup, savedRaid, savedIn
+end
+
+do
+  -- The setting itself: off unless someone turns it on. Nobody is opted into
+  -- posting to their guild's raid chat by installing an update.
+  ns.Settings.Reset()
+  check("auto-post is OFF by default", ns.Settings.Get("autoPost") == false,
+        tostring(ns.Settings.Get("autoPost")))
+  ns.Settings.Set("autoPost", "on")
+  check("...and can be turned on", ns.Settings.Get("autoPost") == true)
+  ns.Settings.Set("autoPost", "off")
+end
+
 -- ── Result ──────────────────────────────────────────────────────────────────
 
 muted = false

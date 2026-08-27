@@ -613,6 +613,16 @@ function stub.Install()
   end
 
   _G.UnitExists = function(unit) return unitEntry(unit) ~= nil end
+
+  -- Guild membership per unit. Defaults to FALSE for group members, which is
+  -- the LFR case — a stub that defaulted everyone to guildmates would make the
+  -- auto-post gate pass in exactly the situation it exists to block, and the
+  -- test would confirm a wrong theory rather than the code.
+  _G.UnitIsInMyGuild = function(unit)
+    if unit == "player" then return true end
+    local e = unitEntry(unit)
+    return (e and e.inGuild) == true
+  end
   _G.UnitGUID = function(unit)
     local e = unitEntry(unit); return e and e.guid or nil
   end

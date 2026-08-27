@@ -311,6 +311,76 @@ local function qualityTag(q)
 end
 ns.QualityTag = qualityTag
 
+--- Is the group we are in a GUILD run?
+---
+--- ⚠️ THIS GATES THE ONE THING THE RAID CAN SEE. Everything else the addon
+--- sends is a hidden addon message that nobody without the addon can observe;
+--- auto-posting writes real chat lines that every stranger in an LFR would
+--- read. So this is the gate that has to be right, and it fails CLOSED.
+---
+--- MEASURED, NOT INFERRED FROM HOW THE GROUP FORMED. The obvious test — "was
+--- this assembled by the group finder?" — is holed: a pug raid joined by
+--- INVITE is indistinguishable from a guild raid by that measure, and Jason
+--- joins both the same way. UnitIsInMyGuild is a fact about each person
+--- instead of a guess about the group.
+---
+--- A MAJORITY, because the three cases separate cleanly on it: a raid night is
+--- almost entirely guildmates, an LFR is none, and a pug raid is a handful at
+--- most. A guild raid carrying so many pugs that guildmates are not a majority
+--- stays quiet — the wrong answer in that direction costs a chat line nobody
+--- got, and in the other direction it is the addon talking to strangers.
+---
+--- Returns inGuildRun, guildmates, total.
+function ns.IsGuildRun()
+  if not (IsInGroup and IsInGroup()) then return false, 0, 0 end
+  if not UnitIsInMyGuild then return false, 0, 0 end
+
+  local total, mates = 0, 0
+  for _, unit in ipairs(ns.Roster and ns.Roster.UnitTokens() or {}) do
+    if (not UnitExists) or UnitExists(unit) then
+      local name = UnitName and UnitName(unit)
+      if name and name ~= "" then
+        total = total + 1
+        -- Ourselves included deliberately: we are in the guild, and excluding
+        -- the one person we are certain about would make a five-guildmate
+        -- group of nine read as a minority.
+        local isSelf = ns.Comms and ns.Comms.IsSelf(name)
+        if isSelf or UnitIsInMyGuild(unit) then mates = mates + 1 end
+      end
+    end
+  end
+
+  return total > 0 and (mates * 2) > total, mates, total
+end
+
+--- A raider ranked as one spec while standing in another, rendered identically
+--- wherever it appears. Returns marker, title, sentence — or nil.
+---
+--- ⚠️ SILENT WHEN THE SPEC CHANGE DOES NOT CHANGE THIS ITEM. Most of a tier
+--- grades the same for both of a class's specs, and Affliction and Destruction
+--- want their stats in the same order — so flagging every spec difference would
+--- put a marker on almost every row of almost every item and mean nothing by
+--- the third one. It speaks only where the TAG actually differs, which is where
+--- a loot decision could go the other way.
+---
+--- In Core rather than Panel.lua so the harness can reach it: pure logic in a
+--- window file is untestable, which this project has repeatedly got wrong.
+function ns.SpecSplitTag(row)
+  local alt = row and row.altSpec
+  if not (alt and alt.spec) then return nil end
+
+  local rosterTag = qualityTag(row.quality)
+  local altTag = qualityTag(alt.quality)
+  if rosterTag == altTag then return nil end
+
+  local function describe(tag) return tag or "not graded" end
+
+  return "*", "Ranked as a different spec",
+    ("Ranked as %s (%s), the spec on the raid roster. Seen playing %s, where this is %s. "):format(
+      tostring(row.spec), describe(rosterTag), tostring(alt.spec), describe(altTag))
+    .. "The ranking follows the roster."
+end
+
 -- Where a raider's gear reading came from, for the panel's provenance marker.
 -- The SNAPSHOT case deliberately returns nil rather than a label: it is the
 -- normal state for almost every row, and tagging all twenty of them turns the
@@ -1169,6 +1239,7 @@ SlashCmdList["HODLOOTADVISOR"] = function(msg)
     ns.ResetWindowPositions()
     ns.Print("window positions reset — each one returns to its default place next time it opens.")
   elseif cmd == "unload" then
+    -- Payload.Clear repaints the panel itself — see repaintPanel in Payload.lua.
     ns.Payload.Clear()
     ns.Print("raid data cleared.")
   else

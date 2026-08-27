@@ -290,10 +290,42 @@ function Loot.RankRaiders(itemID, opts)
         spec, candidateIlvl, candidateTrack
       )
 
+      -- ── The spec they are ACTUALLY in, when it is not the one they are
+      -- ranked as ────────────────────────────────────────────────────────────
+      --
+      -- THE RANKING DOES NOT MOVE. The roster's spec is the officer-set one and
+      -- stays the basis of the score — that is a settled decision, and the rule
+      -- behind it (rules/HoD_Rules_Loot-Gear.txt "SCORE THE SPEC THEY RAID")
+      -- exists because a live observation once mis-scored a healer as DPS.
+      --
+      -- But a raider who genuinely plays two specs by fight is not that case,
+      -- and a TRINKET's grade is per spec: the same item can be an A for the
+      -- spec they are ranked as and an S for the one they are standing in. So
+      -- the alternative is CARRIED, for the panel to show and a human to weigh.
+      --
+      -- Ad-hoc raiders are skipped: they are already scored on their observed
+      -- spec, so there is no second answer to offer.
+      local altSpec = nil
+      if not r.adhoc and ns.Roster and ns.Roster.IdentityFor then
+        local ident = ns.Roster.IdentityFor(r.n)
+        if ident and ident.spec and ident.spec ~= r.s then
+          altSpec = {
+            spec = ident.spec,
+            tree = ident.heroTree,
+            source = ident.source,
+            quality = ns.Scoring.resolveQuality(
+              data.rankings, itemID, r.c or "", ident.spec, ident.heroTree,
+              ns.CurrentContentScope and ns.CurrentContentScope() or nil
+            ),
+          }
+        end
+      end
+
       rows[#rows + 1] = {
         name = r.n, class = r.c, spec = r.s, tree = r.h,
         result = result,
         quality = quality,
+        altSpec = altSpec,
         equipped = state,
         pr = r.pr, rank = r.rank,
         adhoc = r.adhoc,
@@ -565,7 +597,22 @@ function Loot.HandleRoll(roll)
   -- Post button and untouched by this.
   if ns.Comms and ns.Comms.IsRunner() then
     local ranked = Loot.RankRaiders(roll.itemID, { difficulty = roll.difficulty })
-    if ranked and #ranked > 0 then ns.Comms.BroadcastDrops(roll.itemID, ranked) end
+    if ranked and #ranked > 0 then
+      ns.Comms.BroadcastDrops(roll.itemID, ranked)
+
+      -- ── The one thing the raid can actually see ─────────────────────────
+      -- THREE CONDITIONS, ALL REQUIRED, and each is doing separate work:
+      --   · the setting is on          — off by default; nobody is opted in
+      --                                  by an update they did not read about
+      --   · we are the runner          — checked above; otherwise every
+      --                                  installer posts the same shortlist
+      --   · it is a guild run          — ns.IsGuildRun, which fails closed
+      -- The Post button is untouched and still works everywhere, including
+      -- the places this deliberately will not fire.
+      if ns.Settings and ns.Settings.Get("autoPost") and ns.IsGuildRun() then
+        Loot.PostToChat(roll.itemID, { difficulty = roll.difficulty })
+      end
+    end
   end
 
   if ns.Panel then

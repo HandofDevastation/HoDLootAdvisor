@@ -46,6 +46,13 @@ Settings.SPEC = {
     help = "Off by default — the window stays out of your way until you open it.",
   },
   {
+    key = "autoPost", label = "Auto-Post Drops To Chat", default = false,
+    kind = "toggle",
+    help = "The runner's addon posts each drop's shortlist to chat automatically. "
+        .. "Only ever fires on a GUILD run — never in LFR or a pug — and only for "
+        .. "whoever is running loot. Off by default; the Post button is unaffected.",
+  },
+  {
     key = "minQuality", label = "Record Loot Down To", default = 4,
     kind = "number", min = 2, max = 5,
     help = "4 = Epic, which is all raid loot. Lower to 3 to record blues — how "

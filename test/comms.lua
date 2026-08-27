@@ -833,6 +833,349 @@ do
   muted = true
 end
 
+-- ═══════════════════════════════════════════════════════════════════════════
+header("two runners — the stamp decides, never the arrival order")
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Re-encoding a payload is test SCAFFOLDING, not addon code: Payload.lua ships
+-- a decoder only, because the addon never has to write one.
+local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local function encodeBase64(s)
+  local out, i = {}, 1
+  while i <= #s do
+    local a, b, c = s:byte(i), s:byte(i + 1), s:byte(i + 2)
+    local n = a * 65536 + (b or 0) * 256 + (c or 0)
+    local c1, c2 = math.floor(n / 262144) % 64, math.floor(n / 4096) % 64
+    local c3, c4 = math.floor(n / 64) % 64, n % 64
+    out[#out + 1] = B64:sub(c1 + 1, c1 + 1) .. B64:sub(c2 + 1, c2 + 1)
+      .. (b and B64:sub(c3 + 1, c3 + 1) or "=")
+      .. (c and B64:sub(c4 + 1, c4 + 1) or "=")
+    i = i + 3
+  end
+  return table.concat(out)
+end
+
+local fixtureSrc = nsA.Payload.DecodeBase64((encoded:gsub("^LA1:", "")))
+local FIXTURE_STAMP = tonumber(fixtureSrc:match("stamp=(%d+)"))
+
+--- The same roster, restamped.
+---
+--- ⚠️ THE DIGIT COUNT IS ASSERTED, NOT ASSUMED. The payload carries its own
+--- byte length and rejects a body that disagrees with it, so a stamp one digit
+--- shorter would be refused by the integrity check — and would read here as a
+--- comms bug rather than as a broken fixture.
+local function restamped(newStamp)
+  local old = fixtureSrc:match("stamp=(%d+)")
+  assert(old, "fixture has no stamp field")
+  local _, occurrences = fixtureSrc:gsub("stamp=%d+", "")
+  assert(occurrences == 1, "fixture has more than one stamp field")
+  assert(#tostring(newStamp) == #old,
+    ("restamp must keep the digit count (%s -> %s)"):format(old, tostring(newStamp)))
+  return "LA1:" .. encodeBase64((fixtureSrc:gsub("stamp=%d+", "stamp=" .. newStamp, 1)))
+end
+
+local OLDER  = FIXTURE_STAMP - 86400
+local NEWER  = FIXTURE_STAMP + 86400
+local NEWEST = FIXTURE_STAMP + 172800
+
+--- Paste `text` on `client` exactly as LoadWindow does, and put it on the wire.
+local function paste(client, ns_, text)
+  stub.Use(client)
+  local data, err = ns_.Payload.Decode(text)
+  assert(data, tostring(err))
+  ns_.Payload.Store(data, text)
+  ns_.Comms.SetRunner(true)
+  client.addonSent = {}
+  return ns_.Comms.BroadcastRoster()
+end
+
+do
+  stub.Use(B); nsB.Payload.Clear()
+  stub.Use(A); nsA.Payload.Clear()
+
+  -- B is already holding tonight's newer export.
+  stub.Use(B)
+  local newData = nsB.Payload.Decode(restamped(NEWER))
+  nsB.Payload.Store(newData, restamped(NEWER))
+  check("B holds the newer export to begin with",
+        (nsB.Payload.Current() or {}).stamp == NEWER, (nsB.Payload.Current() or {}).stamp)
+
+  -- ...and a STALER one arrives over the wire, which is what pasting yesterday's
+  -- export at 9pm looks like from the other side.
+  paste(A, nsA, restamped(OLDER))
+  pump(A, 5000)
+
+  check("an older export does not replace a newer one",
+        (nsB.Payload.Current() or {}).stamp == NEWER, (nsB.Payload.Current() or {}).stamp)
+
+  -- POSITIVE CONTROL. Without it the check above also passes for a client that
+  -- has stopped accepting payloads altogether — which is a worse bug than the
+  -- one being guarded against, and invisible from the check alone.
+  paste(A, nsA, restamped(NEWEST))
+  pump(A, 5000)
+  check("...but a newer one does replace it",
+        (nsB.Payload.Current() or {}).stamp == NEWEST, (nsB.Payload.Current() or {}).stamp)
+end
+
+do
+  -- TWO PEOPLE PASTE AT ONCE. Neither has heard the other when they do it, so
+  -- both broadcast and both believe they are the runner — and each then
+  -- receives the other's payload. The failure this pins is SILENT: both stand
+  -- down, nobody answers a WANT ever again, and both still see a full correct
+  -- roster on screen so there is no symptom at the runner's end at all.
+  stub.Use(A); nsA.Payload.Clear()
+  stub.Use(B); nsB.Payload.Clear()
+
+  paste(A, nsA, restamped(OLDER))
+  paste(B, nsB, restamped(NEWER))
+
+  -- Interleaved, because the whole question is whether arrival order matters.
+  pump(A, 5000); pump(B, 5000); pump(A, 5000); pump(B, 5000)
+
+  local runners = (nsA.Comms.IsRunner() and 1 or 0) + (nsB.Comms.IsRunner() and 1 or 0)
+  check("two simultaneous pastes leave exactly one runner", runners == 1, runners)
+
+  check("...and both clients settle on the same payload",
+        (nsA.Payload.Current() or {}).stamp == (nsB.Payload.Current() or {}).stamp,
+        ("A=%s B=%s"):format(tostring((nsA.Payload.Current() or {}).stamp),
+                             tostring((nsB.Payload.Current() or {}).stamp)))
+
+  check("...the newer of the two, whoever shouted last",
+        (nsB.Payload.Current() or {}).stamp == NEWER, (nsB.Payload.Current() or {}).stamp)
+end
+
+do
+  -- THE SAME EXPORT, PASTED BY TWO PEOPLE — the likeliest real version of this,
+  -- and the one case freshness cannot settle because neither copy is newer.
+  -- Two runners both answering a WANT is the ~60-message flood the runner gate
+  -- exists to prevent, so it still has to come out at one.
+  stub.Use(A); nsA.Payload.Clear()
+  stub.Use(B); nsB.Payload.Clear()
+
+  local identical = restamped(NEWER)
+  paste(A, nsA, identical)
+  paste(B, nsB, identical)
+  pump(A, 5000); pump(B, 5000); pump(A, 5000); pump(B, 5000)
+
+  local runners = (nsA.Comms.IsRunner() and 1 or 0) + (nsB.Comms.IsRunner() and 1 or 0)
+  check("the same export pasted by two people still leaves exactly one runner",
+        runners == 1, runners)
+
+  -- Both must still HOLD it — standing down is about who answers, never about
+  -- discarding data that is perfectly good.
+  check("...and both still hold the roster",
+        (nsA.Payload.Current() or {}).stamp == NEWER
+          and (nsB.Payload.Current() or {}).stamp == NEWER)
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+header("the runner is CLAIMED, not inferred from who happened to paste")
+-- ═══════════════════════════════════════════════════════════════════════════
+
+local hasClaim = type(nsA.Comms.ClaimRunner) == "function"
+check("comms exposes an explicit runner claim", hasClaim)
+
+if hasClaim then
+  local aKey = nsA.Comms.Normalize(A.player.name)
+  local bKey = nsB.Comms.Normalize(B.player.name)
+
+  do
+    stub.Use(A)
+    nsA.Comms.ClaimRunner()
+    pump(A, 2000); pump(B, 2000)
+
+    check("the claimant is the runner", nsA.Comms.IsRunner() == true)
+    check("...and everyone else agrees who that is",
+          nsB.Comms.RunnerName() == aKey, tostring(nsB.Comms.RunnerName()))
+
+    -- The claim is what gates rankings now, so it has to answer the same
+    -- question raidFrom used to.
+    check("a ranking from the claimed runner is accepted",
+          nsB.Comms.RunnerIs(A.player.name) == true)
+    check("...and one from anybody else is not",
+          nsB.Comms.RunnerIs("Someguy") == false)
+  end
+
+  do
+    -- A SECOND CLAIM TAKES OVER, and the first runner stands down rather than
+    -- both broadcasting rankings at a raid that cannot tell them apart.
+    stub.Use(B)
+    nsB.Comms.ClaimRunner()
+    pump(B, 2000); pump(A, 2000)
+
+    check("a later claim takes over", nsB.Comms.IsRunner() == true)
+    check("...and stands the previous runner down", nsA.Comms.IsRunner() == false)
+    check("...with both clients naming the same runner",
+          nsA.Comms.RunnerName() == bKey and nsB.Comms.RunnerName() == bKey,
+          ("A says %s, B says %s"):format(tostring(nsA.Comms.RunnerName()),
+                                          tostring(nsB.Comms.RunnerName())))
+  end
+
+  do
+    -- Releasing leaves NOBODY claimed. The raid is then in the same position as
+    -- one where nobody has ever claimed, which must still function.
+    stub.Use(B)
+    nsB.Comms.ReleaseRunner()
+    pump(B, 2000); pump(A, 2000)
+
+    check("releasing clears the claim", nsB.Comms.IsRunner() == false)
+    check("...on the other client too", nsA.Comms.RunnerName() == nil,
+          tostring(nsA.Comms.RunnerName()))
+  end
+
+  do
+    -- THE LoadWindow PATH. Pasting still makes you the runner on an ordinary
+    -- night — but must not quietly take the role off someone who asked for it,
+    -- which is the whole point of the claim being explicit.
+    stub.Use(B)
+    nsB.Comms.ClaimRunner()
+    pump(B, 2000); pump(A, 2000)
+
+    stub.Use(A)
+    local took, holder = nsA.Comms.AssumeRunner()
+    check("pasting does not steal an explicit claim", took == false, tostring(took))
+    check("...and reports who is holding it", holder == bKey, tostring(holder))
+
+    stub.Use(B)
+    nsB.Comms.ReleaseRunner()
+    pump(B, 2000); pump(A, 2000)
+
+    -- POSITIVE CONTROL: without it the check above also passes for an
+    -- AssumeRunner that has simply stopped working.
+    stub.Use(A)
+    check("...but does make you the runner when nobody has claimed",
+          nsA.Comms.AssumeRunner() == true)
+  end
+
+  do
+    -- CLAIMING BEFORE THE RAID FORMS is the normal way to do it, and it reaches
+    -- nobody: there is no channel, so the send fails and the claim lives only
+    -- on the claimant's client. Both ends then look correct on their own, which
+    -- is the worst shape of bug to be handed on a raid night.
+    stub.Use(A); nsA.Comms.ReleaseRunner()
+    stub.Use(B); nsB.Comms.ReleaseRunner()
+    pump(A, 2000); pump(B, 2000)
+
+    local wasRaid, wasGroup = stub.inRaid, stub.inGroup
+    stub.inRaid, stub.inGroup = false, false
+
+    stub.Use(A)
+    local sent, why = nsA.Comms.ClaimRunner()
+    check("a claim made outside a group cannot be sent",
+          sent == nil and why == "not in a group", tostring(why))
+    check("...but still holds locally, so the button does not lie",
+          nsA.Comms.HasExplicitClaim() == true)
+    pump(A, 2000); pump(B, 2000)
+    check("...and nobody else has heard it yet", nsB.Comms.RunnerName() == nil,
+          tostring(nsB.Comms.RunnerName()))
+
+    -- The raid forms.
+    stub.inRaid, stub.inGroup = true, false
+    stub.Use(A)
+    stub.Fire("GROUP_ROSTER_UPDATE")
+    pump(A, 5000); pump(B, 5000)
+
+    check("joining a group re-announces the claim",
+          nsB.Comms.RunnerName() == aKey, tostring(nsB.Comms.RunnerName()))
+
+    -- ⚠️ REVERT-PROOF: a claim old enough to belong to a previous raid night
+    -- must NOT be re-asserted, or joining any group would take the role off
+    -- whoever holds it now. Aged by hand, because the harness's clock does not
+    -- move on its own.
+    stub.Use(B); nsB.Comms.ClaimRunner(); pump(B, 5000); pump(A, 5000)
+    check("...B has it now", nsA.Comms.RunnerName() == bKey, tostring(nsA.Comms.RunnerName()))
+
+    stub.Use(A)
+    A.db.runnerClaim = { who = aKey, at = os.time() - (9 * 3600), explicit = true }
+    check("a claim from a previous night is not fresh", nsA.Comms.ClaimIsFresh() == false)
+    stub.Fire("GROUP_ROSTER_UPDATE")
+    pump(A, 5000); pump(B, 5000)
+    check("...and joining a group does not re-assert it over tonight's runner",
+          nsB.Comms.RunnerName() == bKey, tostring(nsB.Comms.RunnerName()))
+
+    stub.Use(B); nsB.Comms.ReleaseRunner(); pump(B, 2000); pump(A, 2000)
+    stub.Use(A); A.db.runnerClaim = nil
+    stub.inRaid, stub.inGroup = wasRaid, wasGroup
+  end
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+header("the Runner tab's data — everything the panel renders and decides nothing")
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ⚠️ THIS IS WHY THE REPORT LIVES IN Comms.lua AND NOT IN Panel.lua. No harness
+-- loads a window file, so a Runner tab that computed its own facts would ship
+-- with none of them ever having been run. The panel renders this table; every
+-- check below is therefore a check on what a raid night actually sees.
+
+do
+  check("comms exposes the runner report", type(nsA.Comms.RunnerReport) == "function")
+
+  stub.Use(A)
+  nsA.Comms.ClaimRunner()
+  pump(A, 2000); pump(B, 2000)
+
+  -- B must have RECEIVED tonight's roster rather than imported its own, or
+  -- payloadFrom is legitimately nil and the check below tests nothing. The
+  -- previous section left B holding a copy it pasted itself.
+  stub.Use(B); nsB.Payload.Clear()
+  stub.Use(A); nsA.Comms.BroadcastRoster()
+  pump(A, 5000); pump(B, 5000)
+
+  -- ⚠️ Use() BEFORE EACH REPORT. RunnerReport reads UnitName("player") to work
+  -- out whether the claimed runner is you, and in this harness "the current
+  -- player" is process-wide state rather than a property of the ns table. Ask B
+  -- for its report while A is active and it answers as A — which is not a bug
+  -- in the addon, but is a bug in any check written that way.
+  stub.Use(A); local mine = nsA.Comms.RunnerReport()
+  stub.Use(B); local theirs = nsB.Comms.RunnerReport()
+  local aKey = nsA.Comms.Normalize(A.player.name)
+
+  check("the runner's own report says so", mine.runnerIsMe == true and mine.iAmRunner == true)
+  check("...and names them to everyone else",
+        theirs.runner == aKey and theirs.runnerIsMe == false, tostring(theirs.runner))
+
+  check("the report carries tonight's roster size", mine.raiders == 24, mine.raiders)
+  check("...and the season it belongs to",
+        mine.seasonName == "Midnight: Season 2", tostring(mine.seasonName))
+
+  -- GEAR AGE IS NOT EXPORT AGE. Conflating them tells the runner the data is
+  -- live when it is not, which is a lie they have no way to detect.
+  check("gear age is reported separately from the export stamp",
+        mine.gearAge ~= nil and mine.stamp ~= nil, tostring(mine.gearAge))
+
+  check("the not-reporting list is present and populated",
+        type(mine.notReporting) == "table" and #mine.notReporting > 0, #mine.notReporting)
+  check("...and counts fewer live than total",
+        mine.totalGear ~= nil and mine.liveGear < mine.totalGear,
+        ("%s of %s"):format(tostring(mine.liveGear), tostring(mine.totalGear)))
+
+  -- Roster.lua is deliberately NOT loaded by this harness, so the field must be
+  -- an empty table rather than nil — the panel iterates it unguarded.
+  check("spec mismatches default to an empty list, never nil",
+        type(mine.specMismatches) == "table", type(mine.specMismatches))
+
+  -- ⚠️ THE PANEL'S TEXT AND ITS BUTTON ARE BOTH KEYED ON explicitClaim. Keying
+  -- the button on iAmRunner instead is what put "Stop Running Loot" beside a
+  -- line reading "Press Run Loot Tonight": importing the data sets iAmRunner
+  -- WITHOUT setting explicitClaim, so the two disagree in exactly that state.
+  check("an explicit claim is reported apart from merely answering",
+        mine.explicitClaim == true and mine.iAmRunner == true)
+  check("...and B, holding a received roster, has neither",
+        theirs.explicitClaim == false and theirs.iAmRunner == false)
+  check("a received roster records who it came from",
+        theirs.payloadFrom == aKey, tostring(theirs.payloadFrom))
+  check("...and an imported one does not",
+        mine.payloadFrom == nil, tostring(mine.payloadFrom))
+
+  -- Left clean for anything appended after this section.
+  stub.Use(A)
+  nsA.Comms.ReleaseRunner()
+  pump(A, 2000); pump(B, 2000)
+  check("the report goes back to unclaimed on release",
+        nsA.Comms.RunnerReport().runner == nil)
+end
+
 -- ── Result ──────────────────────────────────────────────────────────────────
 
 muted = false

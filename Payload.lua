@@ -172,11 +172,23 @@ end
 --- deliberately does not have). ~12 KB, next to a decoded table that is larger.
 --- `from` is who sent it, so DROPS can tell the runner's ranking from anyone
 --- else's — nil when it was pasted in locally.
+--- ⚠️ REPAINTING THE PANEL IS PART OF STORING, not the caller's job to
+--- remember. Every path that changes the payload changes what the panel should
+--- show — the Runner tab appears and disappears with it — and doing it at the
+--- call sites meant an import left the open panel showing the pre-import
+--- world until the window was closed and reopened. There are four such paths
+--- (import, comms receive, clear, unload) and patching them one at a time is
+--- how three of them get it right and the fourth does not.
+local function repaintPanel()
+  if ns.Panel and ns.Panel.Refresh then pcall(ns.Panel.Refresh) end
+end
+
 function Payload.Store(data, raw, from)
   ns.db.raid = data
   ns.db.raidRaw = raw
   ns.db.raidFrom = from and ns.Comms and ns.Comms.Normalize(from) or nil
   Payload.BuildIndex()
+  repaintPanel()
 end
 
 function Payload.Current()
@@ -195,6 +207,7 @@ function Payload.Clear()
   end
   Payload.slotIndex = nil
   Payload.byName = nil
+  repaintPanel()
 end
 
 --- Slot name -> its position in the payload's OWN slot order, and character

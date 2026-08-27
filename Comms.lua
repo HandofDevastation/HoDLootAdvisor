@@ -93,12 +93,30 @@ local WANT_INTERVAL = 20
 -- test would swallow our own traffic forever.
 local SELFTEST_TTL = 120
 
+-- How long our OWN runner claim stays worth re-asserting to a group we have
+-- just joined. Long enough to cover claiming before the raid forms; short
+-- enough that last week's claim is never re-broadcast at tonight's runner.
+local CLAIM_TTL = 8 * 3600
+
+-- Re-announcing the claim has its OWN rate limit rather than riding HELLO's.
+-- GROUP_ROSTER_UPDATE fires dozens of times as a raid fills, and tying the two
+-- together would make whether the claim reaches anyone depend on whether a
+-- HELLO happened to be due.
+local CLAIM_HELLO_INTERVAL = 30
+local lastClaimHello = 0
+
 Comms.TYPES = {
   HELLO      = true,   -- any → all: presence + version
   WANT       = true,   -- any → runner: send me the current raid payload
   ROSTER     = true,   -- runner → all: Payload B, chunked
   GEAR       = true,   -- any → all: sender's own equipped state
   DROPS      = true,   -- runner → all: the computed ranking for one item
+  -- RUNNER is "I am running loot tonight" / "I am not any more". It was NOT in
+  -- the reserved list, so a build predating it drops the message as an unknown
+  -- type — silently, by design, and then falls back to inferring the runner
+  -- from whose payload it is holding, which is exactly what it did before.
+  -- Degrades to the old behaviour rather than to a broken one.
+  RUNNER     = true,   -- any → all: claim or release the runner role
   -- Reserved. Present so the version does not have to move when they land.
   TGT        = false,  -- a raider's targeted items (Experience §9.1)
   BID_OPEN   = false,
@@ -761,10 +779,57 @@ handlers.ROSTER = function(body, sender)
     return
   end
 
+  -- ⚠️ FRESHNESS IS DECIDED BY THE EXPORT'S OWN STAMP, NEVER BY ARRIVAL ORDER.
+  -- handlers.WANT five lines up already refuses to SEND a payload no newer than
+  -- the asker's; this is the same rule applied on the receiving side, and its
+  -- absence was a real bug. Two exports in flight meant whichever landed last
+  -- won, per client and independently — so half a raid could sit on yesterday's
+  -- roster while the other half had tonight's, with nothing to see anywhere.
+  --
+  -- The stamp is when the SITE BUILT the export, not when anyone pasted it, so
+  -- pasting a stale export cannot stomp on a fresher one however late it is.
+  local current = ns.Payload.Current()
+  local ours   = (current and current.stamp) or 0
+  local theirs = data.stamp or 0
+
+  if ours > 0 and theirs > 0 and theirs < ours then
+    if ns.Diagnostics then
+      ns.Diagnostics.Note("commsRosterStale", { sender = sender, theirs = theirs, ours = ours })
+    end
+    return
+  end
+
+  if ours > 0 and theirs > 0 and theirs == ours then
+    -- THE SAME EXPORT, pasted by two people. There is nothing to learn from the
+    -- data, so the only open question is who answers a WANT — and two runners
+    -- answering means a late joiner pulls two ~60-message replies at once.
+    --
+    -- Settled by NAME rather than by timing, because both clients have to reach
+    -- the SAME answer without talking about it, and every timing signal
+    -- available here (arrival order, local clocks) differs between them. An
+    -- explicit claim outranks this entirely; it is only for the implicit case.
+    if Comms.IsRunner() and not Comms.HasExplicitClaim() then
+      local theirKey, myKey = normalize(sender), normalize(Comms.PlayerName())
+      if theirKey and myKey and theirKey < myKey then
+        Comms.SetRunner(false)
+        ns.Print(("%s pasted the same export — they are answering requests for it."):format(
+          tostring(sender)))
+      end
+    end
+    return
+  end
+
+  ns.Payload.Store(data, body, sender)
+
   -- Receiving a payload does NOT make you the runner. That distinction is what
   -- keeps a WANT from being answered by twenty people.
-  ns.Payload.Store(data, body, sender)
-  Comms.SetRunner(false)
+  --
+  -- ⚠️ BUT AN EXPLICIT CLAIM SURVIVES A NEWER PAYLOAD. Data freshness and
+  -- ranking authority are different questions: someone who has said "I am
+  -- running loot tonight" stays the runner when a co-officer pastes a fresher
+  -- export — they simply adopt it. Standing them down here is what deadlocked
+  -- two simultaneous pasters into ZERO runners, silently.
+  if not Comms.HasExplicitClaim() then Comms.SetRunner(false) end
 
   local s = ns.Payload.Summary()
   ns.Print(("received tonight's raid data from %s — %d raiders, gear synced %s."):format(
@@ -775,7 +840,46 @@ handlers.ROSTER = function(body, sender)
       sender = sender, bytes = #body, raiders = s and s.raiders or 0,
     })
   end
+  -- No panel repaint here: Payload.Store above already did it, and the paths
+  -- that return early changed nothing to repaint.
+end
 
+--- "claim" / "release" — who is running loot tonight.
+---
+--- THIS IS A PERSON'S DECISION, NOT AN INFERENCE. Before it existed the runner
+--- was whoever happened to paste, which made a side effect of loading data into
+--- an authority nobody had granted and nobody could see.
+handlers.RUNNER = function(body, sender)
+  local who = normalize(sender)
+  if not who then return end
+
+  if body == "release" then
+    local claim = ns.db and ns.db.runnerClaim
+    -- Only the holder can release it. Otherwise anyone could clear anyone.
+    if claim and claim.who == who then
+      ns.db.runnerClaim = nil
+      ns.Print(("%s is no longer running loot."):format(tostring(sender)))
+      if ns.Panel and ns.Panel.Refresh then pcall(ns.Panel.Refresh) end
+    end
+    return
+  end
+
+  if body ~= "claim" then return end
+
+  -- Read BEFORE the claim is stored: once ns.db.runnerClaim names someone else,
+  -- IsRunner() already answers false and cannot tell us what we just lost.
+  local wasRunner = (ns.db and ns.db.isRunner) == true
+  if ns.db then ns.db.runnerClaim = { who = who, at = time(), explicit = true } end
+
+  if wasRunner then
+    Comms.SetRunner(false)
+    ns.Warn(("%s has taken over running loot — you have stood down. "):format(tostring(sender))
+      .. "Take it back from the Runner tab if that is wrong.")
+  else
+    ns.Print(("%s is running loot tonight."):format(tostring(sender)))
+  end
+
+  if ns.Diagnostics then ns.Diagnostics.Note("commsRunnerClaim", { who = who }) end
   if ns.Panel and ns.Panel.Refresh then pcall(ns.Panel.Refresh) end
 end
 
@@ -870,17 +974,95 @@ end
 --- hold one. Persisted, so a /reload does not silently demote the person the
 --- rest of the raid is asking for data.
 function Comms.IsRunner()
-  return (ns.db and ns.db.isRunner) == true and Comms.CurrentRaw() ~= nil
+  if not ((ns.db and ns.db.isRunner) == true) then return false end
+  -- Nothing to send and nothing to rank with. See RawStatus for the third case
+  -- this deliberately does not collapse into "no".
+  if Comms.CurrentRaw() == nil then return false end
+  -- Somebody else has said out loud that they are running loot. Their claim
+  -- wins over our stale local flag, so the two clients cannot both believe it.
+  local claim = ns.db.runnerClaim
+  if claim and claim.who and claim.who ~= normalize(Comms.PlayerName()) then
+    return false
+  end
+  return true
 end
 
 function Comms.SetRunner(isRunner)
   if ns.db then ns.db.isRunner = isRunner and true or false end
 end
 
---- Did this message come from the person whose payload we are using?
---- Falls back to "any sender" ONLY when we have no idea who that is, so a raid
---- where nobody has announced still functions rather than ignoring everything.
+--- Have WE explicitly claimed it, as opposed to having fallen into it by being
+--- the one who pasted? The difference decides whether a newer payload arriving
+--- stands us down.
+function Comms.HasExplicitClaim()
+  local claim = ns.db and ns.db.runnerClaim
+  return (claim and claim.explicit and claim.who == normalize(Comms.PlayerName())) == true
+end
+
+--- Is our own claim recent enough to still be worth asserting to a group we
+--- have only just joined?
+---
+--- ⚠️ IT IS ONLY THE RE-ANNOUNCEMENT THIS BOUNDS, never IsRunner. The claim
+--- persists across a /reload on purpose, so a runner is not silently demoted
+--- mid-raid — but persistence across DAYS means last Tuesday's claim would be
+--- re-asserted on joining any group, taking the role off whoever holds it now.
+--- A stale local belief is harmless and self-corrects the moment anyone claims;
+--- a stale BROADCAST is theft.
+function Comms.ClaimIsFresh()
+  local claim = ns.db and ns.db.runnerClaim
+  if not (claim and claim.at) then return false end
+  return (time() - claim.at) < CLAIM_TTL
+end
+
+--- Who the group believes is running loot, or nil when nobody has said.
+function Comms.RunnerName()
+  local claim = ns.db and ns.db.runnerClaim
+  return (claim and claim.who) or nil
+end
+
+--- Say out loud that we are running loot tonight. Everyone else records it and
+--- any previous runner stands down.
+function Comms.ClaimRunner()
+  local me = normalize(Comms.PlayerName())
+  if not me then return nil, "no player name" end
+  if ns.db then ns.db.runnerClaim = { who = me, at = time(), explicit = true } end
+  Comms.SetRunner(true)
+  if ns.Panel and ns.Panel.Refresh then pcall(ns.Panel.Refresh) end
+  return Comms.Send("RUNNER", "claim")
+end
+
+--- Hand it back. Leaves NOBODY claimed, which is a state the raid must still
+--- work in — it is where every raid starts.
+function Comms.ReleaseRunner()
+  if ns.db then ns.db.runnerClaim = nil end
+  Comms.SetRunner(false)
+  if ns.Panel and ns.Panel.Refresh then pcall(ns.Panel.Refresh) end
+  return Comms.Send("RUNNER", "release")
+end
+
+--- Pasting still makes you the runner — but only when nobody has explicitly
+--- claimed it. Keeps the ordinary one-officer night a single action, while
+--- stopping a paste from silently taking the role off someone who asked for it.
+--- Returns false + the current holder when it declines.
+function Comms.AssumeRunner()
+  local claim = ns.db and ns.db.runnerClaim
+  local me = normalize(Comms.PlayerName())
+  if claim and claim.who and claim.explicit and claim.who ~= me then
+    return false, claim.who
+  end
+  Comms.SetRunner(true)
+  return true
+end
+
+--- Did this message come from the person running loot?
+---
+--- An explicit claim is the answer when there is one. Without it this falls
+--- back to "whoever's payload we are holding", which is what the whole system
+--- used before claims existed — and then to "anybody", so a raid where nobody
+--- has announced still functions rather than ignoring every ranking.
 function Comms.RunnerIs(sender)
+  local claim = ns.db and ns.db.runnerClaim
+  if claim and claim.who then return normalize(sender) == claim.who end
   local from = ns.db and ns.db.raidFrom
   if not from then return true end
   return normalize(sender) == from
@@ -1083,6 +1265,87 @@ function Comms.PeerList()
   return list
 end
 
+--- Everything the Runner tab shows, gathered in ONE place.
+---
+--- ⚠️ IT LIVES HERE RATHER THAN IN THE PANEL ON PURPOSE. The headless harnesses
+--- do not load window files, so anything put in Panel.lua cannot be tested
+--- without the game — and this is the view a raid night depends on. The panel
+--- renders what this returns and decides nothing.
+---
+--- Roster is optional: the comms harness does not load it, and a client can
+--- reach this before the first scan. Every field it feeds is nil-guarded rather
+--- than assumed.
+function Comms.RunnerReport()
+  local raid = ns.Payload and ns.Payload.Current()
+  local summary = ns.Payload and ns.Payload.Summary()
+  local gear = ns.GearReportingSummary and ns.GearReportingSummary()
+
+  local corrected = 0
+  for _ in pairs(Comms.corrections) do corrected = corrected + 1 end
+
+  local live = 0
+  for _ in pairs(Comms.gear) do live = live + 1 end
+
+  local runner = Comms.RunnerName()
+  local me = normalize(Comms.PlayerName())
+
+  return {
+    -- Who is running loot, and how we know.
+    runner       = runner,
+    runnerIsMe   = (runner ~= nil and runner == me),
+    claimed      = runner ~= nil,
+    iAmRunner    = Comms.IsRunner(),
+    -- Claimed OUT LOUD, as opposed to having fallen into it by importing. The
+    -- panel's text and its button are both keyed on this so they cannot
+    -- disagree with each other.
+    explicitClaim = Comms.HasExplicitClaim(),
+    -- Who we got tonight's data FROM, or nil when we imported it ourselves.
+    -- Distinguishes "a raider holding a received roster" from "the person who
+    -- imported it and then stood down" — states that otherwise look identical
+    -- and want opposite advice.
+    payloadFrom  = (ns.db and ns.db.raidFrom) or nil,
+    -- The state that makes every other line look healthy while nothing can be
+    -- sent. Surfaced, never inferred from a silent counter.
+    rawStatus    = Comms.RawStatus(),
+    rawProblem   = Comms.RawProblem(),
+
+    channel      = Comms.Channel(),
+    registered   = Comms.registered and true or false,
+
+    -- Tonight's data. stamp is when the SITE built it; gearAge is how old the
+    -- oldest audit inside it is. Different numbers, never conflated.
+    hasPayload   = raid ~= nil,
+    raiders      = summary and summary.raiders or 0,
+    ranked       = summary and summary.ranked or 0,
+    seasonName   = summary and summary.seasonName or nil,
+    stamp        = summary and summary.stamp or nil,
+    gearAge      = ns.Payload and ns.Payload.GearAgeText() or nil,
+
+    -- Auto-post: the SETTING and whether it would actually fire here are two
+    -- different facts, and reporting only the first is how "On" comes to mean
+    -- nothing. Both are carried so the panel can say which.
+    autoPost     = (ns.Settings and ns.Settings.Get("autoPost")) and true or false,
+    guildRun     = select(1, ns.IsGuildRun and ns.IsGuildRun()),
+    guildMates   = select(2, ns.IsGuildRun and ns.IsGuildRun()),
+    groupSize    = select(3, ns.IsGuildRun and ns.IsGuildRun()),
+
+    peers        = Comms.PeerList(),
+    liveGear     = gear and gear.reporting or live,
+    totalGear    = gear and gear.total or nil,
+    notReporting = gear and gear.missing or {},
+    corrected    = corrected,
+
+    -- Observed-vs-roster spec disagreements. Computed for a while now with
+    -- nowhere to appear; this is that surface. REPORTED, never acted on — see
+    -- Roster.SpecDiscrepancies for why an observation must not override the
+    -- roster's spec.
+    specMismatches = (ns.Roster and ns.Roster.SpecDiscrepancies
+                        and ns.Roster.SpecDiscrepancies()) or {},
+
+    stats = Comms.stats,
+  }
+end
+
 function Comms.Status()
   local s = Comms.stats
   ns.Print(("comms v%d · prefix %s · %s"):format(
@@ -1093,6 +1356,16 @@ function Comms.Status()
   ns.Line(("Channel: %s%s"):format(
     channel or "|cff888899none — not in a group|r",
     Comms.IsRunner() and "  |cffF3C56B(you are the runner)|r" or ""))
+
+  -- Named rather than left to be worked out from who broadcast last. "Nobody"
+  -- is a real, valid state and says so plainly instead of reading as an error.
+  local runner = Comms.RunnerName()
+  if runner then
+    ns.Line(("Running loot: %s%s"):format(runner,
+      Comms.RunnerName() == normalize(Comms.PlayerName()) and " |cffF3C56B(you)|r" or ""))
+  else
+    ns.Line("Running loot: |cff888899nobody has claimed it — whoever pasted is answering|r")
+  end
 
   -- Surfaced HERE above everything else, because it is the state in which every
   -- other line looks healthy: a full roster, correct rankings, and no ability
@@ -1430,6 +1703,20 @@ function Comms.Start()
     if event == "GROUP_ROSTER_UPDATE" then
       if not Comms.Channel() then return end
       Comms.Announce()
+
+      -- ⚠️ A CLAIM MADE OUTSIDE A GROUP REACHED NOBODY, and claiming before the
+      -- raid forms is the normal way to do it — the send fails with "not in a
+      -- group" and the claim survives locally only. Without this the runner's
+      -- own client says they are running loot while every other client has
+      -- never heard of it, which is the worst version of this to debug: both
+      -- ends look right on their own.
+      if Comms.HasExplicitClaim() and Comms.ClaimIsFresh() then
+        local now = time()
+        if (now - lastClaimHello) >= CLAIM_HELLO_INTERVAL then
+          if Comms.Send("RUNNER", "claim") then lastClaimHello = now end
+        end
+      end
+
       -- No payload and we are in a group: this is the late-joiner case.
       if not ns.Payload.Current() then Comms.RequestPayload() end
       return

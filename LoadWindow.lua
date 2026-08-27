@@ -80,6 +80,18 @@ local function build()
   scroll:SetScrollChild(edit)
   frame.edit = edit
 
+  -- ⚠️ A MULTILINE EditBox IS ONLY AS TALL AS ITS TEXT. Empty, it is ONE LINE
+  -- tall, so the only spot in this large window that would take a click was the
+  -- top line — and the normal flow loses focus on the way to the website to
+  -- copy the export. Clicking back into the obvious middle of the box did
+  -- nothing, with no cursor and no explanation.
+  --
+  -- The catch goes on the SCROLL FRAME rather than on a fixed EditBox height:
+  -- an 11 KB payload is far taller than this window, and pinning the child's
+  -- height would clip it with nothing able to scroll.
+  scroll:EnableMouse(true)
+  scroll:SetScript("OnMouseDown", function() edit:SetFocus() end)
+
   frame.status = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   frame.status:SetPoint("BOTTOMLEFT", 18, 40)
   frame.status:SetPoint("BOTTOMRIGHT", -18, 40)
@@ -92,16 +104,63 @@ local function build()
   load:SetText("Load")
   load:SetScript("OnClick", function() LoadWindow.Submit() end)
 
+  -- ⚠️ "Clear" WAS THE WRONG NAME. Sat beside Load, under a status line reading
+  -- "Currently loaded: 17 raiders… Pasting replaces it", it read as "clear the
+  -- loaded roster" — which is not what it does and not what anyone wants it to
+  -- do by accident. It empties the BOX. The label now says which.
   local clear = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
   clear:SetSize(110, 24)
   clear:SetPoint("RIGHT", load, "LEFT", -8, 0)
-  clear:SetText("Clear")
+  clear:SetText("Clear Box")
   clear:SetScript("OnClick", function()
     frame.edit:SetText("")
     setStatus("", MUTED)
   end)
 
+  -- Discarding the LOADED roster — the thing Clear was mistaken for. Anchored
+  -- far left, away from Load and Clear Box, because it is the one destructive
+  -- control in this window and should not sit in the row you press by habit.
+  frame.discard = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  frame.discard:SetSize(160, 24)
+  frame.discard:SetPoint("BOTTOMLEFT", 18, 12)
+  frame.discard:SetText("Discard Loaded Data")
+  frame.discard:SetScript("OnClick", function() LoadWindow.ConfirmDiscard() end)
+
   return frame
+end
+
+--- ⚠️ CONFIRMED, AND THE PROMPT NAMES WHAT ELSE GOES. Payload.Clear drops the
+--- roster, the raw copy AND the runner flag together — deliberately, since a
+--- runner flag with nothing to send would answer every request with silence.
+--- Mid-raid that is a bad accident, so the prompt says so rather than asking
+--- "are you sure?" about a consequence it has not mentioned.
+StaticPopupDialogs["HODLA_RAID_DISCARD"] = {
+  text = "%s", button1 = "Discard", button2 = "Cancel",
+  timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+  OnAccept = function()
+    ns.Payload.Clear()
+    setStatus("Nothing loaded yet.", MUTED)
+    ns.Print("tonight's raid data discarded.")
+  end,
+}
+
+function LoadWindow.ConfirmDiscard()
+  local s = ns.Payload.Summary()
+  if not s then
+    ns.Warn("there is no raid data loaded to discard.")
+    return
+  end
+
+  local warning = ""
+  if ns.Comms and ns.Comms.IsRunner() then
+    warning = "\n\n|cffF3C56BYou are running loot tonight.|r Discarding stands you down, "
+      .. "and nobody will be answering requests for the roster."
+  end
+
+  StaticPopup_Show("HODLA_RAID_DISCARD",
+    ("Discard the loaded raid data?\n\n%d raiders, %s\nexported %s%s\n\n"):format(
+      s.raiders, s.seasonName or "?", ns.Payload.AgeText(), warning)
+    .. "Recorded loot is kept. Import again to get it back.")
 end
 
 --- Read the box and load it. Reports what it RECEIVED so a paste that got
@@ -128,7 +187,12 @@ function LoadWindow.Submit()
   -- what makes you the runner — receiving a payload over comms does not, which
   -- is what stops twenty clients all answering one late joiner's request.
   ns.Payload.Store(data, text)
-  if ns.Comms then ns.Comms.SetRunner(true) end
+  -- ...UNLESS somebody has explicitly claimed the role from the Runner tab, in
+  -- which case pasting gives you the data without taking their job. Loading a
+  -- fresher export is a normal thing for a second officer to do and must not
+  -- silently reassign who the raid is listening to.
+  local claimed, holder = true, nil
+  if ns.Comms then claimed, holder = ns.Comms.AssumeRunner() end
   local s = ns.Payload.Summary()
 
   -- Reaching here means the self-describing length check in Payload.Decode
@@ -145,6 +209,13 @@ function LoadWindow.Submit()
 
   if s.raiders > 0 and s.ranked == 0 then
     ns.Warn("nobody has an EPGP standing — priority will be blank in rankings.")
+  end
+
+  -- Said plainly rather than left to be discovered: this client will broadcast
+  -- the roster below, but will NOT be the one whose rankings the raid follows.
+  if not claimed then
+    ns.Print(("%s is running loot tonight, so this stays their call — you have the data. "):format(
+      tostring(holder)) .. "|cff888888Runner tab → Run Loot Tonight|r to take over.")
   end
 
   -- Push it to everyone else running the addon. Reported as a COUNT OF MESSAGES
@@ -190,4 +261,9 @@ function LoadWindow.Toggle()
   else
     setStatus("Nothing loaded yet.", MUTED)
   end
+
+  -- Nothing loaded, nothing to discard. Disabled rather than left live to
+  -- explain itself after the press — the ConfirmDiscard warning stays as the
+  -- backstop for a payload cleared while this window sits open.
+  frame.discard:SetEnabled(s ~= nil)
 end

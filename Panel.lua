@@ -61,7 +61,11 @@ local CLASS_COLOR = {
   ["Warrior"] = { 0.78, 0.61, 0.43 },
 }
 
-local TABS = { "Drops", "Boss", "Me", "Standings", "Targets" }
+-- Runner is LAST and conditional: Experience §3 gives it to whoever loaded the
+-- data, and it is hidden without a payload rather than shown inert. Positions
+-- are assigned in layoutTabs() rather than at build time, because the set of
+-- visible tabs changes while the panel is open.
+local TABS = { "Drops", "Boss", "Me", "Standings", "Targets", "Runner" }
 
 -- The target marker. One glyph, used everywhere an item can appear, so it reads
 -- the same on a chip, in a browse row and on the selected-item line.
@@ -321,10 +325,21 @@ local function buildRow(parent, i)
     -- tooltip at all. The provenance marker is four characters wide, which is
     -- nowhere near enough to explain itself — the sentence lives here.
     if not self.itemID then
-      if self.srcHelp then
+      -- Two things can want saying about a raider row, and either may be
+      -- absent: where their gear reading came from, and that they are ranked as
+      -- a spec they are not currently in. Built as a list so neither depends on
+      -- the other being present.
+      if self.srcHelp or self.splitHelp then
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(self.srcName or "", 1, 1, 1)
-        GameTooltip:AddLine(self.srcHelp, 0.6, 0.6, 0.7, true)
+        if self.srcHelp then
+          GameTooltip:AddLine(self.srcName or "", 1, 1, 1)
+          GameTooltip:AddLine(self.srcHelp, 0.6, 0.6, 0.7, true)
+        end
+        if self.splitHelp then
+          if self.srcHelp then GameTooltip:AddLine(" ") end
+          GameTooltip:AddLine(self.splitName or "", 0.953, 0.773, 0.420)
+          GameTooltip:AddLine(self.splitHelp, 0.6, 0.6, 0.7, true)
+        end
         GameTooltip:Show()
       end
       return
@@ -417,10 +432,9 @@ local function build()
   frame.TitleText:SetText("Loot Advisor")
 
   frame.tabs = {}
-  for i, name in ipairs(TABS) do
+  for _, name in ipairs(TABS) do
     local b = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     b:SetSize(TAB_W, 22)
-    b:SetPoint("TOPLEFT", 12 + (i - 1) * TAB_GAP, -28)
     b:SetText(name)
     b:SetScript("OnClick", function()
       state.tab = name
@@ -602,6 +616,57 @@ local function build()
     GameTooltip:Show()
   end)
   frame.post:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+  -- ── The Runner tab's one control ──────────────────────────────────────────
+  -- ⚠️ ONLY the claim toggle belongs here. Import Raid Night, Loot Log and
+  -- Settings are ALREADY permanent buttons on the bottom row (see frame.load /
+  -- cfg / log below) — adding a second copy for this tab put two rows of
+  -- duplicates on screen and covered frame.footer. It takes the slot frame.post
+  -- uses on the other tabs, which is free here because Post is hidden.
+  frame.runToggle = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  frame.runToggle:SetSize(150, 22)
+  frame.runToggle:SetPoint("BOTTOMRIGHT", -14, 38)
+  frame.runToggle:SetText("Run Loot Tonight")
+  frame.runToggle:Hide()
+  -- Auto-post lives HERE as well as in Settings because it is a runner's
+  -- decision about tonight, not a preference you set once. Same stored value
+  -- either way — Settings.SPEC is the single definition.
+  frame.autoPost = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  frame.autoPost:SetSize(170, 22)
+  frame.autoPost:SetPoint("RIGHT", frame.runToggle, "LEFT", -8, 0)
+  frame.autoPost:SetText("Auto-Post: Off")
+  frame.autoPost:Hide()
+  frame.autoPost:SetScript("OnClick", function()
+    if not ns.Settings then return end
+    ns.Settings.Set("autoPost", ns.Settings.Get("autoPost") and "off" or "on")
+    Panel.Refresh()
+  end)
+  frame.autoPost:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+    GameTooltip:SetText("Auto-Post Drops To Chat", 1, 1, 1)
+    GameTooltip:AddLine("Posts each drop's shortlist to chat automatically, "
+      .. "so the raid sees it without you pressing anything.", 0.8, 0.8, 0.8, true)
+    GameTooltip:AddLine(" ")
+    GameTooltip:AddLine("Only ever fires on a GUILD run — never in LFR or a pug — "
+      .. "and only for whoever is running loot.", 0.6, 0.6, 0.7, true)
+    GameTooltip:Show()
+  end)
+  frame.autoPost:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+  frame.runToggle:SetScript("OnClick", function()
+    if not ns.Comms then return end
+    -- ⚠️ KEYED ON THE CLAIM, NEVER ON IsRunner(). IsRunner is also true for
+    -- someone who merely pasted the data, so keying on it made the button read
+    -- "Stop Running Loot" while the panel beside it said "Press Run Loot
+    -- Tonight" — and the first press then RELEASED the implicit role instead of
+    -- claiming it, which is two presses to reach a state one should have.
+    if ns.Comms.HasExplicitClaim() then
+      ns.Comms.ReleaseRunner()
+    else
+      ns.Comms.ClaimRunner()
+    end
+    Panel.Refresh()
+  end)
 
   -- "Load Raid Data" is what the design doc calls this and what the runner is
   -- actually doing. "Load Data" read as generic enough that it was not
@@ -953,7 +1018,16 @@ local function renderRanking(itemID)
   setHeaders("Raider", "Upgrade", "Gain", "Priority")
 
   if not ranked then
-    frame.sub:SetText("Nothing imported yet — press Import Raid Night and paste tonight's export.")
+    -- ⚠️ SAY WHAT IS SHOWN, NOT ONLY WHAT IS MISSING. The grades and BIS marks
+    -- in the strip above are the VIEWER'S OWN — scored from their equipped gear
+    -- against the addon's baked-in tables, so they are fully correct with no
+    -- roster loaded. Reading "nothing imported" directly beneath a strip full
+    -- of live grades makes both halves look broken when neither is.
+    frame.sub:SetText("No raid data — the grades above are yours. "
+      .. "Press Import Raid Night to rank the raid for this item.")
+    -- Cleared too: column headings over a permanently empty list are the other
+    -- half of what makes this read as a failure rather than a state.
+    setHeaders()
     frame.more:SetText("")
     hideRows(1)
     return
@@ -1002,7 +1076,13 @@ local function renderRanking(itemID)
     -- Per-raider, because a grade belongs to a SPEC: two people contesting one
     -- trinket can hold different letters, and that is what explains their order.
     local qText, qColor = qualityTag(r.quality)
-    row.quality:SetText(qText or "")
+    -- A raider ranked as one spec while standing in another gets a marker, and
+    -- the sentence goes in the row tooltip — the column is 28px, which is not
+    -- room to explain anything. ns.SpecSplitTag stays quiet unless the spec
+    -- change actually changes this item's grade.
+    local splitMark, splitName, splitHelp = ns.SpecSplitTag(r)
+    row.splitName, row.splitHelp = splitName, splitHelp
+    row.quality:SetText((qText or "") .. (splitMark or ""))
     if qColor then row.quality:SetTextColor(qColor[1], qColor[2], qColor[3]) end
 
     -- Gap is ABSENT, not zero, when the sort cannot guarantee score order.
@@ -1315,9 +1395,195 @@ end
 -- makeDropdown owns opening and filling all three pickers now, so there is one
 -- implementation to be right rather than three to keep in step.
 
+--- Show the tabs that apply right now and space them evenly.
+---
+--- Positions are assigned HERE rather than at build time because the Runner tab
+--- comes and goes with the payload; laying out once would leave a hole where it
+--- used to be, or crowd the others permanently to reserve room for it.
+local function layoutTabs()
+  local visible = {}
+  for _, name in ipairs(TABS) do
+    local show = (name ~= "Runner") or (ns.Payload and ns.Payload.Current() ~= nil)
+    if show then visible[#visible + 1] = name else frame.tabs[name]:Hide() end
+  end
+
+  -- If the tab we are on just disappeared — the payload was cleared while the
+  -- Runner tab was open — fall back rather than render a tab that is not there.
+  local stillThere = false
+  for _, name in ipairs(visible) do if name == state.tab then stillThere = true end end
+  if not stillThere then state.tab = "Drops" end
+
+  local gap = math.floor((FRAME_W - 24 - 100 - 12) / math.max(#visible, 1))
+  for i, name in ipairs(visible) do
+    local b = frame.tabs[name]
+    b:ClearAllPoints()
+    b:SetPoint("TOPLEFT", 12 + (i - 1) * gap, -28)
+    b:Show()
+  end
+end
+
+--- The runner's own view: who is running loot, what is loaded, who is reporting.
+---
+--- RENDERING ONLY. Every fact here comes from Comms.RunnerReport(), which lives
+--- in Comms.lua so the headless harness can test it — this function decides
+--- nothing and computes nothing.
+local function renderRunner()
+  frame.strip:Hide()
+  for i = 1, CHIPS_PER_PAGE do frame.chips[i]:Hide() end
+  frame.chipMore:SetText("")
+  setHeaders()
+  frame.more:SetText("")
+
+  local r = ns.Comms and ns.Comms.RunnerReport()
+  if not r then
+    frame.context:SetText("Runner")
+    frame.sub:SetText("Comms did not load.")
+    hideRows(1)
+    return
+  end
+
+  frame.context:SetText("Runner")
+  frame.sub:SetText(r.seasonName and ("%s · %d raiders, %d ranked"):format(
+    r.seasonName, r.raiders, r.ranked) or "Nothing imported yet")
+
+  local lines = {}
+  local function add(text) lines[#lines + 1] = text end
+
+  -- WHO IS RUNNING LOOT — first, because it is the one thing this tab exists to
+  -- make unambiguous.
+  --
+  -- ⚠️ EVERY BRANCH NAMES THE BUTTON AS IT IS CURRENTLY LABELLED. Both are keyed
+  -- on HasExplicitClaim, so a branch that says "press Run Loot Tonight" cannot
+  -- appear beside a button reading "Stop Running Loot" — which it did, and sent
+  -- Jason round two presses to reach the state one should have given him.
+  if r.runnerIsMe then
+    add("|cff44ff44You are running loot tonight.|r")
+    add("The raid follows your rankings, and late joiners get the roster from you.")
+  elseif r.runner then
+    add(("|cffF3C56B%s is running loot tonight.|r"):format(r.runner))
+    add("Their rankings are the ones everyone sees. Press Run Loot Tonight to take over.")
+  elseif r.iAmRunner then
+    add("|cffF3C56BYou are answering for tonight's data|r — because you imported it,")
+    add("not because anyone claimed it. Press Run Loot Tonight to make it official.")
+  elseif r.payloadFrom then
+    -- We RECEIVED tonight's data over comms rather than importing it, and have
+    -- not claimed. The sender is answering for it; naming them is more use than
+    -- "nobody has claimed", which is true and unhelpful.
+    add("|cff888899Nobody has claimed the runner role.|r")
+    add(("You have tonight's data from %s, who is answering for it."):format(r.payloadFrom))
+  elseif r.hasPayload then
+    -- Imported it and then stood down. NOBODY is answering — including us — so
+    -- a late joiner asking for the roster gets silence. Said plainly, because
+    -- there is no other symptom of it anywhere.
+    add("|cffF3C56BNobody is answering for tonight's data.|r")
+    add("You imported it and then stood down. Press Run Loot Tonight to answer again.")
+  else
+    add("|cff888899Nobody has claimed the runner role.|r")
+    add("Press Import Raid Night to load tonight's data.")
+  end
+
+  add("")
+
+  -- THE STATE THAT LOOKS HEALTHY AND IS NOT: a full roster on screen with no
+  -- ability to send it anywhere.
+  if r.rawProblem then
+    add("|cffff4444" .. r.rawProblem .. "|r")
+    add("")
+  end
+
+  if not r.hasPayload then
+    add("Nothing imported yet — press Import Raid Night.")
+  else
+    add(("Gear snapshot: %s"):format(tostring(r.gearAge)))
+    if r.totalGear then
+      add(("Reporting live: %d of %d raiders · %d corrected by a win tonight")
+        :format(r.liveGear, r.totalGear, r.corrected))
+    else
+      add(("Reporting live: %d · %d corrected by a win tonight"):format(r.liveGear, r.corrected))
+    end
+
+    -- Named, capped, and the remainder COUNTED rather than trimmed away. Solo
+    -- there is no channel for anyone to report on, so the gap carries no
+    -- information and is not shown at all.
+    if r.channel and #r.notReporting > 0 then
+      local shown = {}
+      for i = 1, math.min(6, #r.notReporting) do shown[#shown + 1] = r.notReporting[i] end
+      local text = "   Not reporting: " .. table.concat(shown, ", ")
+      if #r.notReporting > #shown then
+        text = text .. (" and %d more"):format(#r.notReporting - #shown)
+      end
+      add(text)
+      add("   |cff888899They are still ranked, from the site snapshot.|r")
+    end
+  end
+
+  -- ⚠️ WHETHER IT WILL FIRE, NOT JUST WHETHER IT IS ON. A switch reading "On"
+  -- beside a group it will never fire in is the same lie the runner button told
+  -- when its label disagreed with the text next to it.
+  add("")
+  if not r.autoPost then
+    add("|cff888899Auto-post is off|r — drops are posted to chat only when you press Post.")
+  elseif not r.hasPayload then
+    add("|cffF3C56BAuto-post is on|r, but there is no raid data to rank drops against.")
+  elseif not r.iAmRunner then
+    add("|cffF3C56BAuto-post is on|r, but only whoever is running loot posts.")
+  elseif r.guildRun then
+    add(("|cff44ff44Auto-post is on|r — %d of %d here are guildmates, so drops will post to chat.")
+      :format(r.guildMates or 0, r.groupSize or 0))
+  elseif (r.groupSize or 0) == 0 then
+    add("|cffF3C56BAuto-post is on|r — nothing will post until you are in a group.")
+  else
+    add(("|cffF3C56BAuto-post is on, but this is not a guild run|r — %d of %d here are guildmates.")
+      :format(r.guildMates or 0, r.groupSize or 0))
+    add("Nothing will be posted to chat. The Post button still works.")
+  end
+
+  add("")
+  if #r.peers == 0 then
+    add(r.channel and "Running the addon: |cff888899nobody else has announced|r"
+                   or "Running the addon: |cff888899not in a group|r")
+  else
+    local names = {}
+    for _, p in ipairs(r.peers) do
+      names[#names + 1] = ("%s (%s)"):format(p.name, tostring(p.version))
+    end
+    add(("Running the addon: %d — %s"):format(#r.peers, table.concat(names, ", ")))
+  end
+
+  -- SPEC DISAGREEMENTS. Reported for a person to act on, never acted on here:
+  -- an inspection sees what someone is wearing this minute, which is not the
+  -- same question as what they raid as. See Roster.SpecDiscrepancies.
+  if #r.specMismatches > 0 then
+    add("")
+    add(("|cffF3C56BSpec differs from the roster for %d:|r"):format(#r.specMismatches))
+    for i = 1, math.min(4, #r.specMismatches) do
+      local m = r.specMismatches[i]
+      add(("   %s — roster says %s, seen as %s"):format(m.name, tostring(m.roster),
+        tostring(m.observed)))
+    end
+    if #r.specMismatches > 4 then
+      add(("   and %d more"):format(#r.specMismatches - 4))
+    end
+    add("   |cff888899Scored as the roster says. Fix it on the site, not here.|r")
+  end
+
+  for i = 1, VISIBLE_ROWS do
+    local row, text = frame.rows[i], lines[i]
+    if not text then row:Hide() else
+      resetRow(row)
+      row.name:SetWidth(460)
+      row.name:SetText(text)
+      row.name:SetTextColor(unpack(WHITE))
+      row.hl:Hide()
+      row:Show()
+    end
+  end
+end
+
 function Panel.Refresh()
   if not frame or not frame:IsShown() then return end
 
+  layoutTabs()
   for name, b in pairs(frame.tabs) do b:SetEnabled(name ~= state.tab) end
 
   -- Rows are RECYCLED across tabs, so anything one tab sets has to be cleared
@@ -1329,6 +1595,9 @@ function Panel.Refresh()
     row.name:SetWidth(140)
     row.icon:Hide()
     row.itemID, row.link, row.meta = nil, nil, nil
+    -- Same reason as the line above: a spec-split tooltip left on a recycled row
+    -- would explain the PREVIOUS occupant's spec while naming this one.
+    row.splitName, row.splitHelp = nil, nil
   end
 
   local diff = ns.Settings.Get("difficulty")
@@ -1407,12 +1676,26 @@ function Panel.Refresh()
     end
   end
 
+  local onRunner = state.tab == "Runner"
+
   if onTargets then renderTargets()
+  elseif onRunner then renderRunner()
   elseif state.tab == "Drops" or onBoss then renderItemList()
   elseif state.tab == "Me" then renderMe()
   else renderStandings() end
 
-  frame.post:SetShown(Panel.CurrentItemID() ~= nil)
+  frame.post:SetShown(not onRunner and Panel.CurrentItemID() ~= nil)
+
+  frame.runToggle:SetShown(onRunner)
+  frame.autoPost:SetShown(onRunner)
+  if onRunner then
+    -- Labelled by what pressing it DOES, and keyed on the same fact the panel
+    -- text is keyed on so the two can never contradict each other.
+    frame.runToggle:SetText((ns.Comms and ns.Comms.HasExplicitClaim())
+      and "Stop Running Loot" or "Run Loot Tonight")
+    frame.autoPost:SetText((ns.Settings and ns.Settings.Get("autoPost"))
+      and "Auto-Post: On" or "Auto-Post: Off")
+  end
 
   local me = myEntry()
   if me and me.pr then
