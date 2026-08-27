@@ -507,6 +507,38 @@ for i, m in ipairs(stub.sent) do
   check(("chat line %d is within the 255-byte cap"):format(i), #m.msg <= 255, #m.msg)
 end
 
+-- ⚠️ AN LFR IS RAID-SIZED AND STILL NOT A "RAID" CHANNEL. IsInRaid() is true
+-- there, so resolveChannel returned "RAID" and the client REFUSED the message
+-- outright with "You are not in a raid group" — the Post button doing nothing,
+-- visibly, in the one content type that is always available to test in. Seen in
+-- an LFR wing in Session 245 and again in 247, blamed on comms both times;
+-- comms had picked INSTANCE_CHAT correctly and this had not.
+stub.sent = {}
+stub.instanceGroup = true
+local lfr = ns.Loot.PostToChat(chestId, { difficulty = "h" })
+check("posting in an instance group uses INSTANCE_CHAT",
+      lfr == true and stub.sent[1] and stub.sent[1].channel == "INSTANCE_CHAT",
+      stub.sent[1] and stub.sent[1].channel)
+
+-- An explicit RAID setting names a channel that does not EXIST in an instance
+-- group, so it redirects rather than posting nothing at all.
+stub.sent = {}
+ns.Settings.Set("channel", "RAID")
+ns.Loot.PostToChat(chestId, { difficulty = "h" })
+check("...even when the setting explicitly says RAID",
+      stub.sent[1] and stub.sent[1].channel == "INSTANCE_CHAT",
+      stub.sent[1] and stub.sent[1].channel)
+
+-- SAY works in an instance group, so it is honoured as asked.
+stub.sent = {}
+ns.Settings.Set("channel", "SAY")
+ns.Loot.PostToChat(chestId, { difficulty = "h" })
+check("...but SAY is left alone, because SAY works there",
+      stub.sent[1] and stub.sent[1].channel == "SAY",
+      stub.sent[1] and stub.sent[1].channel)
+ns.Settings.Set("channel", "AUTO")
+stub.instanceGroup = false
+
 -- Solo, there is no channel; the line must still be inspectable rather than
 -- vanishing, or the button cannot be tested outside a raid.
 stub.sent, stub.inRaid, stub.inGroup = {}, false, false

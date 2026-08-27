@@ -327,6 +327,12 @@ function Loot.RankRaiders(itemID, opts)
         quality = quality,
         altSpec = altSpec,
         equipped = state,
+        -- The "+26 ilvl" a row displays, computed ONCE here rather than at each
+        -- surface. It is also the only form of it that survives the wire: a
+        -- ranking received from the runner carries no equipped state to
+        -- subtract from, so every consumer reading this field is what lets a
+        -- received row and a locally computed one render through one path.
+        ilvlGain = candidateIlvl - (state.ilvl or 0),
         pr = r.pr, rank = r.rank,
         adhoc = r.adhoc,
         sortGroup = ns.Scoring.getRankedSortGroup(result, slot),
@@ -373,7 +379,65 @@ function Loot.RankRaiders(itemID, opts)
     end
   end
 
-  return ranked, rows, { slot = slot, ilvl = candidateIlvl, track = candidateTrack, rec = rec }
+  return ranked, rows, {
+    slot = slot, ilvl = candidateIlvl, track = candidateTrack, rec = rec,
+    -- The two halves of "N of M raiders can use it". Carried on meta because a
+    -- ranking that arrived over comms has no `rows` to count.
+    usable = #ranked, total = #rows,
+  }
+end
+
+--- The ranking to DISPLAY for one item: the runner's, when they have sent one.
+---
+--- ⚠️ THE RUNNER COMPUTES, EVERYONE DISPLAYS (Data Contract §4) — a settled
+--- decision that was not implemented. handlers.DROPS stored the runner's
+--- ranking and refreshed the panel, and the panel then called RankRaiders and
+--- recomputed the whole thing locally; Comms.AuthoritativeRanking had no
+--- callers at all. Every client scoring for itself is exactly the divergence
+--- the rule exists to prevent: clients hear different subsets of GEAR
+--- self-reports, so two panels can order the same drop differently in front of
+--- the raid.
+---
+--- FALLS BACK TO LOCAL, deliberately. Nothing has been received for a Boss-tab
+--- item, and nothing has been received in the seconds before the runner's
+--- broadcast lands. A locally computed list is the right answer there — it is
+--- what a lone installer sees, and it is right whenever gear reports agree.
+---
+--- Returns rows, all, meta, runnerName. `all` is nil for a received ranking:
+--- the wire carries the people who can use the item, and the counts behind
+--- "N of M" ride on meta instead.
+function Loot.RankingFor(itemID, opts)
+  local comms = ns.Comms
+  if comms and comms.AuthoritativeRanking and not comms.IsRunner() then
+    local rows, from, meta = comms.AuthoritativeRanking(itemID)
+    if rows and #rows > 0 then
+      local display = {}
+      for i, r in ipairs(rows) do
+        display[i] = {
+          name = r.name,
+          class = r.class,
+          result = { badge = r.badge },
+          -- Rebuilt from the raw grade/bis rather than a rendered tag, so
+          -- ns.QualityTag formats it here exactly as it did on the runner's
+          -- screen. Absent quality stays absent — never invented locally,
+          -- which would reintroduce the disagreement in miniature.
+          quality = (r.grade or r.bis) and { grade = r.grade, bis = r.bis } or nil,
+          gap = r.gap,
+          ilvlGain = r.gain,
+          pr = r.pr,
+          adhoc = r.adhoc,
+          fromRunner = true,
+        }
+      end
+      return display, nil, {
+        usable = (meta and meta.usable) or #display,
+        total  = meta and meta.total,
+      }, from
+    end
+  end
+
+  local ranked, all, meta = Loot.RankRaiders(itemID, opts)
+  return ranked, all, meta, nil
 end
 
 local CLASS_COLOR = {
@@ -392,14 +456,24 @@ end
 --- Print the ranked list. `limit` caps the rows shown; the rest are counted, not
 --- hidden — "and 6 more" is honest where simply stopping is not.
 function Loot.ReportRanking(itemID, opts)
-  local ranked, all, meta = Loot.RankRaiders(itemID, opts)
+  -- RankingFor for the same reason the panel and the chat post use it: this is
+  -- a display, and a client showing its own arithmetic while the runner shows
+  -- theirs is the disagreement Data Contract §4 exists to prevent.
+  local ranked, _, meta = Loot.RankingFor(itemID, opts)
   if not ranked then return false end
 
   local limit = (opts and opts.limit) or 5
-  local rec = meta.rec
+  -- From the data, not from meta.rec: a received ranking carries counts and
+  -- rows, never our item record.
+  local data = ns.Data()
+  local rec = (data and (data.items or {})[itemID]) or {}
 
-  ns.Print(("%s — %d of %d raiders can use it"):format(
-    rec.name or ("item " .. itemID), #ranked, #all))
+  local total = meta.total
+  ns.Print(total
+    and ("%s — %d of %d raiders can use it"):format(
+      rec.name or ("item " .. itemID), meta.usable or #ranked, total)
+    or ("%s — %d raiders can use it"):format(
+      rec.name or ("item " .. itemID), meta.usable or #ranked))
 
   if #ranked == 0 then
     ns.Line("Not an upgrade for anyone on the roster.")
@@ -415,7 +489,7 @@ function Loot.ReportRanking(itemID, opts)
     elseif row.gap == 0 and i > 1 then
       bits[#bits + 1] = "tie"
     end
-    bits[#bits + 1] = ("+%d ilvl"):format(meta.ilvl - (row.equipped.ilvl or 0))
+    bits[#bits + 1] = ("+%d ilvl"):format(row.ilvlGain or 0)
     if row.pr then
       bits[#bits + 1] = ("PR %.2f"):format(row.pr)
     else
@@ -445,8 +519,27 @@ end
 
 --- Where a posted line should go. AUTO follows the group you are actually in,
 --- so the same button works in a raid, a 5-man, or solo testing.
+--- ⚠️ AN INSTANCE GROUP TAKES INSTANCE_CHAT, AND IT IS NOT OPTIONAL. In an LFR
+--- the group is raid-sized, so IsInRaid() is true and this returned "RAID" —
+--- which the client REFUSES with "You are not in a raid group", posting
+--- nothing. The same ladder Comms.Channel already walks, for the same reason;
+--- the two were only ever different because this one was written first.
+local function instanceChannel()
+  local category = (Enum and Enum.PartyCategory and Enum.PartyCategory.Instance)
+    or _G.LE_PARTY_CATEGORY_INSTANCE
+  if not (category and IsInGroup) then return false end
+  local ok, inInstanceGroup = pcall(IsInGroup, category)
+  return ok and inInstanceGroup and true or false
+end
+
 local function resolveChannel()
   local want = ns.Settings.Get("channel")
+  -- SAY works anywhere and is the one choice an instance group does not
+  -- invalidate, so it is honoured as asked. RAID / RAID_WARNING / PARTY name a
+  -- channel that does not EXIST in an instance group, so they redirect rather
+  -- than being refused by the client and posting nothing at all.
+  if want == "SAY" then return "SAY" end
+  if instanceChannel() then return "INSTANCE_CHAT" end
   if want ~= "AUTO" then return want end
   if IsInRaid and IsInRaid() then return "RAID" end
   if IsInGroup and IsInGroup() then return "PARTY" end
@@ -465,7 +558,12 @@ end
 --- Build the lines for one item. Returned rather than sent, so the same code
 --- feeds both the real post and the preview shown in the drops window.
 function Loot.ChatLines(itemID, opts)
-  local ranked, _, meta = Loot.RankRaiders(itemID, opts)
+  -- RankingFor, like the panel: a line posted to raid chat is the most public
+  -- display there is, so a non-runner pressing Post must post the RUNNER's
+  -- ranking rather than a second opinion computed from a different set of gear
+  -- reports. It also means someone who never imported tonight's roster can
+  -- still post a real list instead of "no raid night imported".
+  local ranked = Loot.RankingFor(itemID, opts)
   local data = ns.Data()
   local rec = data and (data.items or {})[itemID]
   local name = (rec and rec.name) or ("item " .. tostring(itemID))
@@ -596,9 +694,9 @@ function Loot.HandleRoll(roll)
   -- the raid on its own is about SendChatMessage, which is still behind the
   -- Post button and untouched by this.
   if ns.Comms and ns.Comms.IsRunner() then
-    local ranked = Loot.RankRaiders(roll.itemID, { difficulty = roll.difficulty })
+    local ranked, _, meta = Loot.RankRaiders(roll.itemID, { difficulty = roll.difficulty })
     if ranked and #ranked > 0 then
-      ns.Comms.BroadcastDrops(roll.itemID, ranked)
+      ns.Comms.BroadcastDrops(roll.itemID, ranked, meta)
 
       -- ── The one thing the raid can actually see ─────────────────────────
       -- THREE CONDITIONS, ALL REQUIRED, and each is doing separate work:

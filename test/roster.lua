@@ -704,6 +704,17 @@ do
   check("a raid of guildmates IS a guild run", isRun == true, isRun)
   check("...counting the player among them", mates == 18, mates)
 
+  -- ⚠️ AND THE RUNNER TAB MUST BE ABLE TO SAY SO. RunnerReport read these
+  -- through `select(2, ns.IsGuildRun and ns.IsGuildRun())`, which collapses the
+  -- call to ONE value, so both counts were always nil and the panel rendered
+  -- "0 of 0 here are guildmates" beside a group it had just correctly called a
+  -- guild run (Session 249, live). The gate was right; the sentence was not.
+  local report = ns.Comms.RunnerReport()
+  check("the runner report carries the guild-run verdict", report.guildRun == true)
+  check("...and the counts behind it, not nils rendered as zero",
+        report.guildMates == mates and report.groupSize == total,
+        ("%s of %s"):format(tostring(report.guildMates), tostring(report.groupSize)))
+
   -- ⚠️ THE CASE THE "was it formed by the finder?" TEST GOT WRONG. A pug raid
   -- joined by INVITE looks exactly like a guild raid to any test based on how
   -- the group was assembled. Jason joins both the same way, so this is the one

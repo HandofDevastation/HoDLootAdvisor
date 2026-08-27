@@ -345,6 +345,21 @@ do
   check("an instance group uses INSTANCE_CHAT",
         Comms.Channel() == "INSTANCE_CHAT", Comms.Channel())
 
+  -- ⚠️ AND IT IS RECORDED. The instance branch used to return above the logging
+  -- block, so the ONE decision the instrumentation exists to answer was the
+  -- only one it could never see: a live LFG group reported INSTANCE_CHAT twice
+  -- through /la comms while the SavedVariables log held zero of them
+  -- (Session 249). "Get evidence first" needs the evidence to exist.
+  local logged
+  for _, e in ipairs(A.db.log or {}) do
+    if e.e == "@commsChannel" and e.x and e.x.chose == "INSTANCE_CHAT" then logged = e end
+  end
+  check("...and the decision is written to the log, like every other channel",
+        logged ~= nil)
+  check("...with the raid/party facts that were true at the same moment",
+        logged ~= nil and logged.x.instanceGroup == true and logged.x.inRaid ~= nil,
+        logged and tostring(logged.x.inRaid))
+
   stub.instanceGroup, stub.inRaid, stub.inGroup = false, false, true
   check("a party uses PARTY", Comms.Channel() == "PARTY", Comms.Channel())
 
@@ -1174,6 +1189,234 @@ do
   pump(A, 2000); pump(B, 2000)
   check("the report goes back to unclaimed on release",
         nsA.Comms.RunnerReport().runner == nil)
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+header("a HELLO is ANSWERED — nobody re-announces on their own")
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Session 249, live, two real clients: each held the other's roster while one
+-- of them reported "nobody else has announced" for the whole evening. HELLO was
+-- fire-and-forget, so a client only ever learned about people who announced
+-- AFTER it started listening — and both moments that matter fall outside that
+-- window. At group formation the inviter's HELLO goes out before the joiner is
+-- on the channel and HELLO_INTERVAL blocks the retry; after a /reload the
+-- returning client has an empty peer table and nobody has any reason to speak.
+
+-- Comms.lua's HELLO_REPLY_INTERVAL. Named here rather than written as a bare
+-- number so the two move together if it is ever retuned.
+local HELLO_REPLY_WINDOW = 60
+
+do
+  -- ⚠️ THE HARNESS CLOCK IS THE REAL ONE (the stub sets _G.time = os.time), so
+  -- a reply A sent in an earlier section is still inside HELLO_REPLY_INTERVAL
+  -- and the rate limit would swallow this one — the test would then fail for a
+  -- reason that has nothing to do with what it is checking. Moved past the
+  -- window on purpose rather than left to depend on which section ran first.
+  local realTime = _G.time
+  _G.time = function() return realTime() + 2 * HELLO_REPLY_WINDOW end
+
+  stub.Use(A); nsA.Comms.peers = {}
+  stub.Use(B); nsB.Comms.peers = {}
+
+  local aKey = nsA.Comms.Normalize(A.player.name)
+  local bKey = nsB.Comms.Normalize(B.player.name)
+
+  local before = #wireLog
+  stub.Use(B)
+  nsB.Comms.Announce(true)
+  pump(B, 2000); pump(A, 2000); pump(B, 2000)
+
+  check("the client that announced is seen, as it always was",
+        nsA.Comms.peers[bKey] ~= nil)
+  -- REVERT-PROOF: this is the half that did not exist. Remove the reply from
+  -- handlers.HELLO and B never learns A, exactly as it did not in game.
+  check("...and the one that was already there answers, so it is seen back",
+        nsB.Comms.peers[aKey] ~= nil)
+  check("...carrying its version, not a placeholder",
+        nsB.Comms.peers[aKey] and nsB.Comms.peers[aKey].version == nsA.Version(),
+        nsB.Comms.peers[aKey] and tostring(nsB.Comms.peers[aKey].version))
+
+  -- ADDRESSED, NOT BROADCAST. Twenty installers answering one returning client
+  -- must cost that client twenty small messages, never the raid twenty
+  -- broadcasts.
+  local addressed, broadcast = 0, 0
+  for i = before + 1, #wireLog do
+    if wireLog[i].channel == "WHISPER" then addressed = addressed + 1
+    else broadcast = broadcast + 1 end
+  end
+  check("the answer is addressed to one player", addressed > 0, addressed)
+  check("...and the only broadcast was the original announcement",
+        broadcast == 1, broadcast)
+
+  -- Identity rides on the GEAR that goes with the reply, which is what lets an
+  -- ad-hoc raider be described at all.
+  check("the answer brings the answerer's identity with it",
+        nsB.Comms.identity[aKey] ~= nil)
+
+  -- A second HELLO from the same peer inside the window is NOT answered again:
+  -- two clients that both consider the other new must not trade greetings.
+  local quiet = #wireLog
+  stub.Use(B)
+  nsB.Comms.peers[aKey] = nil          -- pretend we forgot them again
+  nsA.Comms.peers[bKey] = nil
+  nsB.Comms.Announce(true)
+  pump(B, 2000); pump(A, 2000); pump(B, 2000)
+  local replies = 0
+  for i = quiet + 1, #wireLog do
+    if wireLog[i].channel == "WHISPER" then replies = replies + 1 end
+  end
+  check("a repeat announcement inside the window is not answered again",
+        replies == 0, replies)
+
+  _G.time = realTime
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+header("gear self-reporting starts ON ITS OWN")
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- The only trigger used to be PLAYER_EQUIPMENT_CHANGED, so a client that logged
+-- in already dressed — every client, every raid night — reported nothing until
+-- it happened to swap a piece. Measured live in Session 249: "Reporting live:
+-- 0 of 17" with two installers in the group, the runner's own row among the
+-- missing, and the roster scanner inspecting people whose own client could have
+-- answered for free.
+
+do
+  stub.Use(A)
+  check("comms can announce gear without an equipment change",
+        type(nsA.Comms.AnnounceGear) == "function")
+
+  local sent = nsA.Comms.AnnounceGear(true)
+  check("...and doing so sends something", sent ~= nil, sent)
+  check("...while a second one straight after is rate-limited, like HELLO",
+        select(2, nsA.Comms.AnnounceGear()) == "too soon")
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+header("the runner computes, everyone DISPLAYS")
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Data Contract §4, settled and unimplemented until Session 249: the runner's
+-- ranking was received, stored, and then ignored, because the panel called
+-- RankRaiders and recomputed everything locally. Comms.AuthoritativeRanking had
+-- no callers at all. Every client scoring for itself is precisely the
+-- divergence the rule exists to prevent — clients hear different subsets of
+-- GEAR self-reports, so two panels can order one drop differently.
+
+do
+  stub.Use(A)
+  nsA.Comms.ClaimRunner()
+  pump(A, 2000); pump(B, 2000)
+
+  local data = _G.HoDLootAdvisorData
+  local chestId
+  for id, it in pairs(data.items) do
+    if it.slot == "CHEST" then chestId = id break end
+  end
+
+  local ranked, all, meta = nsA.Loot.RankRaiders(chestId, { difficulty = "h" })
+  check("the fixture ranks somebody for this item", ranked and #ranked > 0, ranked and #ranked)
+
+  stub.Use(B); nsB.Comms.rankings[chestId] = nil
+  stub.Use(A)
+  nsA.Comms.BroadcastDrops(chestId, ranked, meta)
+  pump(A, 5000); pump(B, 5000)
+
+  local rows, from, wireMeta = nsB.Comms.AuthoritativeRanking(chestId)
+  check("B received it", rows ~= nil and #rows == #ranked, rows and #rows)
+
+  -- ⚠️ THE FOURTH FIELD IS THE ILVL GAIN, NOT THE SCORE. It used to carry
+  -- result.ilvl_delta — the F1 score component — which, rendered under the
+  -- "+26 ilvl" heading, would have put a raw score on screen wearing an item
+  -- level's label. Core §7.7 forbids exactly that.
+  check("the wire carries the ilvl GAIN a row displays",
+        rows[1].gain == ranked[1].ilvlGain,
+        ("%s vs %s"):format(tostring(rows[1].gain), tostring(ranked[1].ilvlGain)))
+  check("...never the score component that used to sit in that field",
+        ranked[1].result.ilvl_delta == nil or rows[1].gain ~= ranked[1].result.ilvl_delta
+          or ranked[1].ilvlGain == ranked[1].result.ilvl_delta)
+  check("...the class, so the receiver colours the name identically",
+        rows[1].class == ranked[1].class, tostring(rows[1].class))
+  check("...and the counts behind 'N of M raiders can use it'",
+        wireMeta and wireMeta.usable == #ranked and wireMeta.total == #all,
+        wireMeta and ("%s of %s"):format(tostring(wireMeta.usable), tostring(wireMeta.total)))
+
+  -- Grade and BIS travel RAW so ns.QualityTag renders them the same on both
+  -- screens, rather than a pre-rendered tag that could drift.
+  local graded, gradedRow
+  for i, r in ipairs(ranked) do
+    if r.quality and (r.quality.grade or r.quality.bis) then graded, gradedRow = rows[i], r break end
+  end
+  if graded then
+    check("a graded row keeps its grade across the wire",
+          graded.grade == gradedRow.quality.grade and graded.bis == gradedRow.quality.bis,
+          tostring(graded.grade))
+    check("...and renders through the same tag function on both sides",
+          nsB.QualityTag({ grade = graded.grade, bis = graded.bis })
+            == nsA.QualityTag(gradedRow.quality))
+  end
+
+  -- THE POINT OF ALL OF IT: what B's panel will actually draw.
+  stub.Use(B)
+  local shown, shownAll, shownMeta, runner = nsB.Loot.RankingFor(chestId)
+  check("B displays the RUNNER's ranking, not one it computed itself",
+        runner ~= nil, tostring(runner))
+  check("...attributed to them by name",
+        runner == nsA.Comms.Normalize(A.player.name), tostring(runner))
+  check("...with the same rows, in the same order",
+        #shown == #ranked and shown[1].name == ranked[1].name,
+        shown[1] and shown[1].name)
+  check("...carrying the badge the runner computed",
+        shown[1].result.badge == ranked[1].result.badge, tostring(shown[1].result.badge))
+  check("...and a gain the panel can render without any equipped state",
+        shown[1].ilvlGain == ranked[1].ilvlGain and shown[1].equipped == nil,
+        tostring(shown[1].ilvlGain))
+  check("...counted from the wire, since there is no local list to count",
+        shownAll == nil and shownMeta.total == #all, tostring(shownMeta.total))
+
+  -- The runner is the source and must never display a copy of its own message.
+  stub.Use(A)
+  local mine, mineAll, _, mineRunner = nsA.Loot.RankingFor(chestId, { difficulty = "h" })
+  check("the runner still computes locally", mineRunner == nil and mineAll ~= nil)
+  check("...and gets the same leader either way",
+        mine[1].name == ranked[1].name, mine[1] and mine[1].name)
+
+  -- With nothing received, a non-runner falls back to computing: a Boss-tab
+  -- item has no broadcast ranking and never will.
+  stub.Use(B)
+  nsB.Comms.rankings[chestId] = nil
+  local fallback, fallbackAll, _, none = nsB.Loot.RankingFor(chestId, { difficulty = "h" })
+  check("a non-runner with nothing received computes locally",
+        none == nil and fallbackAll ~= nil and #fallback > 0, #fallback)
+
+  -- ⚠️ LAST, BECAUSE IT CLEARS B's PAYLOAD. Most raiders never import anything;
+  -- they receive. A client holding the runner's ranking but no payload of its
+  -- own used to fall all the way back to "no raid night imported", because
+  -- every surface asked RankRaiders — which needs exactly the roster that the
+  -- received ranking made unnecessary.
+  stub.Use(B)
+  nsB.Comms.Handle(
+    nsB.Comms.Encode("DROPS", 1, 1, nsA.Comms.EncodeDrops(chestId, ranked, meta)),
+    "RAID", A.player.name)
+  nsB.Payload.Clear()
+  local noRoster = nsB.Loot.RankingFor(chestId)
+  check("a client with no roster of its own still shows the runner's ranking",
+        noRoster ~= nil and #noRoster == #ranked, noRoster and #noRoster)
+  local lines = nsB.Loot.ChatLines(chestId)
+  check("...and posts that list rather than 'no raid night imported'",
+        lines[2] ~= nil and lines[2]:find(ranked[1].name, 1, true) ~= nil,
+        lines[1])
+
+  -- The chat-frame summary is a display too — the one every raider sees on
+  -- every roll without opening anything.
+  local before = #stub.printed
+  local reported = nsB.Loot.ReportRanking(chestId, { limit = 5 })
+  local said = table.concat(stub.printed, "\n", before + 1, #stub.printed)
+  check("the roll summary reports the runner's ranking as well",
+        reported == true and said:find(ranked[1].name, 1, true) ~= nil,
+        said ~= "" and said:sub(1, 90) or "nothing printed")
 end
 
 -- ── Result ──────────────────────────────────────────────────────────────────

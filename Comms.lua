@@ -105,6 +105,17 @@ local CLAIM_TTL = 8 * 3600
 local CLAIM_HELLO_INTERVAL = 30
 local lastClaimHello = 0
 
+-- Gear self-reports (provenance tier 1) are rate-limited on the same reasoning
+-- as HELLO: the events that prompt one arrive in bursts.
+local GEAR_INTERVAL = 30
+
+-- How long before we will answer the SAME peer's HELLO again. A reply exists to
+-- close the join race, not to hold a conversation, so one per peer per minute is
+-- already generous — and it is what stops two clients trading greetings if both
+-- ever consider the other new at once.
+local HELLO_REPLY_INTERVAL = 60
+local repliedHello = {}
+
 Comms.TYPES = {
   HELLO      = true,   -- any → all: presence + version
   WANT       = true,   -- any → runner: send me the current raid payload
@@ -163,7 +174,7 @@ Comms.identity = {}
 local warnedVersion = {}
 
 local queue, draining, interval = {}, false, BASE_INTERVAL
-local lastHello, lastWant = 0, 0
+local lastHello, lastWant, lastGear = 0, 0, 0
 
 --- Everything this file cannot verify about itself. A comms layer fails
 --- invisibly by design — a dropped chunk looks exactly like a quiet raid — so
@@ -234,16 +245,23 @@ function Comms.Channel()
   if instanceCategory and IsInGroup then
     local ok, inInstanceGroup = pcall(IsInGroup, instanceCategory)
     why.instanceCall, why.instanceGroup = ok, inInstanceGroup
-    if ok and inInstanceGroup then
-      why.chose = "INSTANCE_CHAT"
-      return "INSTANCE_CHAT"
-    end
+    if ok and inInstanceGroup then why.chose = "INSTANCE_CHAT" end
   end
 
+  -- Recorded on EVERY path, including the instance one. These are what a
+  -- post-mortem compares against: "it chose INSTANCE_CHAT" is not an answer
+  -- without the raid/party facts that were true at the same moment.
   why.inRaid = IsInRaid and IsInRaid() or false
   why.inGroup = IsInGroup and IsInGroup() or false
 
-  if why.inRaid then why.chose = "RAID" end
+  -- ⚠️ NO EARLY RETURN ABOVE THIS. The instance branch used to return the
+  -- moment it decided, which sat ABOVE the logging block below — so the one
+  -- channel decision the instrumentation exists for was the only one never
+  -- recorded. A live LFG group reported INSTANCE_CHAT twice through
+  -- /la comms while the SavedVariables log held zero INSTANCE_CHAT entries
+  -- (Session 249), and loggedChannel was never updated either, so the trip
+  -- back to PARTY did not log a change worth seeing.
+  if not why.chose and why.inRaid then why.chose = "RAID" end
   if not why.chose and why.inGroup then why.chose = "PARTY" end
 
   -- Logged ON CHANGE only. The channel is consulted on every send, so logging
@@ -682,41 +700,82 @@ end
 --- partial install each client hears a different subset of GEAR self-reports,
 --- so scoring independently produces slightly different orderings depending on
 --- who you happened to hear from. One client computes; the result is small.
-function Comms.EncodeDrops(itemID, rows)
-  local parts = { tostring(itemID) }
+--- The runner's computed ranking, on the wire.
+---
+--- ⚠️ IT CARRIES WHAT A ROW DISPLAYS, NOT WHAT SCORED IT. The first version
+--- sent result.ilvl_delta, which is the F1 SCORE COMPONENT (0-40 points) and
+--- not the "+26 ilvl" the panel shows — displaying it would have put a score on
+--- screen wearing an item level's label, which Core §7.7 forbids outright. The
+--- fourth field is now the ilvl GAIN. Nothing read the old field (see
+--- Loot.RankingFor for why), so repurposing it costs no compatibility.
+---
+--- GRADE AND BIS TRAVEL RAW rather than as the rendered tag, so the receiver
+--- runs the same ns.QualityTag over them and cannot format them differently.
+--- FIELDS ARE APPEND-ONLY: a decoder reading a longer record ignores the tail
+--- and a decoder reading a shorter one gets nils, so widening this never needs
+--- a protocol bump.
+function Comms.EncodeDrops(itemID, rows, meta)
+  local candidateIlvl = (meta and meta.ilvl) or 0
+  -- The header answers "N of M raiders can use it", which the receiver cannot
+  -- work out from a list that only contains the ones who can.
+  local parts = { table.concat({
+    tostring(itemID),
+    tostring(#(rows or {})),
+    tostring((meta and meta.total) or ""),
+  }, ",") }
   for _, row in ipairs(rows or {}) do
+    local q = row.quality
     parts[#parts + 1] = table.concat({
       escapeField(row.name or "?"),
       escapeField((row.result and row.result.badge) or ""),
       tostring(row.gap or ""),
-      tostring((row.result and row.result.ilvl_delta) or ""),
+      tostring(candidateIlvl - ((row.equipped and row.equipped.ilvl) or 0)),
       tostring(row.pr or ""),
+      escapeField(row.class or ""),
+      escapeField((q and q.grade) or ""),
+      escapeField((q and q.bis) or ""),
+      row.adhoc and "1" or "",
     }, ",")
   end
   return table.concat(parts, ";")
 end
 
+local function splitFields(record)
+  local fields = {}
+  for field in (record .. ","):gmatch("([^,]*),") do fields[#fields + 1] = field end
+  return fields
+end
+
+--- Returns itemID, rows, meta. meta carries the counts behind "N of M raiders
+--- can use it"; a header from an older build is a bare item id and yields no
+--- counts rather than wrong ones.
 function Comms.DecodeDrops(body)
   local records = {}
   for record in tostring(body or ""):gmatch("[^;]+") do
     records[#records + 1] = record
   end
-  local itemID = tonumber(records[1])
+  local header = splitFields(records[1] or "")
+  local itemID = tonumber(header[1])
   if not itemID then return nil, "no item id" end
 
   local rows = {}
   for i = 2, #records do
-    local fields = {}
-    for field in (records[i] .. ","):gmatch("([^,]*),") do fields[#fields + 1] = field end
+    local fields = splitFields(records[i])
     rows[#rows + 1] = {
       name  = fields[1],
       badge = (fields[2] ~= "" and fields[2]) or nil,
       gap   = tonumber(fields[3]),
-      delta = tonumber(fields[4]),
+      gain  = tonumber(fields[4]),
       pr    = tonumber(fields[5]),
+      class = (fields[6] ~= "" and fields[6]) or nil,
+      grade = (fields[7] ~= "" and fields[7]) or nil,
+      bis   = (fields[8] ~= "" and fields[8]) or nil,
+      -- Carried so a received list still answers "who is that" about an alt,
+      -- a trial or a pug. The panel marks them with an asterisk.
+      adhoc = fields[9] == "1",
     }
   end
-  return itemID, rows
+  return itemID, rows, { usable = tonumber(header[2]), total = tonumber(header[3]) }
 end
 
 -- ---------------------------------------------------------------------------
@@ -725,6 +784,21 @@ end
 
 local handlers = {}
 
+--- Someone announced themselves.
+---
+--- ⚠️ AND WE ANSWER, which the first build did not. HELLO was fire-and-forget,
+--- so a client only ever learned about people who announced AFTER it started
+--- listening — and the two moments that matter both fall outside that window.
+--- At group formation the inviter's HELLO goes out before the joiner is on the
+--- channel, and HELLO_INTERVAL then blocks the retry; after a /reload the
+--- returning client has an empty peer table and nobody has any reason to speak
+--- again. Both were seen live in Session 249: two clients each holding the
+--- other's roster while one reported "nobody else has announced" all evening.
+---
+--- The reply is ADDRESSED TO THE SENDER, so twenty installers answering one
+--- returning client costs twenty small messages to that client rather than
+--- twenty broadcasts to the raid. Only NEW peers are answered, and only once
+--- per HELLO_REPLY_INTERVAL, so a reload storm cannot compound.
 handlers.HELLO = function(body, sender)
   local who = normalize(sender)
   if not who then return end
@@ -733,6 +807,20 @@ handlers.HELLO = function(body, sender)
   if not known and ns.Diagnostics then
     ns.Diagnostics.Note("commsPeer", { who = who, version = body })
   end
+  if known or Comms.IsSelf(sender) then return end
+
+  local now = time()
+  if (now - (repliedHello[who] or 0)) < HELLO_REPLY_INTERVAL then return end
+  repliedHello[who] = now
+
+  Comms.Send("HELLO", ns.Version(), "WHISPER", sender)
+
+  -- Our gear goes with it. They have just arrived or just reloaded, so whatever
+  -- we broadcast earlier they either never received or have already lost —
+  -- their view of us falls back to the site snapshot otherwise, which is the
+  -- provenance inversion tier 1 exists to prevent.
+  local gear = Comms.EncodeGear()
+  if gear ~= "" then Comms.Send("GEAR", gear, "WHISPER", sender) end
 end
 
 handlers.WANT = function(body, sender)
@@ -913,9 +1001,9 @@ handlers.DROPS = function(body, sender)
   -- Only the runner's ranking is authoritative, and taking one from anyone else
   -- would let any installer reorder everybody's panel.
   if not Comms.RunnerIs(sender) then return end
-  local itemID, rows = Comms.DecodeDrops(body)
+  local itemID, rows, meta = Comms.DecodeDrops(body)
   if not itemID then return end
-  Comms.rankings[itemID] = { rows = rows, at = time(), from = normalize(sender) }
+  Comms.rankings[itemID] = { rows = rows, meta = meta, at = time(), from = normalize(sender) }
   if ns.Panel and ns.Panel.Refresh then pcall(ns.Panel.Refresh) end
 end
 
@@ -1145,6 +1233,23 @@ function Comms.BroadcastRoster()
   return Comms.Send("ROSTER", raw)
 end
 
+--- Broadcast our gear because the situation changed, rather than because we
+--- equipped something.
+---
+--- ⚠️ WITHOUT THIS, TIER 1 NEVER STARTS. The only trigger used to be
+--- PLAYER_EQUIPMENT_CHANGED, so a client that logged in already dressed — which
+--- is every client, every raid night — reported nothing until it happened to
+--- swap a piece. Measured live in Session 249: "Reporting live: 0 of 17" with
+--- two installers in the group, including the runner's own row, and the roster
+--- scanner inspecting people whose own client could have answered for free.
+function Comms.AnnounceGear(force)
+  local now = time()
+  if not force and (now - lastGear) < GEAR_INTERVAL then return nil, "too soon" end
+  local chunks, err = Comms.BroadcastGear()
+  if chunks then lastGear = now end
+  return chunks, err
+end
+
 --- Tell everyone what we are actually wearing (provenance tier 1). This is the
 --- personal reason to install the addon: your own row stops depending on how
 --- stale the site snapshot was.
@@ -1155,10 +1260,10 @@ function Comms.BroadcastGear()
 end
 
 --- Push a computed ranking. Runner only — see EncodeDrops.
-function Comms.BroadcastDrops(itemID, rows)
+function Comms.BroadcastDrops(itemID, rows, meta)
   if not Comms.IsRunner() then return nil, "not the runner" end
   if not rows or #rows == 0 then return nil, "nothing to send" end
-  return Comms.Send("DROPS", Comms.EncodeDrops(itemID, rows))
+  return Comms.Send("DROPS", Comms.EncodeDrops(itemID, rows, meta))
 end
 
 --- The runner's ranking for an item, if one arrived and is still fresh.
@@ -1168,7 +1273,7 @@ function Comms.AuthoritativeRanking(itemID, maxAge)
   local entry = Comms.rankings[itemID]
   if not entry then return nil end
   if (time() - entry.at) > (maxAge or 900) then return nil end
-  return entry.rows, entry.from
+  return entry.rows, entry.from, entry.meta
 end
 
 -- ---------------------------------------------------------------------------
@@ -1289,6 +1394,9 @@ function Comms.RunnerReport()
   local runner = Comms.RunnerName()
   local me = normalize(Comms.PlayerName())
 
+  local guildRun, guildMates, groupSize = false, 0, 0
+  if ns.IsGuildRun then guildRun, guildMates, groupSize = ns.IsGuildRun() end
+
   return {
     -- Who is running loot, and how we know.
     runner       = runner,
@@ -1325,9 +1433,14 @@ function Comms.RunnerReport()
     -- different facts, and reporting only the first is how "On" comes to mean
     -- nothing. Both are carried so the panel can say which.
     autoPost     = (ns.Settings and ns.Settings.Get("autoPost")) and true or false,
-    guildRun     = select(1, ns.IsGuildRun and ns.IsGuildRun()),
-    guildMates   = select(2, ns.IsGuildRun and ns.IsGuildRun()),
-    groupSize    = select(3, ns.IsGuildRun and ns.IsGuildRun()),
+    -- ⚠️ CAPTURED FROM ONE CALL. `select(2, fn and fn())` collapses the call to
+    -- a SINGLE value — Lua adjusts the right side of `and` to one result — so
+    -- guildMates and groupSize were always nil and the panel rendered them as
+    -- "0 of 0 here are guildmates" beside a group it had just correctly
+    -- identified as a guild run (Session 249).
+    guildRun     = guildRun,
+    guildMates   = guildMates,
+    groupSize    = groupSize,
 
     peers        = Comms.PeerList(),
     liveGear     = gear and gear.reporting or live,
@@ -1691,6 +1804,7 @@ function Comms.Start()
   frame:RegisterEvent("CHAT_MSG_ADDON")
   frame:RegisterEvent("GROUP_ROSTER_UPDATE")
   frame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
+  frame:RegisterEvent("PLAYER_ENTERING_WORLD")
   frame:SetScript("OnEvent", function(_, event, ...)
     if event == "CHAT_MSG_ADDON" then
       local prefix, text, channel, sender = ...
@@ -1717,8 +1831,23 @@ function Comms.Start()
         end
       end
 
+      -- Our own equipped state, for the same reason we announce at all: the
+      -- group we just joined has never heard it, and nothing else will prompt
+      -- us until we happen to change a piece of gear.
+      Comms.AnnounceGear()
+
       -- No payload and we are in a group: this is the late-joiner case.
       if not ns.Payload.Current() then Comms.RequestPayload() end
+      return
+    end
+
+    if event == "PLAYER_ENTERING_WORLD" then
+      -- A /reload lands here, and it is the case GROUP_ROSTER_UPDATE cannot be
+      -- relied on for: the group did not change, so nothing else re-announces
+      -- us or our gear to a raid that is already formed.
+      if not Comms.Channel() then return end
+      Comms.Announce(true)
+      Comms.AnnounceGear(true)
       return
     end
 

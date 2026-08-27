@@ -1014,7 +1014,9 @@ local function renderStrip(entries)
 end
 
 local function renderRanking(itemID)
-  local ranked, all, meta = ns.Loot.RankRaiders(itemID)
+  -- RankingFor, not RankRaiders: when the runner has broadcast a ranking for
+  -- this item, theirs is the one everyone shows. See Loot.RankingFor.
+  local ranked, all, meta, fromRunner = ns.Loot.RankingFor(itemID)
   setHeaders("Raider", "Upgrade", "Gain", "Priority")
 
   if not ranked then
@@ -1037,10 +1039,18 @@ local function renderRanking(itemID)
   -- A raider who is not reporting is still ranked, from the snapshot, and is
   -- never silently dropped — but the runner is the person who needs to know how
   -- much of this list is live and how much is a snapshot.
-  local sub = ("%d of %d raiders can use it"):format(#ranked, #all)
-  local gear = ns.GearReportingSummary()
-  if gear and gear.reporting > 0 then
-    sub = sub .. ("  ·  %d of %d reporting live gear"):format(gear.reporting, gear.total)
+  local usable = meta.usable or #ranked
+  local sub = meta.total and ("%d of %d raiders can use it"):format(usable, meta.total)
+    or ("%d raiders can use it"):format(usable)
+  if fromRunner then
+    -- Named, because "why does my list differ from what I would have worked
+    -- out" has exactly one answer and it should not be a mystery.
+    sub = sub .. ("  ·  ranked by %s"):format(fromRunner)
+  else
+    local gear = ns.GearReportingSummary()
+    if gear and gear.reporting > 0 then
+      sub = sub .. ("  ·  %d of %d reporting live gear"):format(gear.reporting, gear.total)
+    end
   end
   frame.sub:SetText(sub)
 
@@ -1095,7 +1105,10 @@ local function renderRanking(itemID)
     end
     row.gap:SetTextColor(unpack(MUTED))
 
-    local gain = (meta.ilvl or 0) - (r.equipped and r.equipped.ilvl or 0)
+    -- One field on both paths (Loot.RankRaiders sets it, the wire carries it).
+    -- Subtracting equipped ilvl here would read 0 for a received row and render
+    -- as the item's own level rather than a gain.
+    local gain = r.ilvlGain or 0
     row.ilvl:SetText(gain > 0 and ("+%d ilvl"):format(gain) or "")
     row.ilvl:SetTextColor(unpack(MUTED))
 
