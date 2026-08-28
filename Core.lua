@@ -688,6 +688,42 @@ function ns.LongAge(days)
   return ("%d months ago"):format(math.floor(days / 30))
 end
 
+-- ---------------------------------------------------------------------------
+-- Is this thing even gear? (Session 250)
+-- ---------------------------------------------------------------------------
+--
+-- The Encounter Journal lists EVERYTHING an encounter can drop, which in 12.1
+-- includes profession patterns and housing decor. Those arrived on the Full Loot
+-- Table as UNSCORED rows — the addon correctly saying it had no opinion about a
+-- leatherworking recipe, at the cost of two lines of noise on a list whose whole
+-- job is "who is this for".
+--
+-- ⚠️ THIS MUST NOT BECOME "HIDE WHAT WE DO NOT RECOGNISE". Data Contract §0 is
+-- explicit that an item we never imported still has to appear, named and flagged
+-- as unscored, because the alternative is a real upgrade going invisible. So the
+-- test is a FACT ABOUT THE ITEM — the game's own class — and never our own
+-- ignorance of it. An armour piece we have never seen still shows, unscored.
+--
+-- ⚠️ AND TIER TOKENS ARE "MISCELLANEOUS" TO BLIZZARD, not Armor. Filtering on
+-- class alone would drop every tier token off the list, which is the opposite of
+-- helpful — so anything in OUR payload is gear by definition, tokens included.
+-- That clause has to come first.
+local GEAR_CLASS = { [2] = true, [4] = true }   -- 2 Weapon, 4 Armor
+
+--- itemID plus our payload record (may be nil). Returns true when the row
+--- belongs on a loot list.
+---
+--- FAILS OPEN. With no way to ask the client, everything is gear: an extra row
+--- is visibly wrong and fixable, a missing one is invisible and costs somebody
+--- an upgrade. Same convention as the eligibility fail-open.
+function ns.IsGearItem(itemID, rec)
+  if rec then return true end
+  if type(GetItemInfoInstant) ~= "function" then return true end
+  local ok, _, _, _, _, _, classID = pcall(GetItemInfoInstant, itemID)
+  if not ok or classID == nil then return true end
+  return GEAR_CLASS[classID] == true
+end
+
 --- Which list the Loot tab should open on: "drops" or "table".
 ---
 --- IN A RAID, WHAT DROPPED IS THE QUESTION; anywhere else it is what CAN drop.

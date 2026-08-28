@@ -2304,6 +2304,35 @@ header("Today's drops and the winner lookup (what the Loot tab reads)")
   end)())
   check("the cap is honoured", #ns.Record.RecentDrops(2) == 2)
 
+  -- ⚠️ THE BOSS FILTER. Without it the Loot tab showed every drop of the night
+  -- under whichever boss portrait was selected, so clicking the strip changed
+  -- nothing and the panel looked stuck on the last kill.
+  db.loot = { sessions = { { date = today, items = {
+    { itemID = 11, itemName = "From boss A", encounterID = 2888 },
+    { itemID = 22, itemName = "From boss B", encounterID = 2894 },
+    { itemID = 33, itemName = "Also boss A", encounterID = 2888, winner = "Vörnix" },
+  } } } }
+  check("no boss id returns everything", #ns.Record.RecentDrops() == 3)
+  check("a boss id returns only that boss's drops",
+        #ns.Record.RecentDrops(nil, 2888) == 2, #ns.Record.RecentDrops(nil, 2888))
+  check("...and the other boss's, separately",
+        #ns.Record.RecentDrops(nil, 2894) == 1)
+  -- A boss nobody killed tonight must come back EMPTY: showing another boss's
+  -- loot under its portrait is worse than showing none.
+  check("a boss with no kill tonight returns nothing",
+        #ns.Record.RecentDrops(nil, 2871) == 0, #ns.Record.RecentDrops(nil, 2871))
+
+  db.loot = { sessions = {
+    { date = "1999-01-01", items = { { itemID = 111, itemName = "Ancient", winner = "Nobody" } } },
+    { date = today, items = {
+        { itemID = 222, itemName = "First drop",  winner = "Vörnix" },
+        { itemID = 333, itemName = "Second drop" },
+    } },
+    { date = today, items = {
+        { itemID = 444, itemName = "Third drop", winner = "Dåmir" },
+    } },
+  } }
+
   check("a settled item reports its winner", ns.Record.WinnerFor(444) == "Dåmir",
         tostring(ns.Record.WinnerFor(444)))
   check("...across more than one run today", ns.Record.WinnerFor(222) == "Vörnix")
@@ -2450,6 +2479,93 @@ header("Which list the Loot tab opens on")
   check("out in the world it opens on the Full Loot Table",
         ns.DefaultLootSource() == "table", ns.DefaultLootSource())
   ns.CurrentContentScope = saved
+end)()
+
+-- ── Auto-open survives a failure further down the roll handler ──────────────
+--
+-- ⚠️ THE PANEL USED TO OPEN LAST, behind scoring, chat reporting, the ranking,
+-- the recorder and a comms broadcast — with the whole handler inside a pcall, so
+-- a throw anywhere in that chain silently took the panel with it. The symptom is
+-- a window that opens on some kills and not others for reasons unrelated to the
+-- kill, which is exactly what a raid reported and what no amount of reasoning
+-- about difficulty was going to explain.
+
+header("Patterns and housing decor are not loot — but unknown GEAR still is")
+
+;(function()
+  stub.itemClass = {
+    [900001] = 4,   -- an armour piece we have never imported
+    [900002] = 2,   -- a weapon we have never imported
+    [900003] = 9,   -- Recipe — "Pattern: Adorned Fang"
+    [900004] = 15,  -- Miscellaneous — housing decor
+    [900005] = 0,   -- Consumable
+  }
+
+  -- ⚠️ THE RULE THIS MUST NOT BREAK (Data Contract §0): an item we never
+  -- imported still appears, so a real upgrade can never go invisible because
+  -- our table was incomplete. The test is the GAME'S item class, never our own
+  -- ignorance.
+  check("an unknown ARMOUR piece is still gear", ns.IsGearItem(900001, nil))
+  check("an unknown WEAPON is still gear", ns.IsGearItem(900002, nil))
+  check("a profession pattern is not", ns.IsGearItem(900003, nil) == false)
+  check("housing decor is not", ns.IsGearItem(900004, nil) == false)
+  check("a consumable is not", ns.IsGearItem(900005, nil) == false)
+
+  -- ⚠️ TIER TOKENS ARE "MISCELLANEOUS" TO BLIZZARD. Filtering on class alone
+  -- would drop every tier token off the loot table, which is the opposite of
+  -- helpful — so anything in OUR payload counts as gear whatever its class.
+  check("a tier token survives despite being Miscellaneous",
+        ns.IsGearItem(900004, { name = "Venomwoven Idol", slot = "TOKEN" }))
+
+  -- FAILS OPEN: an extra row is visibly wrong and fixable; a missing one is
+  -- invisible and costs somebody an upgrade.
+  local savedInstant = _G.GetItemInfoInstant
+  _G.GetItemInfoInstant = nil
+  check("with no way to ask the client, everything counts as gear",
+        ns.IsGearItem(900003, nil))
+  _G.GetItemInfoInstant = function() error("client refused") end
+  check("...and an erroring client does the same", ns.IsGearItem(900003, nil))
+  _G.GetItemInfoInstant = savedInstant
+
+  stub.itemClass = nil
+end)()
+
+header("Auto-open fires even when the rest of the roll handler breaks")
+
+;(function()
+  local savedScore, savedPanel = ns.Loot.ScoreItem, ns.Panel
+  local savedGet = ns.Settings.Get
+
+  local shown = 0
+  ns.Panel = { Show = function() shown = shown + 1 end, Refresh = function() end }
+  ns.Settings.Get = function(key)
+    if key == "autoOpen" then return true end
+    return savedGet(key)
+  end
+
+  -- Everything after the open throws.
+  ns.Loot.ScoreItem = function() error("deliberate failure below the open") end
+
+  local ok = pcall(ns.Loot.HandleRoll, { itemID = 270160, name = "Anything" })
+  check("the handler still fails loudly rather than swallowing the error", not ok)
+  check("...and the panel opened ANYWAY, before the failure", shown == 1, shown)
+
+  -- And the ordinary path still opens exactly once, not twice.
+  ns.Loot.ScoreItem = savedScore
+  shown = 0
+  pcall(ns.Loot.HandleRoll, { itemID = 270160, name = "Anything" })
+  check("a healthy roll opens it exactly once", shown == 1, shown)
+
+  -- With the setting off it must stay shut — nobody is opted in by an update.
+  ns.Settings.Get = function(key)
+    if key == "autoOpen" then return false end
+    return savedGet(key)
+  end
+  shown = 0
+  pcall(ns.Loot.HandleRoll, { itemID = 270160, name = "Anything" })
+  check("with the setting off it never opens", shown == 0, shown)
+
+  ns.Loot.ScoreItem, ns.Panel, ns.Settings.Get = savedScore, savedPanel, savedGet
 end)()
 
 -- ── Every file compiles under the Lua the GAME runs ─────────────────────────

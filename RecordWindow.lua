@@ -728,7 +728,20 @@ local function refreshItems()
         row.expand:SetText("")
         row.left:SetText("      " .. r.name)
         row.left:SetTextColor(unpack(roll.isWinner and GREEN or MUTED))
-        row.mid:SetText(roll.rollType or "?")
+        -- ⚠️ THE RAW STATE RIDES ALONGSIDE THE LABEL, deliberately. Our
+        -- ROLL_STATE map is INHERITED from HoDLootTracker and has never been
+        -- verified against a real group-loot raid; the first night of evidence
+        -- (Session 250) recorded state 0 on 125 rolls that all carried a real
+        -- roll VALUE, which "noroll" cannot mean. Transmog never appears at all.
+        --
+        -- The map is NOT being changed on that — the standing rule is to wait
+        -- for evidence rather than guess, and one night does not yet say what 0,
+        -- 1 and 2 ARE. What this does is put the number where a human can read
+        -- it beside the game's own roll window, so the next raid decodes it
+        -- without anyone parsing a SavedVariables file.
+        local label = roll.rollType or "?"
+        if roll.state ~= nil then label = ("%s [%d]"):format(label, roll.state) end
+        row.mid:SetText(label)
         row.mid:SetTextColor(unpack(ROLL_COLOR[roll.rollType or ""] or MUTED))
         -- 0 means "did not roll", which is information, not a zero. Blank it
         -- rather than print a number that reads as a terrible roll.

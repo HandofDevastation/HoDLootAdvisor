@@ -112,6 +112,12 @@ local FOOT_Y, FOOT_H = 509, 51
 -- 380px pane. It gets its own row set for that reason — recycling one row across
 -- two geometries means every render re-points every fontstring, which is how the
 -- old panel ended up needing resetRow discipline in the first place.
+-- Difficulty dropdown, on the tab row's right (Loot tab only — the Standings
+-- design puts the season name in that space instead).
+local DIFF_X, DIFF_Y, DIFF_W, DIFF_H = 500, 60, 100, 24
+local DIFF_CHOICES = { "AUTO", "NORMAL", "HEROIC", "MYTHIC" }
+local DIFF_LABEL = { AUTO = "Auto", NORMAL = "Normal", HEROIC = "Heroic", MYTHIC = "Mythic" }
+
 local SEASON_R = 583                 -- season label, right-aligned, on the tab row
 local RAIL_X = 20                    -- the personal rail down the left
 local RAIL_BLOCK_Y = { 117, 213, 299, 395 }   -- Priority · Earned/Spent · Attendance · Last item
@@ -623,6 +629,77 @@ local function buildChrome()
 end
 
 local function buildLootControls()
+  -- ── Difficulty, on the tab row's right ────────────────────────────────────
+  -- Which difficulty's item levels EVERYTHING is scored against. It was a
+  -- cycling button on the old panel, dropped in the rebuild because no design
+  -- had it yet; Jason has since drawn it as a dropdown at x=500 on the tab row.
+  --
+  -- AUTO follows the raid you are standing in, which is right on a raid night
+  -- and useless in a city — hence the override. Without this control on screen
+  -- there was no way to tell WHICH difficulty a loot table was being shown for,
+  -- which is the complaint that brought it back.
+  frame.diff = ns.Style and ns.Style.Pill(frame, DIFF_W, DIFF_H, "")
+    or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  frame.diff:SetPoint("TOPLEFT", DIFF_X, -DIFF_Y)
+  if frame.diff.SetPillState then frame.diff:SetPillState(true) end
+
+  -- The caret. A dropdown that looks like a button gets clicked once and
+  -- abandoned; the design draws the affordance, so it is drawn.
+  frame.diffCaret = frame.diff:CreateTexture(nil, "OVERLAY")
+  frame.diffCaret:SetSize(9, 9)
+  frame.diffCaret:SetPoint("RIGHT", -8, -1)
+  frame.diffCaret:SetTexture("Interface\\ChatFrame\\ChatFrameExpandArrow")
+
+  frame.diffMenu = CreateFrame("Frame", nil, frame)
+  -- TOOLTIP strata so nothing the panel draws can land over the open list.
+  frame.diffMenu:SetFrameStrata("TOOLTIP")
+  frame.diffMenu:SetPoint("TOPLEFT", frame.diff, "BOTTOMLEFT", 0, -2)
+  frame.diffMenu:SetSize(DIFF_W, 4 + 4 * 20)
+  frame.diffMenu:EnableMouse(true)
+  frame.diffMenu:Hide()
+  if ns.Style then ns.Style.Surface(frame.diffMenu, ns.Style.COLOR.elevated, 0.98) end
+
+  -- ⚠️ NO FULL-SCREEN CLICK-CATCHER. The old dropdown had one for
+  -- click-outside-to-close and it silently ate every selection: only ONE frame
+  -- receives a click and a screen-covering button takes it. This closes on a
+  -- pick, on re-clicking its own button, and when the tab changes.
+  frame.diffItems = {}
+  for i, choice in ipairs(DIFF_CHOICES) do
+    local b = CreateFrame("Button", nil, frame.diffMenu)
+    b._hodStyled = true
+    b:SetSize(DIFF_W - 2, 20)
+    b:SetPoint("TOPLEFT", 1, -((i - 1) * 20) - 2)
+    b.hl = b:CreateTexture(nil, "BACKGROUND")
+    b.hl:SetAllPoints()
+    if ns.Style then b.hl:SetColorTexture(ns.Style.rgb(ns.Style.COLOR.purple)) end
+    b.hl:Hide()
+    b.label = at(text(b, "titleMed", "head", "text"), 8, 2, DIFF_W - 16)
+    b.label:SetText(DIFF_LABEL[choice] or choice)
+    b:SetScript("OnEnter", function(s) s.hl:Show() end)
+    b:SetScript("OnLeave", function(s) s.hl:Hide() end)
+    b:SetScript("OnClick", function()
+      frame.diffMenu:Hide()
+      if ns.Settings then ns.Settings.Set("difficulty", choice) end
+      state.sel, state.colScroll, state.rankScroll = 1, 0, 0
+      Panel.Refresh()
+    end)
+    frame.diffItems[i] = b
+  end
+
+  frame.diff:SetScript("OnClick", function()
+    if frame.diffMenu:IsShown() then frame.diffMenu:Hide()
+    else frame.diffMenu:Show(); frame.diffMenu:Raise() end
+  end)
+  frame.diff:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    GameTooltip:SetText("Difficulty", 1, 1, 1)
+    GameTooltip:AddLine("Which difficulty's item levels everything is scored against.",
+      0.8, 0.8, 0.8, true)
+    GameTooltip:AddLine("Auto follows the raid you are currently in.", 0.6, 0.6, 0.7, true)
+    GameTooltip:Show()
+  end)
+  frame.diff:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
   -- ── Boss context, left of the strip ───────────────────────────────────────
   frame.bossName = at(text(frame, "label", "head", "orange"), 21, CTX_Y, 200)
   frame.bossSub  = at(text(frame, "body", "small", "text"), 21, CTX_Y + 18, 200)
@@ -1093,7 +1170,12 @@ local function itemEntries()
   local out, seen = {}, {}
 
   if state.source == "drops" then
-    for _, d in ipairs(ns.Record and ns.Record.RecentDrops(40) or {}) do
+    -- SCOPED TO THE SELECTED BOSS. The strip is a selector on both lists, not
+    -- just the full table; without this it was inert here and the tab looked
+    -- frozen on whichever boss died last.
+    local bosses = bossList()
+    local boss = bosses[state.bossIndex]
+    for _, d in ipairs(ns.Record and ns.Record.RecentDrops(40, boss and boss.id) or {}) do
       if d.itemID and not seen[d.itemID] then
         seen[d.itemID] = true
         out[#out + 1] = {
@@ -1119,7 +1201,16 @@ local function itemEntries()
     -- the source would hide somebody else's upgrade.
     if ns.Journal then
       for _, j in ipairs(ns.Journal.CachedLoot(boss.id)) do
-        if not seen[j.itemID] then
+        -- ⚠️ NOT GEAR, NOT ON THE LIST. The journal enumerates profession
+        -- patterns and housing decor alongside the loot, and they arrived here
+        -- as UNSCORED rows — the addon truthfully having no opinion about a
+        -- leatherworking recipe, which is noise on a list that answers "who is
+        -- this for". ns.IsGearItem tests the GAME'S item class, never whether we
+        -- happen to recognise it, so an armour piece we never imported still
+        -- shows (Data Contract §0) and tier tokens are kept by the payload
+        -- clause despite Blizzard calling them Miscellaneous.
+        if not seen[j.itemID] and ns.IsGearItem(j.itemID, (data or {}).items
+             and data.items[j.itemID]) then
           seen[j.itemID] = true
           out[#out + 1] = {
             itemID = j.itemID, name = j.name, link = j.link,
@@ -1738,10 +1829,27 @@ local function renderRanking(itemID)
 
   -- Rows that do not fit are COUNTED, never silently cut off.
   local bits = {}
+  -- ⚠️ "CAN USE IT" WAS A MISLABEL. This count is raiders the item is an
+  -- UPGRADE for, not raiders who can equip it — the two differ by everyone it
+  -- fits and does not improve, which on a well-geared roster is most of them.
   local usable = (meta and meta.usable) or total
   bits[#bits + 1] = (meta and meta.total)
-    and ("%d of %d raiders can use it"):format(usable, meta.total)
-    or ("%d raiders can use it"):format(usable)
+    and ("%d of %d raiders gain from it"):format(usable, meta.total)
+    or ("%d raiders gain from it"):format(usable)
+
+  -- ⚠️ SAY WHY YOU ARE NOT IN THE LIST. The table holds only people the item
+  -- improves, so a viewer it does not improve simply is not there — which reads
+  -- as the addon having lost them rather than as an answer. The header says "No
+  -- Upgrade", but nobody connects the two without being told.
+  local listed = false
+  for _, r in ipairs(ranked) do
+    if (r.name or ""):lower() == me then listed = true end
+  end
+  if not listed and ns.Payload.Current() then
+    local S = ns.Style
+    bits[#bits + 1] = (S and S.code(S.COLOR.textDim) or "")
+      .. "you are not listed — no gain for you" .. "|r"
+  end
   if fromRunner then
     -- Named, because "why does my list differ from what I would have worked out"
     -- has exactly one answer and it should not be a mystery.
@@ -2281,6 +2389,32 @@ function Panel.Refresh()
   frame.standingsView:Hide()
   frame.instDrop:Hide()
   frame.encDrop:Hide()
+
+  -- The difficulty control belongs to the Loot tab; the Standings design puts
+  -- the season in that space. Closing the menu with it matters — a TOOLTIP-strata
+  -- list left open would hang over whichever tab you moved to.
+  frame.diff:SetShown(onLoot)
+  if not onLoot then frame.diffMenu:Hide() end
+  if onLoot then
+    local cur = ns.Settings and ns.Settings.Get("difficulty") or "AUTO"
+    if cur == "AUTO" then
+      -- AUTO SAYS WHAT IT RESOLVED TO. "Auto" alone leaves the actual question
+      -- — which difficulty am I looking at — unanswered, which is the complaint
+      -- that brought this control back.
+      local key = ns.DifficultyKey()
+      setLabel(frame.diff, ("Auto: %s"):format(
+        ({ n = "Normal", h = "Heroic", m = "Mythic" })[key] or "?"))
+    else
+      setLabel(frame.diff, DIFF_LABEL[cur] or cur)
+    end
+    for i, choice in ipairs(DIFF_CHOICES) do
+      local item = frame.diffItems[i]
+      if ns.Style then
+        item.label:SetTextColor(ns.Style.rgb(choice == cur
+          and ns.Style.COLOR.orange or ns.Style.COLOR.text))
+      end
+    end
+  end
 
   frame.season:SetShown(onStandings)
   frame.stDiv:SetShown(onStandings)

@@ -520,6 +520,23 @@ function stub.Install()
     end,
   }
 
+  -- ⚠️ A GLOBAL, not a C_Item member. GetItemInfoInstant is the SYNCHRONOUS
+  -- one: it answers from the item id alone with no cache involved, which is what
+  -- makes it usable for deciding whether a journal entry is even gear. Returns
+  -- itemID, itemType, itemSubType, itemEquipLoc, icon, classID, subclassID —
+  -- only classID (6th) is read by the addon.
+  --
+  -- stub.itemClass maps id -> classID so a test can sit a profession pattern (9)
+  -- or housing decor (15) beside a real armour piece (4). Anything not listed
+  -- answers 4, since nearly everything in the fixtures is gear.
+  _G.GetItemInfoInstant = function(idOrLink)
+    local itemID = tonumber(idOrLink)
+      or tonumber(tostring(idOrLink):match("|?H?item:(%d+)"))
+    if not itemID then return nil end
+    local classID = (stub.itemClass or {})[itemID] or 4
+    return itemID, "Armor", "Mail", "INVTYPE_CHEST", 0, classID, 3
+  end
+
   _G.GetInstanceInfo = function()
     -- The full 8 returns: the 4th is the difficulty NAME and the 8th the
     -- instance id, both of which land in the loot export's SESSION line.

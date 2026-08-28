@@ -1128,13 +1128,26 @@ end
 
 --- Today's drops, newest first. Each entry is the recorder's own, so it carries
 --- whatever the recorder knows — including a winner once the roll has settled.
-function Record.RecentDrops(limit)
+---
+--- `bossID` scopes it to ONE encounter, which is what the panel's boss strip
+--- selects. Every recorded drop carries the journal encounter id from
+--- ENCOUNTER_END, the same id space the emitted payload keys its bosses by, so
+--- this is a direct comparison and not a name match.
+---
+--- ⚠️ AN UNFILTERED LIST WAS THE BUG. The Loot tab showed every drop of the
+--- night whichever boss was selected, so clicking through the strip changed
+--- nothing and the panel looked stuck on the last kill. A boss you have not
+--- killed must come back EMPTY — that is a fact about tonight, and showing
+--- another boss's loot under its portrait is worse than showing none.
+function Record.RecentDrops(limit, bossID)
   local db = lootDB()
   local today = date("%Y-%m-%d")
   local out = {}
   for _, s in ipairs((db or {}).sessions or {}) do
     if s.date == today then
-      for _, e in ipairs(s.items or {}) do out[#out + 1] = e end
+      for _, e in ipairs(s.items or {}) do
+        if not bossID or e.encounterID == bossID then out[#out + 1] = e end
+      end
     end
   end
   -- Newest first. Entries within a run are appended in the order they were

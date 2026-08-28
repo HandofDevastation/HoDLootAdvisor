@@ -661,6 +661,27 @@ function Loot.HandleRoll(roll)
     return
   end
 
+  -- ⚠️ OPEN FIRST, SCORE AFTER. This used to be the LAST thing the handler did,
+  -- behind scoring, chat reporting, the ranking, the recorder and a comms
+  -- broadcast — and the whole handler runs inside a pcall, so a throw anywhere
+  -- in that chain silently took the panel with it. The symptom is a window that
+  -- opens on some kills and not others for reasons that have nothing to do with
+  -- the kill: a cold item cache, one unlucky item, an edge case in the roster.
+  --
+  -- Nothing above this line can fail: we have a roll and an item id. Opening
+  -- here means the setting does what it says regardless of what happens next,
+  -- and Panel.Refresh at the end still fills it in once the drop is recorded.
+  --
+  -- pcall'd on its own so the reverse is also true — a fault in the panel can
+  -- never break the scoring and recording path, which is the half that matters
+  -- when loot is actually on the line.
+  if ns.Panel and ns.Settings and ns.Settings.Get("autoOpen") then
+    local shown, err = pcall(ns.Panel.Show)
+    if not shown and ns.Diagnostics then
+      ns.Diagnostics.Note("panelShowError", tostring(err))
+    end
+  end
+
   local out = Loot.ScoreItem(roll.itemID, {
     itemLink   = roll.itemLink,
     difficulty = roll.difficulty,
@@ -713,12 +734,11 @@ function Loot.HandleRoll(roll)
     end
   end
 
-  if ns.Panel then
-    ns.Panel.Refresh()
-    -- Opening is OPT-IN and off by default. An addon that throws a window over
-    -- your screen mid-pull gets uninstalled before it proves anything.
-    if ns.Settings.Get("autoOpen") then ns.Panel.Show() end
-  end
+  -- Opening happened at the TOP of this function, before anything that can
+  -- fail. This just fills in what the drop added. Opening is OPT-IN and off by
+  -- default: an addon that throws a window over your screen mid-pull gets
+  -- uninstalled before it proves anything.
+  if ns.Panel then pcall(ns.Panel.Refresh) end
 
   return out
 end
