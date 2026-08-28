@@ -6,11 +6,11 @@
 ## SavedVariables: HoDLootAdvisorDB
 ## SavedVariablesPerCharacter: HoDLootAdvisorCharDB
 
-# ⚠️ FILL THIS IN AFTER CREATING THE CURSEFORGE PROJECT, uncommented, with the
-# numeric Project ID shown on the project's page. The packager reads it from
-# here to know what to upload to; without it the CurseForge step is skipped and
-# only the GitHub Release is cut. See .github/workflows/release.yml.
-# ## X-Curse-Project-ID: 000000
+# The CurseForge project the packager uploads to. Paired with the CF_API_TOKEN
+# repo secret; remove either one and the CurseForge step is simply skipped while
+# the GitHub Release still gets cut. See .github/workflows/release.yml for why
+# CurseForge exists here at all (WoWUp's GitHub update path is broken).
+## X-Curse-Project-ID: 1671489
 
 # Load order matters: the baked data table must exist before anything reads it,
 # and Scoring must be on the namespace before Loot drives it.
