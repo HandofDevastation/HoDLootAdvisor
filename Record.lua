@@ -1106,6 +1106,64 @@ function Record.Sessions(filter)
   return out
 end
 
+-- ---------------------------------------------------------------------------
+-- What has dropped TODAY (Session 250)
+-- ---------------------------------------------------------------------------
+--
+-- WHY THE PANEL READS THE RECORDER AND NOT Loot.recent. The in-memory list is
+-- built from roll events and is wiped by a /reload, so a raider who reloads
+-- mid-raid loses the whole night's drops off the Loot tab while the recorder's
+-- copy sits in SavedVariables untouched. Worse, the memory list never learns a
+-- WINNER — the roll event fires when the window opens, and who won arrives
+-- minutes later on a rescan that only the recorder is listening for.
+--
+-- So the drops list and "Won By" come from the same place, which is also the
+-- only place that can answer both.
+--
+-- ⚠️ TODAY, BY DATE, NOT "THE CURRENT RUN". A raid that crosses local midnight
+-- would split into two runs, and a strict current-run read would empty the tab
+-- at 00:00 while people are still in the instance. Date is what the recorder
+-- already keys a run on, so this matches what the Loot Log shows rather than
+-- introducing a second notion of "tonight".
+
+--- Today's drops, newest first. Each entry is the recorder's own, so it carries
+--- whatever the recorder knows — including a winner once the roll has settled.
+function Record.RecentDrops(limit)
+  local db = lootDB()
+  local today = date("%Y-%m-%d")
+  local out = {}
+  for _, s in ipairs((db or {}).sessions or {}) do
+    if s.date == today then
+      for _, e in ipairs(s.items or {}) do out[#out + 1] = e end
+    end
+  end
+  -- Newest first. Entries within a run are appended in the order they were
+  -- seen, so reversing is enough and there is no timestamp to sort on that
+  -- every path sets.
+  local rev = {}
+  for i = #out, 1, -1 do
+    rev[#rev + 1] = out[i]
+    if limit and #rev >= limit then break end
+  end
+  return rev
+end
+
+--- Who won this item today, or nil while the roll is still open.
+---
+--- nil IS A REAL ANSWER AND MUST NOT BE DRESSED UP. "Nobody has won it yet" and
+--- "we never found out" look identical from here, because nothing in the addon
+--- registers that a roll ENDED — only that one started. Callers show the absence
+--- rather than a countdown or a "pending" they cannot stand behind.
+function Record.WinnerFor(itemID)
+  if not itemID then return nil end
+  for _, e in ipairs(Record.RecentDrops()) do
+    if e.itemID == itemID and e.winner and e.winner ~= "" then
+      return e.winner
+    end
+  end
+  return nil
+end
+
 function Record.SetKind(index, kind)
   local db = lootDB()
   local s = db and db.sessions[index]

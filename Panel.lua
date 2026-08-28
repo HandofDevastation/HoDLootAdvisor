@@ -1,28 +1,38 @@
--- Panel.lua — the Loot Advisor panel (Arrangement A)
+-- Panel.lua — the Loot Advisor panel
 --
--- Layout is HoD_LootAddon_Experience.md §3 and §6:
+-- REBUILT IN SESSION 250 to Jason's Figma design. The old panel was six tabs
+-- over a horizontal chip strip; this is three tabs over a two-column reading
+-- surface:
 --
---   [ Drops | Boss | Me | Standings ]        tabs
---   ( chip )( chip )( chip )                 STRIP — one per item, YOUR badge
---   ────────────────────────────────────
---   1. Name      Major   -4   +42 ilvl  PR   DETAIL — one item, ranked
---   2. Name      Major   -7   +38 ilvl  PR
---   ────────────────────────────────────
---   You: 3rd of 18 · EP 1240 · GP 310        FOOTER — always your own row
+--   [ Loot | Standings | Runner ]                       tabs
+--   Boss name                     ( )( )( )( )( )( )    BOSS STRIP — portraits
+--   For You: 1 BIS | 2 Targets
+--   [Current Drops][Full Loot Table]  ┌──────────────────────────────────┐
+--   [Usable Only  ][All Loot       ]  │ Upgrade for You  Standing  EPGP  │
+--   ┌────────────────────┐            │ +17 ilvl | -16 behind | BIS      │
+--   │ Item name      * ◆ │            │ [icon] Item name      Won By:    │
+--   │ MAJOR • Chest,Plate│  <- the    │ RAIDER   UPGRADE  GAIN  PRIORITY │
+--   │ Item name          │   SELECTOR │ 1 Corvá  BIS Major  +26   4.122  │
+--   └────────────────────┘            └──────────────────────────────────┘
+--   Your Gear: LIVE          [Import Raid Night][Loot Log][Settings]
 --
--- WHY THE STRIP EXISTS: the two rankings are different SHAPES. EPGP priority is
--- one global list of the whole raid, stable through a kill. Upgrade magnitude is
--- a different list per item — five drops means five orderings. The strip answers
--- "is any of this for me" before a row is read.
+-- WHY IT CHANGED SHAPE. The panel is an OUT-OF-COMBAT REFERENCE (Session 249,
+-- Jason: "literally NOBODY would ever have this addon open during combat"), so
+-- width is nearly free and the layout optimises for READING. The horizontal chip
+-- strip existed to fit five drops into a narrow window; with the width available
+-- the items become a vertical selector, which holds a full loot table rather
+-- than five chips and a pager.
 --
--- WHY PRIORITY IS A COLUMN AND NOT THE SORT: during a roll what matters is the
--- priority of the people contesting THIS item, which is the rightmost column.
--- The full ladder is a tab, not something competing for space mid-decision.
+-- WHAT DID NOT CHANGE, and must not: the two rankings are still different
+-- SHAPES. EPGP priority is one global list of the whole raid, stable through a
+-- kill; upgrade magnitude is a different list per item. So the detail pane still
+-- orders by upgrade with priority as a COLUMN, and the full ladder still lives
+-- on its own tab. That is Arrangement A and it is settled.
 --
--- The strip is the SAME control on both Drops and Boss — a list of items, each
--- carrying the viewer's own badge, one selected. Drops fills it from what has
--- dropped; Boss fills it from everything that boss can drop. That is why the
--- anticipatory view needs no separate interaction to learn.
+-- ⚠️ NO LOGIC IN THIS FILE. No harness loads it — anything put here ships having
+-- never run. Ordering, banding, the slot line, the ordinal and the counts all
+-- live in Core.lua; the winner lookup lives in Record.lua; the runner report
+-- lives in Comms.lua. This file builds frames and sets text.
 --
 -- Nothing here posts to chat on its own — the Post button is the only path.
 
@@ -35,21 +45,10 @@ local GOLD  = { 0.953, 0.773, 0.420 }
 local WHITE = { 1, 1, 1 }
 local MUTED = { 0.533, 0.533, 0.600 }
 
-local BADGE_COLOR = {
-  major     = { 1.000, 0.420, 0.420 },
-  moderate  = { 0.784, 0.588, 0.180 },
-  minor     = { 0.627, 0.627, 0.690 },
-  sidegrade = { 0.533, 0.533, 0.600 },
-}
-local BADGE_LABEL = {
-  major = "Major", moderate = "Moderate", minor = "Minor", sidegrade = "Sidegrade",
-}
-
--- The item-quality tag (text + colour) lives in Core.lua: it is pure logic that
--- the tooltip needs too, and Panel.lua is frame construction the headless test
--- harness deliberately does not load.
+-- The item-quality tag (text + colour) and the badge ramp live outside this
+-- file: the tag is pure logic the tooltip needs too, and the ramp is shared with
+-- the detail header, so a single table beats three that drift.
 local qualityTag = ns.QualityTag
-
 
 local CLASS_COLOR = {
   ["Death Knight"] = { 0.77, 0.12, 0.23 }, ["Demon Hunter"] = { 0.64, 0.19, 0.79 },
@@ -62,39 +61,148 @@ local CLASS_COLOR = {
 }
 
 -- Runner is LAST and conditional: Experience §3 gives it to whoever loaded the
--- data, and it is hidden without a payload rather than shown inert. Positions
--- are assigned in layoutTabs() rather than at build time, because the set of
--- visible tabs changes while the panel is open.
-local TABS = { "Drops", "Boss", "Me", "Standings", "Targets", "Runner" }
+-- data, and Session 249 made that a rule — the tab renders ONLY for the runner.
+local TABS = { "Loot", "Standings", "Runner" }
 
--- The target marker. One glyph, used everywhere an item can appear, so it reads
--- the same on a chip, in a browse row and on the selected-item line.
-local TARGET_MARK = "|cffF3C56B*|r"
+-- ---------------------------------------------------------------------------
+-- Geometry — read straight off the Figma frame, at 1:1
+-- ---------------------------------------------------------------------------
+--
+-- The design is a FIXED-SIZE window (Session 249): everything from the title
+-- down to the boss strip is fixed, as is the bottom bar. Only the two middle
+-- columns scroll, and they scroll independently.
+--
+-- Numbers are the mock's own coordinates rather than derived ones, so a value
+-- here can be checked against the file by eye. Where a count IS derived
+-- (COL_ROWS, RANK_ROWS) it is derived from the space, never picked — WoW frames
+-- do not clip their children, so a row count larger than the space available
+-- draws straight through whatever is below it instead of scrolling.
 
--- Geometry. VISIBLE_ROWS is DERIVED from the frame height rather than picked:
--- WoW frames do not clip their children, so a row count larger than the space
--- available does not scroll or truncate — it draws straight over the footer and
--- out through the bottom of the window, which is exactly what happened.
-local FRAME_W, FRAME_H = 500, 560
--- LIST_TOP must clear the column-header row, which sits at -154 and is 12 tall.
--- At 152 the list started ABOVE its own header and row 1 painted over it.
-local LIST_TOP, LIST_BOTTOM = 170, 74
-local ROW_H = 20
-local VISIBLE_ROWS = math.floor((FRAME_H - LIST_TOP - LIST_BOTTOM) / ROW_H)
-local CHIPS_PER_PAGE = 5
+local FRAME_W, FRAME_H = 620, 560
 
--- Five tabs now have to share the row with the difficulty button, which sits at
--- the right edge. DERIVED rather than picked, for the same reason VISIBLE_ROWS
--- is: WoW frames do not clip, so tabs that overrun simply draw through whatever
--- is beside them instead of announcing the problem.
-local TAB_GAP = math.floor((FRAME_W - 24 - 100 - 12) / #TABS)
-local TAB_W = TAB_GAP - 2
+local PAD = 20
+
+local TAB_Y, TAB_W, TAB_H, TAB_PITCH = 60, 100, 24, 110
+
+-- Boss strip: 32px portraits, right-aligned to the window's right margin.
+local BOSS_Y, BOSS_SIZE, BOSS_PITCH = 102, 32, 42
+local BOSS_SLOTS = 9
+
+local CTX_Y = 100          -- boss name + "For You:" block, left of the strip
+
+-- Two 2x2 filter toggles.
+local TOG_X, TOG_Y = 20, 150
+local TOG_W, TOG_H = 92, 24
+local TOG_COL, TOG_ROW = 99, 27
+
+-- The item column: the selector.
+local COL_X, COL_W, COL_TOP = 20, 198, 211
+local ITEM_H, ITEM_PITCH = 38, 40
+
+-- The detail pane.
+local PANE_X, PANE_Y, PANE_W, PANE_H = 220, 149, 380, 360
+
+-- The bottom bar.
+local FOOT_Y, FOOT_H = 509, 51
+
+-- ── Standings tab ──────────────────────────────────────────────────────────
+--
+-- A DIFFERENT TABLE, not the Loot pane's with different headings: five columns
+-- against four, different x positions, and it fills the window rather than a
+-- 380px pane. It gets its own row set for that reason — recycling one row across
+-- two geometries means every render re-points every fontstring, which is how the
+-- old panel ended up needing resetRow discipline in the first place.
+local SEASON_R = 583                 -- season label, right-aligned, on the tab row
+local RAIL_X = 20                    -- the personal rail down the left
+local RAIL_BLOCK_Y = { 117, 213, 299, 395 }   -- Priority · Earned/Spent · Attendance · Last item
+local ST_DIV_X, ST_DIV_Y, ST_DIV_H = 151, 114, 373
+local ST_HEAD_Y = 117
+local ST_TOP, ST_PITCH = 141, 16
+-- Derived from the space the divider encloses, never picked: WoW frames do not
+-- clip their children, so a row count larger than the space draws through the
+-- footer instead of scrolling.
+local ST_ROWS = math.floor(((ST_DIV_Y + ST_DIV_H) - ST_TOP) / ST_PITCH)
+-- Name is left-aligned; every number column is right-aligned to its own edge,
+-- which is also where the design puts each heading's right edge.
+local ST_RANK_R, ST_NAME = 190, 203
+local ST_EP_R, ST_GP_R, ST_PR_R, ST_LAST_R = 335, 410, 488, 583
+
+local COL_ROWS = math.floor((FOOT_Y - COL_TOP) / ITEM_PITCH)
+
+-- Detail-pane internals, all absolute in frame space.
+local HEAD_Y      = 161     -- the three header blocks
+local FACTS_Y     = 209     -- "+17 ilvl | -16 behind | Overall BIS | Targeted"
+local ITEM_Y      = 240     -- the selected item's icon + name
+local RANK_HEAD_Y = 302     -- RAIDER / UPGRADE / GAIN / PRIORITY
+local RANK_TOP    = 326
+local RANK_PITCH  = 16
+local RANK_ROWS   = 9
+local MORE_Y      = 472
+local NOTE_Y      = 489
+
+local DIV_X, DIV_W = 230, 360   -- the pane's horizontal hairlines
+local DIV1_Y, DIV2_Y, DIV3_Y = 205, 230, 290
+
+-- Column x positions inside the ranked table. GAIN and PRIORITY are RIGHT
+-- edges, because both are numbers and numbers align on their right.
+local C_RANK, C_NAME, C_UPGRADE = 231, 246, 352
+local C_GAIN_R, C_PRIORITY_R = 499, 591
+
+-- ⚠️ MARKS ARE IMAGES, NEVER CHARACTERS (Session 249, verified against the
+-- bundled fonts: General Sans and Khand carry NONE of the star or diamond
+-- glyphs, and a missing glyph in a custom font renders as NOTHING rather than
+-- falling back). Blizzard's raid-target atlas supplies both shapes in one
+-- texture every client already has, so this needs no bundled art and cannot
+-- draw blank the way Build Barn's per-tier boss icons can. Desaturated first so
+-- the vertex colour lands clean over the atlas's own yellow and purple.
+local MARK_TEXTURE = "Interface\\TargetingFrame\\UI-RaidTargetingIcons"
+local MARK_STAR    = { 0.00, 0.25, 0.00, 0.25 }   -- icon 1
+local MARK_DIAMOND = { 0.50, 0.75, 0.00, 0.25 }   -- icon 3
+local MARK_SIZE = 12
+-- A fixed-width gutter at the row's right so names align whether or not a row
+-- carries marks. Wide enough for BOTH marks plus their inset — an item can be
+-- targeted AND best-in-slot, and at 30 the name ran three pixels under the star.
+local MARK_GUTTER = 36
+
+--- The badge's label and colour, as two values.
+---
+--- ⚠️ NOT `local a, b = S and S.Badge(x)`. An `and` expression is ADJUSTED TO ONE
+--- VALUE in a multiple assignment, so that form silently drops the colour and
+--- every badge in the panel would have drawn in the default text colour. Wrapped
+--- here once rather than written out at four call sites, three of which had it
+--- wrong.
+local function badgeOf(key)
+  local S = ns.Style
+  if not S then return nil, nil end
+  return S.Badge(key)
+end
+
+--- A literal pipe, for WoW's escape syntax. A single "|" starts a colour or a
+--- link sequence; "||" is how you draw one.
+local BAR = "||"
+
+--- Relabel a control, whichever kind it turned out to be.
+---
+--- Style.Pill keeps its label at `.text`; the Blizzard template fallback keeps
+--- its own behind SetText. Style.lua loading is a packaging guarantee rather
+--- than a runtime one, and every other helper in this file degrades rather than
+--- erroring — a nil index here would take down the whole refresh.
+local function setLabel(btn, label)
+  if not btn then return end
+  if btn.text and btn.text.SetText then btn.text:SetText(label or "")
+  elseif btn.SetText then btn:SetText(label or "") end
+end
 
 local frame
 local state = {
-  tab = "Drops", sel = 1, bossIndex = 1, scroll = 0, chipPage = 0,
-  -- Targets tab: which instance and encounter are being browsed, and whether we
-  -- are browsing the catalogue or looking at what has been flagged.
+  tab = "Loot",
+  sel = 1, bossIndex = 1,
+  colScroll = 0, rankScroll = 0,
+  -- The two filter toggles. `source` is which list the column shows; `filter`
+  -- is whether it hides what this character cannot use.
+  source = "drops",     -- "drops" | "table"
+  filter = "usable",    -- "usable" | "all"
+  -- The Standings tab's provisional sub-view. See renderStandingsTab.
   instIndex = 1, encIndex = 1, targetMode = "browse",
 }
 
@@ -102,38 +210,58 @@ local state = {
 -- Builders
 -- ---------------------------------------------------------------------------
 
--- Every fontstring in the panel goes through here, which is what lets the type
--- system be swapped in one edit. The Blizzard template names are kept as the
--- ARGUMENT so the ~40 call sites did not all have to change at once; they map
--- onto the addon's own roles, and a template this does not know falls back to
--- body text at row size rather than erroring.
-local TEMPLATE_ROLE = {
-  GameFontNormal       = { role = "body",  size = "row",   color = "text" },
-  GameFontNormalSmall  = { role = "body",  size = "small", color = "text" },
-  GameFontDisableSmall = { role = "body",  size = "small", color = "textDim" },
-  GameFontHighlight    = { role = "bodyMed", size = "row", color = "text" },
-}
+--- Every fontstring goes through here, which is what lets the type system be
+--- swapped in one edit. Roles and sizes are the addon's own (Style.lua), not
+--- Blizzard template names — the old TEMPLATE_ROLE indirection existed only to
+--- avoid touching ~40 call sites during the DS port and every call site is being
+--- rewritten anyway.
+local function text(parent, role, size, color, justify)
+  local S = ns.Style
+  if S then return S.Text(parent, role, size, color and S.COLOR[color], justify) end
+  -- Style.lua missing is a packaging fault, not a reason to draw nothing.
+  local t = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  t:SetJustifyH(justify or "LEFT")
+  t:SetWordWrap(false)
+  return t
+end
 
-local function fs(parent, template, x, y, width, justify)
+--- Place a fontstring by the mock's own coordinates.
+local function at(fs, x, y, width, justify)
+  fs:ClearAllPoints()
+  fs:SetPoint("TOPLEFT", x, -y)
+  if width then fs:SetWidth(width) end
+  if justify then fs:SetJustifyH(justify) end
+  return fs
+end
+
+--- Place a right-aligned fontstring by its RIGHT edge, which is how the mock
+--- positions the two numeric columns.
+local function atRight(fs, right, y, width)
+  fs:ClearAllPoints()
+  fs:SetPoint("TOPLEFT", right - width, -y)
+  fs:SetWidth(width)
+  fs:SetJustifyH("RIGHT")
+  return fs
+end
+
+local function divider(parent, x, y, w)
   local S = ns.Style
   local t
   if S then
-    local m = TEMPLATE_ROLE[template or ""] or { role = "body", size = "row", color = "text" }
-    t = S.Text(parent, m.role, m.size, S.COLOR[m.color], justify)
+    t = S.Divider(parent, S.COLOR.rim, 0.25)
   else
-    -- Style.lua missing is a packaging fault, not a reason to draw nothing.
-    t = parent:CreateFontString(nil, "OVERLAY", template or "GameFontNormal")
-    t:SetJustifyH(justify or "LEFT")
-    t:SetWordWrap(false)
+    t = parent:CreateTexture(nil, "ARTWORK")
+    t:SetColorTexture(1, 1, 1, 0.15)
+    t:SetHeight(1)
   end
-  if x then t:SetPoint("TOPLEFT", x, y) end
-  if width then t:SetWidth(width) end
+  t:SetPoint("TOPLEFT", x, -y)
+  t:SetWidth(w)
   return t
 end
 
 --- Flag or unflag whatever item a control is carrying, and say which happened.
---- Right-click is the gesture everywhere: left-click already selects a strip
---- chip, and nothing else in the addon uses right-click.
+--- Right-click is the gesture everywhere: left-click selects, and nothing else
+--- in the addon uses right-click.
 local function toggleTarget(itemID, meta)
   if not itemID or not ns.Targets then return end
   local now = ns.Targets.Toggle(itemID, meta)
@@ -147,188 +275,195 @@ local function toggleTarget(itemID, meta)
   Panel.Refresh()
 end
 
---- Blank every fontstring on a recycled row, so a view only has to set what it
---- actually wants to show.
-local function resetRow(row)
-  if not row or not row.TEXT_KEYS then return end
-  for _, key in ipairs(row.TEXT_KEYS) do
-    local fsObj = row[key]
-    if fsObj and fsObj.SetText then fsObj:SetText("") end
+--- One 12px mark in the item row's gutter.
+local function buildMark(parent, coords, colorKey, offsetFromRight)
+  local m = parent:CreateTexture(nil, "OVERLAY")
+  m:SetSize(MARK_SIZE, MARK_SIZE)
+  m:SetPoint("RIGHT", -offsetFromRight, 0)
+  m:SetTexture(MARK_TEXTURE)
+  m:SetTexCoord(unpack(coords))
+  m:SetDesaturated(true)
+  local S = ns.Style
+  if S and S.COLOR[colorKey] then
+    m:SetVertexColor(S.rgb(S.COLOR[colorKey]))
   end
+  m:Hide()
+  return m
 end
 
---- A dropdown: a button that opens a list of choices below it.
----
---- Built once and used for all three pickers, so the Boss tab's fix is not a
---- one-off and the next selector gets it free. Arrows made you step through a
---- list to find out what was on each entry, which is the wrong shape whenever
---- choosing is a COMPARISON rather than a walk — true of bosses, and just as
---- true of instances and encounters on the planning tab.
----
---- ⚠️ NO FULL-SCREEN CLICK-CATCHER, deliberately. The first version had one for
---- click-outside-to-close and it silently ate every selection: only ONE frame
---- receives a click, and a screen-covering button takes it. Two reloads and an
---- empty diagnostic log established that. The menu closes on a pick, on
---- re-clicking its button, and when its tab goes away.
----
---- Hand-rolled rather than UIDropDownMenu: Blizzard's is heavily skinned, awkward
---- to restyle, and cannot colour its rows, which is the whole point here.
-local function makeDropdown(parent, width, onSelect)
-  local ROW = 20
-
-  local dd = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-  dd:SetSize(width, 22)
-  dd:SetText("")
-  dd.label = fs(dd, "GameFontNormal", 8, -4, width - 40)
-  dd.arrow = fs(dd, "GameFontNormalSmall", width - 24, -4, 16, "RIGHT")
-  dd.arrow:SetText("v")
-
-  local menu = CreateFrame("Frame", nil, parent)
-  -- TOOLTIP so nothing the panel draws can end up over the open list.
-  menu:SetFrameStrata("TOOLTIP")
-  menu:SetPoint("TOPLEFT", dd, "BOTTOMLEFT", 0, -2)
-  menu:SetWidth(width)
-  -- Swallows clicks that land on the menu but miss an item, rather than letting
-  -- them fall through to the list underneath.
-  menu:EnableMouse(true)
-  menu:Hide()
-  if ns.Style then ns.Style.Surface(menu, ns.Style.COLOR.bgAlt, 0.98) end
-  menu.items = {}
-  dd.menu = menu
-
-  dd:SetScript("OnClick", function()
-    if menu:IsShown() then menu:Hide() else dd:Open() end
-  end)
-
-  --- entries = { { label = "...", current = bool }, ... }
-  function dd:SetEntries(entries, currentIndex, currentLabel)
-    dd.entries = entries or {}
-    dd.currentIndex = currentIndex
-    dd.label:SetText(currentLabel or "")
-  end
-
-  function dd:Open()
-    local entries = dd.entries or {}
-    for _, b in ipairs(menu.items) do b:Hide() end
-
-    for i, e in ipairs(entries) do
-      local btn = menu.items[i]
-      if not btn then
-        btn = CreateFrame("Button", nil, menu)
-        btn:EnableMouse(true)
-        btn:RegisterForClicks("LeftButtonUp")
-        btn:SetSize(width - 2, ROW)
-        btn:SetPoint("TOPLEFT", 1, -((i - 1) * ROW) - 1)
-        btn.hl = btn:CreateTexture(nil, "BACKGROUND")
-        btn.hl:SetAllPoints()
-        if ns.Style then btn.hl:SetColorTexture(ns.Style.rgb(ns.Style.COLOR.elevated)) end
-        btn.hl:Hide()
-        btn.text = fs(btn, "GameFontNormalSmall", 8, -3, width - 18)
-        btn:SetScript("OnEnter", function(sf) sf.hl:Show() end)
-        btn:SetScript("OnLeave", function(sf) sf.hl:Hide() end)
-        menu.items[i] = btn
-      end
-      btn.text:SetText(e.label or "?")
-      -- The current entry is gold, so the open list also says where you are.
-      btn.text:SetTextColor(unpack(i == dd.currentIndex and GOLD or WHITE))
-      btn:SetScript("OnClick", function()
-        menu:Hide()
-        if onSelect then onSelect(i) end
-      end)
-      btn:Show()
-    end
-
-    menu:SetHeight(math.max(1, #entries) * ROW + 2)
-    menu:Show()
-    menu:Raise()
-  end
-
-  function dd:Close() menu:Hide() end
-  function dd:SetShownAll(shown)
-    dd:SetShown(shown)
-    if not shown then menu:Hide() end
-  end
-
-  return dd
-end
-
-local function buildRow(parent, i)
-  -- A Button rather than a Frame, so a browse row can be right-clicked. The
-  -- ranking rows built from this are RAIDERS, not items, and simply carry no
-  -- itemID — which is what makes the gesture a no-op there rather than a
-  -- surprise.
+--- One row of the item column: a two-line selector button.
+local function buildItemRow(parent, i)
   local row = CreateFrame("Button", nil, parent)
   row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-  row:SetHeight(ROW_H)
-  row:SetPoint("TOPLEFT", 0, -(i - 1) * ROW_H)
-  row:SetPoint("TOPRIGHT", 0, -(i - 1) * ROW_H)
+  row:SetSize(COL_W, ITEM_H)
+  row:SetPoint("TOPLEFT", 0, -(i - 1) * ITEM_PITCH)
 
+  local S = ns.Style
+  row.bg = row:CreateTexture(nil, "BACKGROUND")
+  row.bg:SetAllPoints()
+  if S then
+    row.bg:SetColorTexture(S.COLOR.purple.r, S.COLOR.purple.g, S.COLOR.purple.b, 0.1)
+  else
+    row.bg:SetColorTexture(1, 1, 1, 0.05)
+  end
+
+  -- Two lines, as the design draws them: name on top, verdict and slot beneath.
+  -- The name gives up the gutter's width so a marked row and an unmarked one
+  -- start their text at the same place and truncate at the same place.
+  row.name = at(text(row, "body", "small", "text"), 12, 5, COL_W - 12 - MARK_GUTTER)
+  row.sub  = at(text(row, "body", "tiny", "text"), 12, 21, COL_W - 12 - MARK_GUTTER)
+
+  -- BIS sits outermost, the target inside it — the pair reads left-to-right as
+  -- "you want this" then "it is the best one".
+  row.markBis    = buildMark(row, MARK_DIAMOND, "bis", 6)
+  row.markTarget = buildMark(row, MARK_STAR, "target", 6 + MARK_SIZE + 3)
+
+  row:SetScript("OnClick", function(self, button)
+    if button == "RightButton" then
+      if self.itemID then toggleTarget(self.itemID, { name = self.itemName }) end
+      return
+    end
+    if self.entryIndex then
+      state.sel = self.entryIndex
+      state.rankScroll = 0
+      Panel.Refresh()
+    end
+  end)
+  -- A REAL game tooltip, so item level, stats and effects come from the client
+  -- rather than from anything we compute. The dropped item's own link is used
+  -- when we have one — it is the version that actually dropped.
+  row:SetScript("OnEnter", function(self)
+    if S then self.bg:SetColorTexture(S.COLOR.purple.r, S.COLOR.purple.g, S.COLOR.purple.b, 0.28) end
+    local link = self.link or (self.itemID and ns.ItemLinkFor(self.itemID))
+    if not link then return end
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetHyperlink(link)
+    GameTooltip:AddLine(ns.Targets and ns.Targets.Has(self.itemID)
+      and "Right-click to stop targeting." or "Right-click to target.", 0.6, 0.6, 0.7)
+    GameTooltip:Show()
+  end)
+  row:SetScript("OnLeave", function(self)
+    if S then
+      self.bg:SetColorTexture(S.COLOR.purple.r, S.COLOR.purple.g, S.COLOR.purple.b,
+        self._selected and 0.2 or 0.1)
+    end
+    GameTooltip:Hide()
+  end)
+  return row
+end
+
+--- One boss portrait in the strip.
+---
+--- The selected boss takes a 4px orange underline rather than a rim or a fill:
+--- a rim on a 32px tile eats the art, and the underline is what the design draws.
+local function buildBossTile(parent, i)
+  local tile = CreateFrame("Button", nil, parent)
+  tile:SetSize(BOSS_SIZE, BOSS_SIZE)
+  tile:SetPoint("LEFT", (i - 1) * BOSS_PITCH, 0)
+
+  local S = ns.Style
+  tile.art = tile:CreateTexture(nil, "ARTWORK")
+  tile.art:SetAllPoints()
+
+  -- THE FALLBACK IS A TILE, NOT NOTHING. Whether this client can supply a boss
+  -- portrait at all is unsettled (Journal.EncounterPortrait asks; /la journal
+  -- reports). A strip of blank squares reads as "the addon is broken" — Build
+  -- Barn taught this the expensive way when a new tier shipped without art — so
+  -- an unanswered portrait draws a filled tile carrying the boss's initial.
+  tile.fallback = tile:CreateTexture(nil, "BACKGROUND")
+  tile.fallback:SetAllPoints()
+  if S then
+    tile.fallback:SetColorTexture(S.COLOR.elevated.r, S.COLOR.elevated.g, S.COLOR.elevated.b, 1)
+  end
+  tile.initial = text(tile, "titleMed", "head", "textDim", "CENTER")
+  tile.initial:SetPoint("CENTER")
+
+  tile.sel = tile:CreateTexture(nil, "OVERLAY")
+  tile.sel:SetPoint("BOTTOMLEFT")
+  tile.sel:SetPoint("BOTTOMRIGHT")
+  tile.sel:SetHeight(4)
+  if S then tile.sel:SetColorTexture(S.rgb(S.COLOR.orange)) end
+  tile.sel:Hide()
+
+  tile:SetScript("OnClick", function(self)
+    if not self.bossIndex then return end
+    state.bossIndex = self.bossIndex
+    state.sel, state.colScroll, state.rankScroll = 1, 0, 0
+    Panel.Refresh()
+  end)
+  tile:SetScript("OnEnter", function(self)
+    if not self.bossName then return end
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    GameTooltip:SetText(self.bossName, 1, 1, 1)
+    if (self.bossBis or 0) > 0 then
+      GameTooltip:AddLine(("%d best-in-slot for you here"):format(self.bossBis), 1, 0.957, 0.408)
+    end
+    GameTooltip:Show()
+  end)
+  tile:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  return tile
+end
+
+--- One row of the ranked raider table in the detail pane.
+---
+--- Rows are RECYCLED across the Loot ranking, Standings, the personal card, the
+--- Runner report and the target browser, each writing only the fields it cares
+--- about. EVERY fontstring key is recorded so resetRow() can blank them all
+--- without a hand-maintained list — a field added in one view that four others
+--- did not know to clear is exactly how a quality tag ended up printed through
+--- the middle of the Me tab's sentences.
+local function buildRankRow(parent, i)
+  local row = CreateFrame("Button", nil, parent)
+  row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+  row:SetHeight(RANK_PITCH)
+  row:SetPoint("TOPLEFT", 0, -(i - 1) * RANK_PITCH)
+  row:SetPoint("TOPRIGHT", 0, -(i - 1) * RANK_PITCH)
+
+  local S = ns.Style
   row.hl = row:CreateTexture(nil, "BACKGROUND")
   row.hl:SetAllPoints()
-  if ns.Style then
-    row.hl:SetColorTexture(ns.Style.rgb(ns.Style.COLOR.elevated))
+  if S then
+    row.hl:SetColorTexture(S.COLOR.purple.r, S.COLOR.purple.g, S.COLOR.purple.b, 0.22)
   else
     row.hl:SetColorTexture(1, 1, 1, 0.07)
   end
   row.hl:Hide()
 
-  -- EVERY fontstring key on a row is recorded, so resetRow() can blank them all
-  -- without a hand-maintained list. Rows are RECYCLED across five different
-  -- views, each of which writes only the fields it cares about — so anything a
-  -- previous view left behind draws on top of the current one. That is exactly
-  -- how the quality tag ended up printed through the middle of the Me tab's
-  -- sentences: a field added in one view that four other views did not know to
-  -- clear. A list that maintains itself is the only version of this that stays
-  -- correct when the next field is added.
-  row.TEXT_KEYS = { "rank", "name", "quality", "badge", "gap", "ilvl", "pr", "src" }
+  row.TEXT_KEYS = { "rank", "name", "upgrade", "gap", "gain", "pr", "src" }
 
-  row.rank  = fs(row, "GameFontNormalSmall", 4, -4, 22)
-  row.name  = fs(row, "GameFontNormal", 28, -3, 112)
-  -- Sits in the space between the name and the badge. Per-RAIDER, not per-item:
-  -- a grade belongs to a spec, so two raiders contesting one trinket can hold
-  -- different letters, and that is exactly what explains their order.
-  row.quality = fs(row, "GameFontNormalSmall", 142, -4, 28, "RIGHT")
-  row.badge = fs(row, "GameFontNormalSmall", 172, -4, 70)
-  row.gap   = fs(row, "GameFontNormalSmall", 240, -4, 36, "RIGHT")
-  row.ilvl  = fs(row, "GameFontNormalSmall", 282, -4, 66, "RIGHT")
-  row.pr    = fs(row, "GameFontNormalSmall", 354, -4, 78, "RIGHT")
-  -- GEAR PROVENANCE, at the right edge. The columns above end at 432 and the
-  -- list is 472 wide, so this fits in space that was already there rather than
-  -- squeezing an existing column — which matters because WoW frames do not clip
-  -- their children, so an overrun draws straight through its neighbour instead
-  -- of announcing itself.
-  --
-  -- BLANK IS THE COMMON CASE AND THAT IS DELIBERATE. Almost every row is scored
-  -- from the site snapshot; tagging all twenty of them turns the signal into
-  -- wallpaper. What is worth marking is the rows that are BETTER than the
-  -- snapshot, not the ordinary ones.
-  row.src   = fs(row, "GameFontNormalSmall", 436, -4, 36, "RIGHT")
+  -- Positions are relative to the ROW, which is anchored at the pane's left, so
+  -- the mock's absolute x values are offset by the rank column's own origin.
+  local o = C_RANK
+  row.rank    = at(text(row, "label", "small", "text"), C_RANK - o, 1, 12, "LEFT")
+  row.name    = at(text(row, "label", "small", "text"), C_NAME - o, 1, 100)
+  row.upgrade = at(text(row, "label", "small", "text"), C_UPGRADE - o, 1, 118)
+  row.gain    = atRight(text(row, "body", "small", "text"), C_GAIN_R - o, 1, 44)
+  row.pr      = atRight(text(row, "body", "small", "text"), C_PRIORITY_R - o, 1, 48)
+  -- Gear provenance, in the space between GAIN and PRIORITY. Blank is the common
+  -- case and that is deliberate: almost every row is scored from the site
+  -- snapshot, so tagging all twenty turns the signal into wallpaper. What is
+  -- worth marking is the rows BETTER than the snapshot.
+  row.src     = at(text(row, "body", "tiny", "textDim"), C_GAIN_R - o + 6, 2, 36)
 
-  -- The browse list reuses these rows for ITEMS, which need an icon the ranking
-  -- rows have no use for. Created once and simply hidden rather than built per
-  -- refresh: rows are recycled, and a texture created on every draw leaks.
+  -- The browse view reuses these rows for ITEMS, which need an icon the ranking
+  -- rows have no use for. Created once and hidden rather than built per refresh:
+  -- rows are recycled, and a texture created on every draw leaks.
   row.icon = row:CreateTexture(nil, "ARTWORK")
-  row.icon:SetSize(14, 14)
-  row.icon:SetPoint("TOPLEFT", 6, -3)
+  row.icon:SetSize(12, 12)
+  row.icon:SetPoint("TOPLEFT", 0, -2)
   row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
   row.icon:Hide()
 
   row:SetScript("OnClick", function(self, button)
     if not self.itemID then return end
-    if button == "RightButton" then
-      toggleTarget(self.itemID, self.meta)
-    end
+    if button == "RightButton" then toggleTarget(self.itemID, self.meta) end
   end)
   row:SetScript("OnEnter", function(self)
     self.hl:Show()
-    -- A ranking row is a RAIDER and carries no itemID, so it never had a
-    -- tooltip at all. The provenance marker is four characters wide, which is
-    -- nowhere near enough to explain itself — the sentence lives here.
+    -- A ranking row is a RAIDER and carries no itemID, so it never had a tooltip
+    -- at all. The provenance marker is four characters wide, which is nowhere
+    -- near enough to explain itself — the sentence lives here.
     if not self.itemID then
-      -- Two things can want saying about a raider row, and either may be
-      -- absent: where their gear reading came from, and that they are ranked as
-      -- a spec they are not currently in. Built as a list so neither depends on
-      -- the other being present.
       if self.srcHelp or self.splitHelp then
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         if self.srcHelp then
@@ -359,66 +494,74 @@ local function buildRow(parent, i)
   return row
 end
 
-local function buildChip(parent, i)
-  local chip = CreateFrame("Button", nil, parent)
-  chip:SetSize(88, 36)
-  chip:SetPoint("LEFT", (i - 1) * 91, 0)
+--- One row of the Standings table.
+local function buildStandingsRow(parent, i)
+  local row = CreateFrame("Frame", nil, parent)
+  row:SetHeight(ST_PITCH)
+  row:SetPoint("TOPLEFT", 0, -(i - 1) * ST_PITCH)
+  row:SetPoint("TOPRIGHT", 0, -(i - 1) * ST_PITCH)
 
-  -- The site's item chip: an elevated surface with a hairline rim, the rim
-  -- going gold when selected rather than a translucent wash over the fill.
-  -- A wash lightens the text with it; a rim does not.
   local S = ns.Style
-  chip.bg = chip:CreateTexture(nil, "BACKGROUND")
-  chip.bg:SetAllPoints()
+  row.hl = row:CreateTexture(nil, "BACKGROUND")
+  row.hl:SetAllPoints()
   if S then
-    chip.bg:SetColorTexture(S.rgb(S.COLOR.elevated))
-    chip.rim = S.Rim(chip, S.COLOR.border, 1)
-  else
-    chip.bg:SetColorTexture(1, 1, 1, 0.05)
+    row.hl:SetColorTexture(S.COLOR.purple.r, S.COLOR.purple.g, S.COLOR.purple.b, 0.22)
   end
+  row.hl:Hide()
 
-  chip.sel = chip:CreateTexture(nil, "BORDER")
-  chip.sel:SetAllPoints()
-  chip.sel:SetColorTexture(0.95, 0.77, 0.42, 0.10)
-  chip.sel:Hide()
-
-  chip.name  = fs(chip, "GameFontNormalSmall", 4, -3, 80)
-  -- The badge gives up its right-hand third to the quality tag rather than the
-  -- two sharing a span and overlapping on the long labels ("Sidegrade").
-  chip.badge   = fs(chip, "GameFontNormalSmall", 4, -19, 52)
-  chip.quality = fs(chip, "GameFontNormalSmall", 56, -19, 28, "RIGHT")
-
-  chip:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-  chip:SetScript("OnClick", function(self, button)
-    if button == "RightButton" then
-      toggleTarget(self.itemID, { name = self.itemName })
-      return
-    end
-    if self.entryIndex then
-      state.sel = self.entryIndex
-      state.scroll = 0
-      Panel.Refresh()
-    end
-  end)
-  -- A REAL game tooltip, so item level, stats and effects come from the client
-  -- rather than from anything we compute. The dropped item's own link is used
-  -- when we have one (it is the authoritative version that actually dropped);
-  -- otherwise one is built for the selected difficulty.
-  chip:SetScript("OnEnter", function(self)
-    local link = self.link or ns.ItemLinkFor(self.itemID)
-    if not link then return end
-    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-    GameTooltip:SetHyperlink(link)
-    GameTooltip:AddLine(ns.Targets and ns.Targets.Has(self.itemID)
-      and "Right-click to stop targeting." or "Right-click to target.", 0.6, 0.6, 0.7)
-    GameTooltip:Show()
-  end)
-  chip:SetScript("OnLeave", function() GameTooltip:Hide() end)
-  return chip
+  -- Positions are relative to the row, which starts at the rank column's left.
+  local o = ST_RANK_R - 24
+  row.rank = atRight(text(row, "label", "small", "text"), ST_RANK_R - o, 1, 24)
+  row.name = at(text(row, "label", "small", "text"), ST_NAME - o, 1, 110)
+  row.ep   = atRight(text(row, "body", "small", "text"), ST_EP_R - o, 1, 60)
+  row.gp   = atRight(text(row, "body", "small", "text"), ST_GP_R - o, 1, 50)
+  row.pr   = atRight(text(row, "body", "small", "text"), ST_PR_R - o, 1, 50)
+  row.last = atRight(text(row, "body", "small", "text"), ST_LAST_R - o, 1, 60)
+  return row
 end
 
+--- One block of the personal rail: a purple heading, a large figure, and a line
+--- of context beneath it. Three fontstrings so each can take its own type role;
+--- the design gives the heading, the figure and the caption three different
+--- faces and sizes.
+local function buildRailBlock(parent, y)
+  local b = {}
+  b.head = at(text(parent, "titleMed", "head", "railHead"), RAIL_X, y, 130)
+  if ns.Style then ns.Style.SetFont(b.head, ns.Style.FONT.titleMed, 16) end
+  b.big = at(text(parent, "titleMed", "title", "orange"), RAIL_X, y + 18, 130)
+  if ns.Style then ns.Style.SetFont(b.big, ns.Style.FONT.titleMed, 34) end
+  -- Sits on the big figure's baseline, for the "/3" in "2/3".
+  b.bigSuffix = at(text(parent, "title", "title", "text"), RAIL_X, y + 26, 130)
+  if ns.Style then ns.Style.SetFont(b.bigSuffix, ns.Style.FONT.title, 21) end
+  b.line1 = at(text(parent, "body", "row", "text"), RAIL_X, y + 54, 130)
+  b.line2 = at(text(parent, "body", "row", "text"), RAIL_X, y + 70, 130)
+  b.line3 = at(text(parent, "body", "row", "textMuted"), RAIL_X, y + 86, 130)
+  return b
+end
+
+--- Blank every fontstring on a recycled row.
+local function resetRow(row)
+  if not row or not row.TEXT_KEYS then return end
+  for _, key in ipairs(row.TEXT_KEYS) do
+    local fsObj = row[key]
+    if fsObj and fsObj.SetText then fsObj:SetText("") end
+  end
+end
+
+-- ---------------------------------------------------------------------------
+-- Build
+-- ---------------------------------------------------------------------------
+
 local function build()
-  frame = CreateFrame("Frame", "HoDLootAdvisorPanel", UIParent, "BasicFrameTemplateWithInset")
+  -- ⚠️ NO BLIZZARD TEMPLATE. This was BasicFrameTemplateWithInset, and the inset
+  -- border kept drawing however many of its regions Style.Window took off — a
+  -- second rim around the content that survived three attempts to hide it.
+  -- The template was only ever supplying a close button and a title, both of
+  -- which are a few lines here, while the artwork it also supplies is artwork
+  -- this design spends effort removing. Dragging was already hand-wired below.
+  -- A plain frame ends the whole category of "some hidden region is still
+  -- painting" rather than hiding one more of them.
+  frame = CreateFrame("Frame", "HoDLootAdvisorPanel", UIParent)
   frame:SetSize(FRAME_W, FRAME_H)
   frame:SetPoint("CENTER", 260, 0)
   frame:SetMovable(true)
@@ -429,178 +572,334 @@ local function build()
   frame:SetFrameStrata("DIALOG")
   ns.MakeWindow(frame)
   frame:Hide()
-  frame.TitleText:SetText("Loot Advisor")
 
+  -- The design's ground: a near-black fill, a warm wash rising from the bottom
+  -- edge, and one light hairline.
+  if ns.Style then ns.Style.PanelGround(frame, FRAME_H) end
+
+  -- ⚠️ THE HEADER IS ONE IMAGE, CREST AND WORDMARK TOGETHER (Jason's export,
+  -- 223x30, which is exactly the crest's 88px plus the wordmark out to x=239 in
+  -- the design). This also settles the one thing the panel could not match: the
+  -- wordmark is painted with the site's brand GRADIENT, and a WoW fontstring
+  -- takes a colour and nothing else — no SetGradient, no way to clip a gradient
+  -- to glyph shapes. Drawn from the design file, the gradient is simply real.
+  frame.logo = frame:CreateTexture(nil, "ARTWORK")
+  frame.logo:SetSize(223, 30)
+  frame.logo:SetPoint("TOPLEFT", 16, -14)
+  frame.logo:SetTexture("Interface\\AddOns\\HoDLootAdvisor\\Media\\hodlogotitle.png")
+
+  -- The close button the template used to supply.
+  frame.close = CreateFrame("Button", nil, frame)
+  frame.close._hodStyled = true
+  frame.close:SetSize(20, 20)
+  frame.close:SetPoint("TOPRIGHT", -8, -8)
+  frame.close.x = text(frame.close, "label", "small", "textDim", "CENTER")
+  frame.close.x:SetPoint("CENTER")
+  frame.close.x:SetText("X")
+  frame.close:SetScript("OnClick", function() frame:Hide() end)
+  frame.close:SetScript("OnEnter", function(s)
+    if ns.Style then s.x:SetTextColor(ns.Style.rgb(ns.Style.COLOR.orange)) end
+  end)
+  frame.close:SetScript("OnLeave", function(s)
+    if ns.Style then s.x:SetTextColor(ns.Style.rgb(ns.Style.COLOR.textDim)) end
+  end)
+
+  -- ── Tabs ──────────────────────────────────────────────────────────────────
   frame.tabs = {}
-  for _, name in ipairs(TABS) do
-    local b = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    b:SetSize(TAB_W, 22)
-    b:SetText(name)
+  for i, name in ipairs(TABS) do
+    -- Tabs carry the design's larger label (16); the filter toggles and footer
+    -- buttons stay at 13. Same control, two type sizes, exactly as drawn.
+    local b = ns.Style and ns.Style.Pill(frame, TAB_W, TAB_H, name, "title")
+      or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    b:SetPoint("TOPLEFT", PAD + (i - 1) * TAB_PITCH, -TAB_Y)
     b:SetScript("OnClick", function()
       state.tab = name
-      state.sel, state.scroll, state.chipPage = 1, 0, 0
+      state.rankScroll, state.colScroll = 0, 0
       Panel.Refresh()
     end)
     frame.tabs[name] = b
   end
 
-  -- Boss selector (Boss tab only).
-  frame.bossDrop = makeDropdown(frame, 300, function(i)
-    state.bossIndex = i
-    state.sel, state.scroll, state.chipPage = 1, 0, 0
-    Panel.Refresh()
-  end)
-  frame.bossDrop:SetPoint("TOPLEFT", 14, -56)
+  -- ── Boss context, left of the strip ───────────────────────────────────────
+  frame.bossName = at(text(frame, "label", "head", "orange"), 21, CTX_Y, 200)
+  frame.bossSub  = at(text(frame, "body", "small", "text"), 21, CTX_Y + 18, 200)
 
-  frame.bossName = fs(frame, "GameFontNormal", 322, -59, 200)
-  frame.bossName:SetTextColor(unpack(WHITE))
-
-  -- Instance and encounter pickers (Targets browse): instance on the boss row,
-  -- encounter on the row below it, which is free on this tab because the strip
-  -- is hidden. Same control as the boss picker — the question there is also
-  -- "which of these is worth my time", which a list answers and four arrows do
-  -- not: arrows make you visit every entry to find out what is on it.
-  frame.instDrop = makeDropdown(frame, 300, function(i)
-    state.instIndex = i
-    -- A new instance means the old encounter index means nothing.
-    state.encIndex, state.scroll = 1, 0
-    Panel.Refresh()
-  end)
-  frame.instDrop:SetPoint("TOPLEFT", 14, -56)
-
-  frame.encDrop = makeDropdown(frame, 300, function(i)
-    state.encIndex = i
-    state.scroll = 0
-    Panel.Refresh()
-  end)
-  frame.encDrop:SetPoint("TOPLEFT", 14, -80)
-
-  frame.encName = fs(frame, "GameFontNormalSmall", 70, -83, 240)
-  frame.encName:SetTextColor(unpack(MUTED))
-
-  -- Browse <-> your flagged list. One tab, two views: the flag and the list want
-  -- to be a click apart so you can watch what you just flagged land.
-  frame.targetMode = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.targetMode:SetSize(130, 20)
-  frame.targetMode:SetPoint("TOPRIGHT", -14, -80)
-  frame.targetMode:SetScript("OnClick", function()
-    state.targetMode = (state.targetMode == "browse") and "flagged" or "browse"
-    state.scroll = 0
-    Panel.Refresh()
-  end)
-
-  -- Strip
+  -- ── Boss strip ────────────────────────────────────────────────────────────
+  -- Right-aligned to the window margin, so a raid with fewer bosses than slots
+  -- keeps the last tile against the same edge instead of leaving a ragged gap
+  -- under the header.
   frame.strip = CreateFrame("Frame", nil, frame)
-  frame.strip:SetPoint("TOPLEFT", 14, -80)
-  frame.strip:SetPoint("TOPRIGHT", -60, -80)
-  frame.strip:SetHeight(36)
-  frame.strip:EnableMouseWheel(true)
-  frame.strip:SetScript("OnMouseWheel", function(_, delta) Panel.PageChips(-delta) end)
-
-  frame.chips = {}
-  for i = 1, CHIPS_PER_PAGE do
-    frame.chips[i] = buildChip(frame.strip, i)
-    frame.chips[i]:Hide()
+  frame.strip:SetSize(BOSS_SLOTS * BOSS_PITCH - (BOSS_PITCH - BOSS_SIZE), BOSS_SIZE)
+  frame.strip:SetPoint("TOPRIGHT", -PAD, -BOSS_Y)
+  frame.bossTiles = {}
+  for i = 1, BOSS_SLOTS do
+    frame.bossTiles[i] = buildBossTile(frame.strip, i)
+    frame.bossTiles[i]:Hide()
   end
+  frame.stripMore = at(text(frame, "body", "tiny", "textDim"), 0, BOSS_Y + BOSS_SIZE + 2, 200, "RIGHT")
+  frame.stripMore:ClearAllPoints()
+  frame.stripMore:SetPoint("TOPRIGHT", -PAD, -(BOSS_Y + BOSS_SIZE + 2))
 
-  -- Page indicator PLUS arrows. The wheel alone was not an affordance — "1/3"
-  -- announced there were more pages while offering no visible way to reach them.
-  frame.chipMore = fs(frame, "GameFontDisableSmall", nil, nil, 46, "RIGHT")
-  frame.chipMore:SetPoint("TOPRIGHT", -14, -84)
+  -- ── The two filter toggles ────────────────────────────────────────────────
+  local function toggle(col, rowIdx, label, onClick)
+    local b = ns.Style and ns.Style.Pill(frame, TOG_W, TOG_H, label)
+      or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    b:SetPoint("TOPLEFT", TOG_X + col * TOG_COL, -(TOG_Y + rowIdx * TOG_ROW))
+    -- A filter that is not selected is still a choice on offer, so its label
+    -- stays readable while its fill recedes. Only the TABS dim their text.
+    b._dimText = false
+    b:SetScript("OnClick", onClick)
+    return b
+  end
+  local function pickSource(which)
+    return function()
+      state.source = which
+      state.sel, state.colScroll, state.rankScroll = 1, 0, 0
+      Panel.Refresh()
+    end
+  end
+  local function pickFilter(which)
+    return function()
+      state.filter = which
+      state.sel, state.colScroll, state.rankScroll = 1, 0, 0
+      Panel.Refresh()
+    end
+  end
+  frame.togDrops  = toggle(0, 0, "Current Drops",  pickSource("drops"))
+  frame.togTable  = toggle(1, 0, "Full Loot Table", pickSource("table"))
+  frame.togUsable = toggle(0, 1, "Usable Only",    pickFilter("usable"))
+  frame.togAll    = toggle(1, 1, "All Loot",       pickFilter("all"))
 
-  frame.chipPrev = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.chipPrev:SetSize(22, 18)
-  frame.chipPrev:SetPoint("TOPRIGHT", -38, -98)
-  frame.chipPrev:SetText("<")
-  frame.chipPrev:SetScript("OnClick", function() Panel.PageChips(-1) end)
-
-  frame.chipNext = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.chipNext:SetSize(22, 18)
-  frame.chipNext:SetPoint("TOPRIGHT", -14, -98)
-  frame.chipNext:SetText(">")
-  frame.chipNext:SetScript("OnClick", function() Panel.PageChips(1) end)
-
-  -- Difficulty, on the tab row's right. Cycles AUTO -> Normal -> Heroic ->
-  -- Mythic; AUTO follows the raid you are in, which is right in a raid and
-  -- useless in a city, hence the override.
-  frame.diff = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.diff:SetSize(96, 22)
-  frame.diff:SetPoint("TOPRIGHT", -12, -28)
-  frame.diff:SetScript("OnClick", function()
-    local spec
-    for _, s in ipairs(ns.Settings.SPEC) do if s.key == "difficulty" then spec = s end end
-    local cur, idx = ns.Settings.Get("difficulty"), 1
-    for i, c in ipairs(spec.choices) do if c == cur then idx = i end end
-    ns.Settings.Set("difficulty", spec.choices[(idx % #spec.choices) + 1])
-    Panel.Refresh()
-  end)
-  frame.diff:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-    GameTooltip:SetText("Difficulty", 1, 1, 1)
-    GameTooltip:AddLine("Which difficulty's item levels everything is scored against.", 0.8, 0.8, 0.8, true)
-    GameTooltip:AddLine("AUTO follows the raid you are currently in.", 0.8, 0.8, 0.8, true)
+  frame.togUsable:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetText("Usable Only", 1, 1, 1)
+    GameTooltip:AddLine("Hides items your class cannot equip.", 0.8, 0.8, 0.8, true)
+    GameTooltip:AddLine("Anything you have targeted stays visible either way — "
+      .. "hiding something you asked for is worse than showing one you cannot use.",
+      0.6, 0.6, 0.7, true)
     GameTooltip:Show()
   end)
-  frame.diff:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  frame.togUsable:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-  frame.context = fs(frame, "GameFontNormal", 16, -122, 400)
-  frame.context:SetTextColor(unpack(GOLD))
+  -- ── The item column ───────────────────────────────────────────────────────
+  frame.col = CreateFrame("Frame", nil, frame)
+  frame.col:SetPoint("TOPLEFT", COL_X, -COL_TOP)
+  frame.col:SetSize(COL_W, COL_ROWS * ITEM_PITCH)
+  frame.col:EnableMouseWheel(true)
+  frame.col:SetScript("OnMouseWheel", function(_, delta) Panel.ScrollColumn(-delta) end)
+  frame.itemRows = {}
+  for i = 1, COL_ROWS do
+    frame.itemRows[i] = buildItemRow(frame.col, i)
+    frame.itemRows[i]:Hide()
+  end
+  frame.colEmpty = at(text(frame, "body", "small", "textDim"), COL_X + 12, COL_TOP + 12, COL_W - 24)
+  frame.colMore = at(text(frame, "body", "tiny", "textDim"),
+    COL_X, COL_TOP + COL_ROWS * ITEM_PITCH + 2, COL_W)
 
-  -- The selected item's name is also a tooltip target — it is the biggest
-  -- representation of the item on screen, so hovering it should do what
-  -- hovering an item anywhere else in the game does.
-  frame.contextHover = CreateFrame("Frame", nil, frame)
-  frame.contextHover:SetPoint("TOPLEFT", 16, -120)
-  frame.contextHover:SetSize(400, 18)
-  frame.contextHover:EnableMouse(true)
-  frame.contextHover:SetScript("OnEnter", function(self)
-    local link = self.link or ns.ItemLinkFor(Panel.CurrentItemID())
+  -- ── Standings tab ─────────────────────────────────────────────────────────
+  -- The season, on the tab row's right. Only this tab shows it: the Loot design
+  -- leaves that space empty, and a label that appears on one tab and not another
+  -- is the design's choice to make, not this file's.
+  frame.season = text(frame, "titleMed", "title", "orange", "RIGHT")
+  if ns.Style then ns.Style.SetFont(frame.season, ns.Style.FONT.titleMed, 16) end
+  frame.season:SetPoint("TOPRIGHT", -(FRAME_W - SEASON_R), -62)
+  frame.season:SetWidth(220)
+
+  frame.rail = {}
+  for i, y in ipairs(RAIL_BLOCK_Y) do frame.rail[i] = buildRailBlock(frame, y) end
+
+  frame.stDiv = frame:CreateTexture(nil, "ARTWORK")
+  frame.stDiv:SetSize(1, ST_DIV_H)
+  frame.stDiv:SetPoint("TOPLEFT", ST_DIV_X, -ST_DIV_Y)
+  if ns.Style then
+    frame.stDiv:SetColorTexture(ns.Style.COLOR.rim.r, ns.Style.COLOR.rim.g,
+      ns.Style.COLOR.rim.b, 0.25)
+  end
+
+  frame.stHead = {
+    at(text(frame, "label", "tiny", "text"), ST_NAME, ST_HEAD_Y, 80),
+    atRight(text(frame, "label", "tiny", "text"), ST_EP_R, ST_HEAD_Y, 40),
+    atRight(text(frame, "label", "tiny", "text"), ST_GP_R, ST_HEAD_Y, 40),
+    atRight(text(frame, "label", "tiny", "text"), ST_PR_R, ST_HEAD_Y, 60),
+    atRight(text(frame, "label", "tiny", "text"), ST_LAST_R, ST_HEAD_Y, 60),
+  }
+  frame.stHead[1]:SetText("RAIDER")
+  frame.stHead[2]:SetText("EP")
+  frame.stHead[3]:SetText("GP")
+  frame.stHead[4]:SetText("PRIORITY")
+  frame.stHead[5]:SetText("LAST ITEM")
+
+  frame.stList = CreateFrame("Frame", nil, frame)
+  frame.stList:SetPoint("TOPLEFT", ST_RANK_R - 24, -ST_TOP)
+  frame.stList:SetSize(ST_LAST_R - (ST_RANK_R - 24), ST_ROWS * ST_PITCH)
+  frame.stList:EnableMouseWheel(true)
+  frame.stList:SetScript("OnMouseWheel", function(_, delta) Panel.Scroll(-delta) end)
+  frame.stRows = {}
+  for i = 1, ST_ROWS do
+    frame.stRows[i] = buildStandingsRow(frame.stList, i)
+    frame.stRows[i]:Hide()
+  end
+
+  frame.stNote = at(text(frame, "body", "small", "textDim"), ST_NAME, ST_TOP + 8, 340)
+  frame.stNote:SetWordWrap(true)
+
+  -- ── The detail pane ───────────────────────────────────────────────────────
+  frame.pane = CreateFrame("Frame", nil, frame)
+  frame.pane:SetPoint("TOPLEFT", PANE_X, -PANE_Y)
+  frame.pane:SetSize(PANE_W, PANE_H)
+  if ns.Style then
+    local S = ns.Style
+    frame.paneBg = frame.pane:CreateTexture(nil, "BACKGROUND")
+    frame.paneBg:SetAllPoints()
+    frame.paneBg:SetColorTexture(S.COLOR.purple.r, S.COLOR.purple.g, S.COLOR.purple.b, 0.2)
+  end
+
+  -- Header block 1: how big an upgrade this is for the viewer.
+  frame.hUpgradeLabel = at(text(frame, "titleMed", "row", "text"), 236, HEAD_Y, 130)
+  frame.hUpgradeLabel:SetText("Upgrade for You:")
+  frame.hUpgrade = at(text(frame, "title", "title", "major"), 236, HEAD_Y + 13, 140)
+  if ns.Style then ns.Style.SetFont(frame.hUpgrade, ns.Style.FONT.title, 24) end
+
+  -- Header block 2: where the viewer sits on the global ladder.
+  frame.hStandLabel = at(text(frame, "titleMed", "row", "text"), 379, HEAD_Y, 110)
+  frame.hStandLabel:SetText("Your Standing:")
+  frame.hStand = at(text(frame, "title", "title", "orange"), 379, HEAD_Y + 13, 110)
+  if ns.Style then ns.Style.SetFont(frame.hStand, ns.Style.FONT.title, 24) end
+
+  -- Header block 3: the raw EPGP numbers behind it.
+  frame.hEpgp = at(text(frame, "body", "tiny", "text"), 500, HEAD_Y + 2, 92)
+  frame.hEpgp:SetWordWrap(true)
+  frame.hEpgp:SetHeight(36)
+  frame.hEpgp:SetJustifyV("TOP")
+
+  frame.div1 = divider(frame, DIV_X, DIV1_Y, DIV_W)
+  frame.facts = at(text(frame, "body", "small", "text"), 236, FACTS_Y, DIV_W - 12)
+  frame.div2 = divider(frame, DIV_X, DIV2_Y, DIV_W)
+
+  -- The selected item's identity.
+  frame.itemIcon = frame:CreateTexture(nil, "ARTWORK")
+  frame.itemIcon:SetSize(40, 40)
+  frame.itemIcon:SetPoint("TOPLEFT", 231, -ITEM_Y)
+  frame.itemIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+  frame.itemName = at(text(frame, "label", "head", "text"), 281, ITEM_Y + 3, 200)
+  frame.itemSub  = at(text(frame, "body", "small", "textDim"), 281, ITEM_Y + 18, 200)
+
+  -- The item name is the biggest representation of the item on screen, so
+  -- hovering it should do what hovering an item anywhere else in the game does.
+  frame.itemHover = CreateFrame("Frame", nil, frame)
+  frame.itemHover:SetPoint("TOPLEFT", 231, -ITEM_Y)
+  frame.itemHover:SetSize(250, 40)
+  frame.itemHover:EnableMouse(true)
+  frame.itemHover:SetScript("OnEnter", function(self)
+    local link = self.link or (Panel.CurrentItemID() and ns.ItemLinkFor(Panel.CurrentItemID()))
     if not link then return end
     GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT")
     GameTooltip:SetHyperlink(link)
     GameTooltip:Show()
   end)
-  frame.contextHover:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  frame.itemHover:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-  frame.sub = fs(frame, "GameFontNormalSmall", 16, -138, 400)
-  frame.sub:SetTextColor(unpack(MUTED))
+  frame.wonDiv = frame:CreateTexture(nil, "ARTWORK")
+  frame.wonDiv:SetSize(1, 32)
+  frame.wonDiv:SetPoint("TOPLEFT", 485, -245)
+  if ns.Style then
+    frame.wonDiv:SetColorTexture(ns.Style.COLOR.rim.r, ns.Style.COLOR.rim.g,
+      ns.Style.COLOR.rim.b, 0.25)
+  end
+  frame.wonLabel = at(text(frame, "body", "tiny", "text"), 495, 246, 96)
+  frame.wonLabel:SetText("Won By:")
+  frame.wonBy = at(text(frame, "label", "tiny", "orange"), 495, 258, 96)
 
-  frame.head = CreateFrame("Frame", nil, frame)
-  frame.head:SetPoint("TOPLEFT", 14, -154)
-  frame.head:SetPoint("TOPRIGHT", -14, -154)
-  frame.head:SetHeight(12)
-  frame.headText = {
-    fs(frame.head, "GameFontDisableSmall", 28, 0, 140),
-    fs(frame.head, "GameFontDisableSmall", 172, 0, 70),
-    fs(frame.head, "GameFontDisableSmall", 282, 0, 66, "RIGHT"),
-    fs(frame.head, "GameFontDisableSmall", 354, 0, 78, "RIGHT"),
-  }
+  frame.div3 = divider(frame, DIV_X, DIV3_Y, DIV_W)
+
+  -- The ranked table's column headings.
+  frame.head = {}
+  frame.head[1] = at(text(frame, "label", "tiny", "text"), C_NAME, RANK_HEAD_Y, 90)
+  frame.head[2] = at(text(frame, "label", "tiny", "text"), C_UPGRADE, RANK_HEAD_Y, 110)
+  frame.head[3] = atRight(text(frame, "label", "tiny", "text"), C_GAIN_R, RANK_HEAD_Y, 44)
+  frame.head[4] = atRight(text(frame, "label", "tiny", "text"), C_PRIORITY_R, RANK_HEAD_Y, 48)
 
   frame.list = CreateFrame("Frame", nil, frame)
-  frame.list:SetPoint("TOPLEFT", 14, -LIST_TOP)
-  frame.list:SetPoint("BOTTOMRIGHT", -14, LIST_BOTTOM)
+  frame.list:SetPoint("TOPLEFT", C_RANK, -RANK_TOP)
+  frame.list:SetSize(C_PRIORITY_R - C_RANK, RANK_ROWS * RANK_PITCH)
   frame.list:EnableMouseWheel(true)
   frame.list:SetScript("OnMouseWheel", function(_, delta) Panel.Scroll(-delta) end)
-
   frame.rows = {}
-  for i = 1, VISIBLE_ROWS do
-    frame.rows[i] = buildRow(frame.list, i)
+  for i = 1, RANK_ROWS do
+    frame.rows[i] = buildRankRow(frame.list, i)
     frame.rows[i]:Hide()
   end
 
-  frame.more = fs(frame, "GameFontDisableSmall", 16, 0, 300)
-  frame.more:ClearAllPoints()
-  frame.more:SetPoint("BOTTOMLEFT", 16, 58)
+  frame.more = at(text(frame, "body", "tiny", "textDim"), C_RANK, MORE_Y, DIV_W)
+  frame.note = at(text(frame, "body", "tiny", "textDim"), C_RANK, NOTE_Y, DIV_W)
+  frame.note:SetAlpha(0.5)
 
-  frame.footer = fs(frame, "GameFontNormalSmall", 16, 0, 320)
-  frame.footer:ClearAllPoints()
-  frame.footer:SetPoint("BOTTOMLEFT", 16, 40)
-  frame.footer:SetTextColor(unpack(GOLD))
+  -- ── The bottom bar ────────────────────────────────────────────────────────
+  -- FIXED, and present on EVERY tab. Import Raid Night in particular cannot move
+  -- behind the Runner tab: it is how a non-runner BECOMES the runner, so it
+  -- cannot live behind the tab that only appears once you already are one
+  -- (Session 249).
+  frame.foot = CreateFrame("Frame", nil, frame)
+  frame.foot:SetPoint("TOPLEFT", 0, -FOOT_Y)
+  frame.foot:SetPoint("TOPRIGHT", 0, -FOOT_Y)
+  frame.foot:SetHeight(FOOT_H)
+  if ns.Style then
+    local S = ns.Style
+    local bg = frame.foot:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(S.rgb(S.COLOR.ground))
+    S.Rim(frame.foot, S.COLOR.rim, 0.4)
+  end
 
-  frame.post = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.post:SetSize(90, 22)
-  frame.post:SetPoint("BOTTOMRIGHT", -14, 38)
-  frame.post:SetText("Post")
+  frame.gearLine1 = at(text(frame.foot, "body", "tiny", "text"), PAD, 13, 200)
+  frame.gearLine2 = at(text(frame.foot, "body", "tiny", "text"), PAD, 25, 200)
+
+  local function footButton(w, rightOffset, label, onClick)
+    local b = ns.Style and ns.Style.Pill(frame.foot, w, 24, label)
+      or CreateFrame("Button", nil, frame.foot, "UIPanelButtonTemplate")
+    b:SetPoint("TOPRIGHT", -rightOffset, -13)
+    b:SetScript("OnClick", onClick)
+    if b.SetPillState then b:SetPillState(true) end
+    return b
+  end
+
+  frame.cfg = footButton(69, PAD, "Settings", function() ns.Settings.Toggle() end)
+  frame.log = footButton(69, PAD + 79, "Loot Log", function()
+    if ns.RecordWindow then ns.RecordWindow.Toggle() end
+  end)
+  frame.load = footButton(114, PAD + 79 + 79, "Import Raid Night", function()
+    ns.LoadWindow.Toggle()
+  end)
+
+  frame.load:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:SetText("Import Raid Night", 1, 1, 1)
+    GameTooltip:AddLine("Paste the export from the Loot Advisor page on the website.", 0.8, 0.8, 0.8, true)
+    GameTooltip:AddLine("This is what supplies everyone's gear — the rankings need it.", 0.8, 0.8, 0.8, true)
+    GameTooltip:Show()
+  end)
+  frame.load:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  frame.log:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:SetText("Loot Log", 1, 1, 1)
+    GameTooltip:AddLine("Every drop and every roll, recorded automatically. Review a night, "
+      .. "tag a run Guild or Personal, and export for the website.", 0.8, 0.8, 0.8, true)
+    local _, items = ns.Record.Counts()
+    GameTooltip:AddLine(("%d item%s recorded."):format(items, items == 1 and "" or "s"), 0.6, 0.6, 0.7)
+    GameTooltip:Show()
+  end)
+  frame.log:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+  -- ── Per-tab controls, in the pane's bottom-right ──────────────────────────
+  -- POST IS RUNNER-ONLY (Session 249): two people posting puts two different
+  -- lists in raid chat for one item, and chat is the only thing a non-installer
+  -- ever sees. It sits inside the pane rather than in the bottom bar because it
+  -- acts on the SELECTED ITEM, and the bar is about the window.
+  frame.post = ns.Style and ns.Style.Pill(frame, 69, 22, "Post")
+    or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  frame.post:SetPoint("TOPRIGHT", -PAD, -(NOTE_Y - 4))
+  if frame.post.SetPillState then frame.post:SetPillState(true) end
   frame.post:SetScript("OnClick", function()
     local id = Panel.CurrentItemID()
     if id then ns.Loot.PostToChat(id) end
@@ -617,24 +916,32 @@ local function build()
   end)
   frame.post:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-  -- ── The Runner tab's one control ──────────────────────────────────────────
-  -- ⚠️ ONLY the claim toggle belongs here. Import Raid Night, Loot Log and
-  -- Settings are ALREADY permanent buttons on the bottom row (see frame.load /
-  -- cfg / log below) — adding a second copy for this tab put two rows of
-  -- duplicates on screen and covered frame.footer. It takes the slot frame.post
-  -- uses on the other tabs, which is free here because Post is hidden.
-  frame.runToggle = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.runToggle:SetSize(150, 22)
-  frame.runToggle:SetPoint("BOTTOMRIGHT", -14, 38)
-  frame.runToggle:SetText("Run Loot Tonight")
+  frame.runToggle = ns.Style and ns.Style.Pill(frame, 150, 22, "Run Loot Tonight")
+    or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  frame.runToggle:SetPoint("TOPRIGHT", -PAD, -(NOTE_Y - 4))
+  if frame.runToggle.SetPillState then frame.runToggle:SetPillState(true) end
   frame.runToggle:Hide()
-  -- Auto-post lives HERE as well as in Settings because it is a runner's
+  frame.runToggle:SetScript("OnClick", function()
+    if not ns.Comms then return end
+    -- ⚠️ KEYED ON THE CLAIM, NEVER ON IsRunner(). IsRunner is also true for
+    -- someone who merely pasted the data, so keying on it made the button read
+    -- "Stop Running Loot" while the panel beside it said "Press Run Loot
+    -- Tonight" — and the first press then RELEASED the implicit role.
+    if ns.Comms.HasExplicitClaim() then
+      ns.Comms.ReleaseRunner()
+    else
+      ns.Comms.ClaimRunner()
+    end
+    Panel.Refresh()
+  end)
+
+  -- Auto-post lives here as well as in Settings because it is a runner's
   -- decision about tonight, not a preference you set once. Same stored value
   -- either way — Settings.SPEC is the single definition.
-  frame.autoPost = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.autoPost:SetSize(170, 22)
+  frame.autoPost = ns.Style and ns.Style.Pill(frame, 150, 22, "Auto-Post: Off")
+    or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
   frame.autoPost:SetPoint("RIGHT", frame.runToggle, "LEFT", -8, 0)
-  frame.autoPost:SetText("Auto-Post: Off")
+  if frame.autoPost.SetPillState then frame.autoPost:SetPillState(false) end
   frame.autoPost:Hide()
   frame.autoPost:SetScript("OnClick", function()
     if not ns.Settings then return end
@@ -653,72 +960,49 @@ local function build()
   end)
   frame.autoPost:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-  frame.runToggle:SetScript("OnClick", function()
-    if not ns.Comms then return end
-    -- ⚠️ KEYED ON THE CLAIM, NEVER ON IsRunner(). IsRunner is also true for
-    -- someone who merely pasted the data, so keying on it made the button read
-    -- "Stop Running Loot" while the panel beside it said "Press Run Loot
-    -- Tonight" — and the first press then RELEASED the implicit role instead of
-    -- claiming it, which is two presses to reach a state one should have.
-    if ns.Comms.HasExplicitClaim() then
-      ns.Comms.ReleaseRunner()
-    else
-      ns.Comms.ClaimRunner()
-    end
+  -- ⚠️ THE PROVISIONAL SWITCHER IS GONE. It existed only while Standings had no
+  -- design; that design has arrived and has no such control, and the personal
+  -- card it used to reach is now the rail down the left of that tab.
+  --
+  -- These three controls belong to the TARGET BROWSER, which still has no door
+  -- into it (see renderTargetsView). Built and hidden rather than removed, so
+  -- giving it a home is a matter of showing them again.
+  frame.standingsView = ns.Style and ns.Style.Pill(frame, 92, 22, "Targets")
+    or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  frame.standingsView:SetPoint("TOPLEFT", TOG_X, -TOG_Y)
+  frame.standingsView:Hide()
+
+  frame.instDrop = ns.Style and ns.Style.Pill(frame, 170, 22, "")
+    or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  frame.instDrop:SetPoint("TOPLEFT", TOG_X, -(TOG_Y + TOG_ROW))
+  frame.instDrop:Hide()
+  frame.instDrop:SetScript("OnClick", function()
+    local list = ns.Journal and ns.Journal.CachedInstances() or {}
+    if #list == 0 then return end
+    state.instIndex = (state.instIndex % #list) + 1
+    state.encIndex, state.rankScroll = 1, 0
     Panel.Refresh()
   end)
 
-  -- "Load Raid Data" is what the design doc calls this and what the runner is
-  -- actually doing. "Load Data" read as generic enough that it was not
-  -- recognisable as the paste step at all.
-  frame.load = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.load:SetSize(130, 22)
-  frame.load:SetPoint("BOTTOMLEFT", 14, 12)
-  frame.load:SetText("Import Raid Night")
-  frame.load:SetScript("OnClick", function() ns.LoadWindow.Toggle() end)
-  frame.load:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:SetText("Import Raid Night", 1, 1, 1)
-    GameTooltip:AddLine("Paste the export from the Loot Advisor page on the website.", 0.8, 0.8, 0.8, true)
-    GameTooltip:AddLine("This is what supplies everyone's gear — the rankings need it.", 0.8, 0.8, 0.8, true)
-    GameTooltip:Show()
+  frame.encDrop = ns.Style and ns.Style.Pill(frame, 170, 22, "")
+    or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  frame.encDrop:SetPoint("TOPLEFT", TOG_X, -(TOG_Y + TOG_ROW * 2))
+  frame.encDrop:Hide()
+  frame.encDrop:SetScript("OnClick", function()
+    local list = Panel._encounterList and Panel._encounterList() or {}
+    if #list == 0 then return end
+    state.encIndex = (state.encIndex % #list) + 1
+    state.rankScroll = 0
+    Panel.Refresh()
   end)
-  frame.load:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-  local cfg = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  cfg:SetSize(90, 22)
-  cfg:SetPoint("BOTTOMRIGHT", -14, 12)
-  cfg:SetText("Settings")
-  cfg:SetScript("OnClick", function() ns.Settings.Toggle() end)
-
-  -- The recorder runs whether or not anyone opens this, but a log nobody can
-  -- find is one nobody reviews — and reviewing it is the point (Session 243).
-  local log = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  log:SetSize(90, 22)
-  log:SetPoint("RIGHT", cfg, "LEFT", -8, 0)
-  log:SetText("Loot Log")
-  log:SetScript("OnClick", function()
-    if ns.RecordWindow then ns.RecordWindow.Toggle() end
-  end)
-  log:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-    GameTooltip:SetText("Loot Log", 1, 1, 1)
-    GameTooltip:AddLine("Every drop and every roll, recorded automatically. Review a night, tag a run Guild or Personal, and export for the website.", 0.8, 0.8, 0.8, true)
-    local _, items = ns.Record.Counts()
-    GameTooltip:AddLine(("%d item%s recorded."):format(items, items == 1 and "" or "s"), 0.6, 0.6, 0.7)
-    GameTooltip:Show()
-  end)
-  log:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
 -- ---------------------------------------------------------------------------
 -- Data
 -- ---------------------------------------------------------------------------
 
--- bossBisCount lives in Core.lua as ns.BisCountForBoss: it is pure payload
+-- BIS counting lives in Core.lua as ns.BisCountsByBoss: it is pure payload
 -- logic, and Panel.lua is frame construction the headless harness does not load.
--- Writing it here made it untestable, which is the SECOND time that happened
--- today — the quality tag had to be moved for the same reason.
 local function bossList()
   local data = ns.Data()
   local counts = ns.BisCountsByBoss()
@@ -733,121 +1017,145 @@ local function bossList()
   return out
 end
 
---- A picker label: the thing's name, plus how many of its drops are BIS for you.
---- Silent at zero rather than showing "0 BIS" down most of the list — the count
---- is there to draw the eye, and a column of zeroes does the opposite. Zero is
---- the NORMAL answer on the browse pickers, whose catalogue spans dungeons and
---- world bosses our payload does not cover at all.
+--- Attach the viewer's own verdict to one item entry — badge, grade, BIS,
+--- whether they can use it at all, and how much item level it would gain them.
 ---
---- One formatter for all three pickers so they cannot drift apart in wording or
---- colour, and so the count always means the same thing wherever it appears.
-local function pickerLabel(name, bis)
-  if (bis or 0) > 0 then
-    return ("%s   |cffff0080%d BIS|r"):format(name or "?", bis)
+--- ⚠️ THE VIEWER'S OWN, on every entry, including the ones the ranking below is
+--- about somebody else. That is what makes the column answer "is any of this for
+--- me" before a single row of the detail pane is read.
+local function scoreEntry(e)
+  local scored = ns.Loot.ScoreItem(e.itemID, { itemLink = e.link })
+  e.quality = scored.quality
+  e.ineligible = scored.ineligible or false
+  e.reason = scored.reason
+  if scored.result then
+    e.badge = scored.result.badge
+    e.isUpgrade = scored.result.is_upgrade
+    e.gain = (scored.candidateIlvl or 0) - ((scored.equipped or {}).ilvl or 0)
+  else
+    e.gain = 0
   end
-  return name or "?"
+  e.slotText = e.slotText or scored.slot
+  -- Carried so the detail pane's identity line does not score the same item a
+  -- SECOND time on every refresh just to learn its track and item level.
+  e.candidateTrack = scored.candidateTrack
+  e.candidateIlvl = scored.candidateIlvl
+  e.targeted = ns.Targets and ns.Targets.Has(e.itemID) or false
+  return e
 end
 
-local function bossLabel(b)
-  if not b then return "" end
-  return pickerLabel(b.name, b.bis)
-end
-
---- The strip's contents for the current tab: a list of items, each with the
---- VIEWER'S OWN badge. Same shape for Drops and Boss, which is what lets one
---- control serve both.
-local function stripEntries()
-  if state.tab == "Drops" then
-    local drops, out = ns.Loot.recent or {}, {}
-    for i = #drops, 1, -1 do          -- newest first
-      local d = drops[i]
-      out[#out + 1] = {
-        itemID = d.itemID, name = d.name, link = d.link,
-        badge = d.badge, reason = d.reason,
-      }
-    end
-    return out
-  end
-
-  local bosses = bossList()
-  local boss = bosses[state.bossIndex]
-  if not boss then return {} end
-
-  local data = ns.Data()
+--- The item column's contents.
+---
+--- TWO SOURCES, one shape. "Current Drops" reads the RECORDER, not the in-memory
+--- roll list: the memory list is wiped by a /reload and never learns a winner,
+--- while the recorder's copy survives in SavedVariables and is the only thing
+--- that knows who won. "Full Loot Table" reads the game's journal first and our
+--- payload second.
+local function itemEntries()
   local out, seen = {}, {}
 
-  -- THE GAME'S LIST FIRST, not ours (Data Contract §0: the drop list is driven
-  -- by what the game reports, never by what our data contains). This tab used to
-  -- list only items we had imported, so an item we never imported was INVISIBLE
-  -- on the one screen whose entire job is "everything this boss can drop" —
-  -- quietly the same failure §0 exists to prevent, one surface removed.
-  --
-  -- NOT class/spec filtered, deliberately: this tab ranks the whole ROSTER per
-  -- item, so filtering to the viewer would hide items that are somebody else's
-  -- upgrade. The Targets tab filters, because that one is personal.
-  --
-  -- data.bosses is keyed by BLIZZARD encounter id and so are journal
-  -- encounters — the same id space, which is what makes this a drop-in.
-  if ns.Journal then
-    for _, e in ipairs(ns.Journal.CachedLoot(boss.id)) do
-      if not seen[e.itemID] then
-        seen[e.itemID] = true
-        out[#out + 1] = { itemID = e.itemID, name = e.name, journal = true }
+  if state.source == "drops" then
+    for _, d in ipairs(ns.Record and ns.Record.RecentDrops(40) or {}) do
+      if d.itemID and not seen[d.itemID] then
+        seen[d.itemID] = true
+        out[#out + 1] = {
+          itemID = d.itemID, name = d.itemName or d.name, link = d.itemLink,
+          winner = d.winner,
+        }
+      end
+    end
+  else
+    local bosses = bossList()
+    local boss = bosses[state.bossIndex]
+    if not boss then return out end
+
+    local data = ns.Data()
+
+    -- THE GAME'S LIST FIRST, not ours (Data Contract §0: the drop list is driven
+    -- by what the game reports, never by what our data contains). Listing only
+    -- items we had imported made an item we never imported INVISIBLE on the one
+    -- screen whose entire job is "everything this boss can drop".
+    --
+    -- NOT class/spec filtered here: the Usable Only toggle is the viewer's own
+    -- decision, and the pane ranks the whole ROSTER per item, so filtering at
+    -- the source would hide somebody else's upgrade.
+    if ns.Journal then
+      for _, j in ipairs(ns.Journal.CachedLoot(boss.id)) do
+        if not seen[j.itemID] then
+          seen[j.itemID] = true
+          out[#out + 1] = {
+            itemID = j.itemID, name = j.name, link = j.link,
+            slotText = j.slot, armorType = j.armorType,
+          }
+        end
+      end
+    end
+
+    -- Anything we hold that the journal did not report is still shown. Where the
+    -- two disagree, the union is the degrade-loudly answer and a missing item is
+    -- the failure that actually costs somebody an upgrade.
+    for id, it in pairs((data or {}).items or {}) do
+      if it.boss == boss.id and not seen[id] then
+        seen[id] = true
+        out[#out + 1] = { itemID = id, name = it.name }
+      end
+    end
+
+    -- A journal entry read from a cold cache has no name yet. Fall back to ours,
+    -- then to the id — never to a blank row, which reads as a bug.
+    for _, e in ipairs(out) do
+      if not e.name then
+        local rec = (data or {}).items and data.items[e.itemID]
+        e.name = (rec and rec.name) or ("item:" .. tostring(e.itemID))
       end
     end
   end
 
-  -- Anything we hold that the journal did not report is still shown. The two
-  -- lists should agree; where they do not, showing the union is the degrade-
-  -- loudly answer and a missing item is the failure that actually costs someone
-  -- an upgrade.
-  for id, it in pairs((data or {}).items or {}) do
-    if it.boss == boss.id and not seen[id] then
-      seen[id] = true
-      out[#out + 1] = { itemID = id, name = it.name }
+  for _, e in ipairs(out) do scoreEntry(e) end
+
+  -- USABLE ONLY HIDES WHAT YOU CANNOT EQUIP, EXCEPT WHAT YOU ASKED FOR. Targets
+  -- pin to the top regardless of usability (Session 249, Jason, flatly) — a
+  -- target is an actively chosen thing, and a Resto Druid may legitimately be
+  -- chasing Feral gear. Hiding one behind a filter would be the same silent
+  -- omission the pin rule exists to prevent.
+  if state.filter == "usable" then
+    local kept = {}
+    for _, e in ipairs(out) do
+      if (not e.ineligible) or e.targeted then kept[#kept + 1] = e end
     end
+    out = kept
   end
 
-  -- A journal entry read from a cold cache has no name yet. Fall back to ours,
-  -- then to the id — never to a blank row, which reads as a bug.
-  for _, e in ipairs(out) do
-    if not e.name then
-      local rec = (data or {}).items and data.items[e.itemID]
-      e.name = (rec and rec.name) or ("item:" .. tostring(e.itemID))
-    end
-  end
+  return ns.OrderItems(out)
+end
 
-  table.sort(out, function(a, b) return (a.name or "") < (b.name or "") end)
+local function myEntry()
+  if not ns.Payload.Current() then return nil end
+  local me = UnitName("player")
+  if not me then return nil end
+  return ns.Payload.byName and ns.Payload.byName[me:lower()] or nil
+end
 
-  -- The viewer's own badge per item — the whole point of the strip. Scoring 13
-  -- items is a handful of table lookups, so this is cheap enough to do on every
-  -- refresh rather than cache and risk staleness.
-  for _, e in ipairs(out) do
-    local scored = ns.Loot.ScoreItem(e.itemID)
-    e.quality = scored.quality
-    if scored.reason then e.reason = scored.reason
-    else e.badge = scored.result and scored.result.badge end
-  end
-  return out
+--- The item the detail pane is currently about.
+---
+--- Reads the list the LAST REFRESH drew rather than rebuilding it. Rebuilding
+--- means scoring every item on the boss again, and this is called from Refresh
+--- itself, from the Post button's click and from its tooltip — three full passes
+--- per frame to answer a question the render had just answered. The cache is
+--- written by renderLoot and cleared whenever the tab changes, so it cannot
+--- outlive the list it came from.
+function Panel.CurrentItemID()
+  if state.tab ~= "Loot" then return nil end
+  local e = Panel._entries and Panel._entries[state.sel]
+  return e and e.itemID or nil
 end
 
 -- ---------------------------------------------------------------------------
--- Targets browsing
+-- The parked target browser (provisional — see the note in build())
 -- ---------------------------------------------------------------------------
---
--- This is the ONE surface that reaches past tonight's raid: raids, dungeons and
--- world bosses, the whole tier, filtered to what this character can actually
--- use. That reach is what makes targets worth having outside a raid night — the
--- Boss tab answers "who should we prioritise on this boss", and this one answers
--- "what am I going after", which is a different question with a different scope.
-
-local function instanceList()
-  if not ns.Journal then return {} end
-  return ns.Journal.CachedInstances()
-end
 
 local function currentInstance()
-  local list = instanceList()
+  local list = ns.Journal and ns.Journal.CachedInstances() or {}
   if #list == 0 then return nil end
   if state.instIndex > #list then state.instIndex = 1 end
   return list[state.instIndex]
@@ -858,6 +1166,7 @@ local function encounterList()
   if not inst then return {} end
   return ns.Journal.CachedEncounters(inst.id)
 end
+Panel._encounterList = encounterList
 
 local function currentEncounter()
   local list = encounterList()
@@ -866,12 +1175,9 @@ local function currentEncounter()
   return list[state.encIndex]
 end
 
---- The rows for the Targets tab, in whichever mode it is in.
----
 --- BROWSE goes through Blizzard's OWN class/spec filter rather than our emitted
---- eligibility answers. That is not a shortcut — it is the only thing that
---- answers for DUNGEON and WORLD BOSS loot at all, since our payload covers raid
---- items only. It is also why this needed no site work.
+--- eligibility answers. Not a shortcut — it is the only thing that answers for
+--- DUNGEON and WORLD BOSS loot at all, since our payload covers raid items only.
 local function targetRows()
   if state.targetMode == "flagged" then
     local out = {}
@@ -890,13 +1196,9 @@ local function targetRows()
   local char = ns.ResolveCharacter()
   local classID = select(3, UnitClass("player"))
 
-  -- A LIST FILTERED WITHOUT A SPEC IS A DIFFERENT LIST. If the character's spec
-  -- has not resolved yet, filtering by class alone returns more items than the
-  -- viewer can use — and because the spec is part of the cache key, the list
-  -- would then CHANGE LENGTH once it resolved, which is one of the two things
-  -- reported. Waiting is honest; showing the wrong list and correcting it later
-  -- is not. This is a guard against the SYMPTOM, and it holds whether or not the
-  -- item-cache explanation turns out to be the cause.
+  -- A LIST FILTERED WITHOUT A SPEC IS A DIFFERENT LIST, and because the spec is
+  -- part of the cache key the list would CHANGE LENGTH once it resolved. Waiting
+  -- is honest; showing the wrong list and correcting it later is not.
   if not (classID and char.specId) then
     ns.Journal.ScheduleWarm()
     return {}, true
@@ -906,11 +1208,9 @@ local function targetRows()
     classID = classID, specID = char.specId,
   })
 
-  -- A WARMING READ IS NOT SHOWN. It is wrong in two ways at once — unnamed AND
+  -- A WARMING READ IS NOT SHOWN: it is wrong in two ways at once — unnamed AND
   -- unfiltered, because Blizzard's filter cannot judge an item the client has
-  -- not loaded — so painting it puts a list of raw item ids on screen that then
-  -- silently changes length underneath the user. Journal re-reads and refreshes
-  -- on its own when the client answers, so this resolves within a moment.
+  -- not loaded.
   if warming then return {}, true end
 
   local inst = currentInstance()
@@ -919,29 +1219,12 @@ local function targetRows()
     out[#out + 1] = {
       itemID = e.itemID,
       name   = e.name or ("item:" .. tostring(e.itemID)),
-      icon   = e.icon,
-      link   = e.link,
-      slot   = e.slot,
-      veryRare = e.veryRare,
-      unusable = e.unusable,
+      icon   = e.icon, link = e.link, slot = e.slot,
+      veryRare = e.veryRare, unusable = e.unusable,
       source = ("%s · %s"):format(inst and inst.name or "?", enc.name or "?"),
     }
   end
   return out
-end
-
-local function myEntry()
-  if not ns.Payload.Current() then return nil end
-  local me = UnitName("player")
-  if not me then return nil end
-  return ns.Payload.byName and ns.Payload.byName[me:lower()] or nil
-end
-
-function Panel.CurrentItemID()
-  if state.tab ~= "Drops" and state.tab ~= "Boss" then return nil end
-  local entries = stripEntries()
-  local e = entries[state.sel]
-  return e and e.itemID or nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -949,171 +1232,449 @@ end
 -- ---------------------------------------------------------------------------
 
 local function hideRows(from)
-  for i = from, VISIBLE_ROWS do frame.rows[i]:Hide() end
+  for i = from, RANK_ROWS do frame.rows[i]:Hide() end
 end
 
 local function setHeaders(a, b, c, d)
-  frame.headText[1]:SetText(a or "")
-  frame.headText[2]:SetText(b or "")
-  frame.headText[3]:SetText(c or "")
-  frame.headText[4]:SetText(d or "")
+  frame.head[1]:SetText(a or "")
+  frame.head[2]:SetText(b or "")
+  frame.head[3]:SetText(c or "")
+  frame.head[4]:SetText(d or "")
 end
 
-local function renderStrip(entries)
-  local total = #entries
-  local pages = math.max(1, math.ceil(total / CHIPS_PER_PAGE))
-  if state.chipPage >= pages then state.chipPage = pages - 1 end
-  if state.chipPage < 0 then state.chipPage = 0 end
+--- The purple surface behind the detail pane.
+---
+--- ⚠️ IT IS ABSENT, NOT EMPTY, WHEN THERE IS NOTHING TO SHOW. Jason's 0-Drops
+--- mock has NO pane: the right-hand side is simply the window. The first build
+--- drew the full 380x360 purple block with a dash in it and two dividers
+--- floating across nothing, which is a large piece of furniture announcing that
+--- it has no contents. Between kills that is the NORMAL state, so it is the one
+--- worth getting right.
+local function showPaneSurface(shown)
+  if frame.paneBg then frame.paneBg:SetShown(shown) end
+end
 
-  local base = state.chipPage * CHIPS_PER_PAGE
-  for i = 1, CHIPS_PER_PAGE do
-    local chip = frame.chips[i]
-    local e = entries[base + i]
-    if not e then
-      chip:Hide()
+--- The Loot tab's own pane furniture: the three header blocks, the facts line,
+--- the item identity row, Won By, and the dividers that separate them. Hidden
+--- wholesale on the views that do not use them, so nothing is left drawing over
+--- a list it has nothing to do with.
+local function showLootPaneParts(shown)
+  for _, part in ipairs({
+    frame.hUpgradeLabel, frame.hUpgrade, frame.hStandLabel, frame.hStand, frame.hEpgp,
+    frame.div1, frame.facts, frame.div2, frame.div3,
+    frame.itemIcon, frame.itemHover, frame.itemName, frame.itemSub,
+    frame.wonDiv, frame.wonLabel, frame.wonBy,
+  }) do
+    if part then part:SetShown(shown) end
+  end
+end
+
+--- Blank every part of the detail pane that a view does not own, so nothing one
+--- view sets bleeds into the next.
+local function clearPane()
+  frame.hUpgradeLabel:SetText("")
+  frame.hUpgrade:SetText("")
+  frame.hStandLabel:SetText("")
+  frame.hStand:SetText("")
+  frame.hEpgp:SetText("")
+  frame.facts:SetText("")
+  frame.itemIcon:Hide()
+  frame.itemHover:Hide()
+  frame.itemName:SetText("")
+  frame.itemSub:SetText("")
+  frame.wonDiv:Hide()
+  frame.wonLabel:Hide()
+  frame.wonBy:SetText("")
+  frame.more:SetText("")
+  frame.note:SetText("")
+  setHeaders()
+end
+
+local function renderBossStrip()
+  local bosses = bossList()
+  if state.bossIndex > #bosses then state.bossIndex = 1 end
+
+  -- The strip is fixed at nine slots because the window is fixed. A raid with
+  -- more bosses than that is COUNTED rather than silently cut off — nine has
+  -- covered every tier so far, and the day it does not, the panel says so.
+  local shown = math.min(#bosses, BOSS_SLOTS)
+  for i = 1, BOSS_SLOTS do
+    local tile, b = frame.bossTiles[i], bosses[i]
+    if not b or i > shown then
+      tile:Hide()
     else
-      chip.entryIndex = base + i
-      chip.link = e.link
-      chip.itemID = e.itemID
-      chip.itemName = e.name
-      local marked = ns.Targets and ns.Targets.Has(e.itemID)
-      chip.name:SetText((marked and (TARGET_MARK .. " ") or "") .. (e.name or "?"))
-      chip.name:SetTextColor(unpack(WHITE))
-      if e.reason then
-        chip.badge:SetText("not for you")
-        chip.badge:SetTextColor(unpack(MUTED))
+      tile.bossIndex, tile.bossName, tile.bossBis = i, b.name, b.bis
+
+      -- ⚠️ BUNDLED SQUARE ART, NOT THE GAME'S CREATURE PORTRAIT. Two wrong
+      -- answers preceded this one. The Encounter Journal's creature icon is WIDE,
+      -- so forcing it into a 32x32 tile squashed every face; asking the client
+      -- for a proper portrait instead fixed the aspect and came back ROUND,
+      -- because that call renders the circular unit-frame portrait.
+      --
+      -- The design's tiles are 56x56 squares, and they are the same files
+      -- Gloom's Build Barn already bundles — that is where the mock's art came
+      -- from. So this addon bundles them too, and the strip is a plain texture
+      -- lookup with nothing to distort and nothing to resolve at runtime.
+      --
+      -- ⚠️ RENAMED TO THE BLIZZARD ENCOUNTER ID. Build Barn keys its copies by
+      -- WCL id; this payload's bosses are keyed by BLIZZARD id, and those are
+      -- different number spaces (Core §1.1). Renaming at bundle time keeps the
+      -- lookup a single index rather than shipping a mapping table that would
+      -- need maintaining alongside the art.
+      --
+      -- ⚠️ NEW TIER = NEW ART, or these draw as initials. Same standing cost
+      -- Build Barn carries; it belongs on the season-rollover checklist.
+      tile.art:SetTexture(("Interface\\AddOns\\HoDLootAdvisor\\Media\\bosses\\%d.png")
+        :format(b.id))
+      local drew = tile.art:GetTexture() ~= nil
+
+      tile.art:SetShown(drew)
+      tile.fallback:SetShown(not drew)
+      tile.initial:SetText(drew and "" or (b.name or "?"):sub(1, 1):upper())
+      tile.sel:SetShown(i == state.bossIndex)
+      tile:Show()
+    end
+  end
+  frame.stripMore:SetText(#bosses > BOSS_SLOTS
+    and ("+%d more bosses not shown"):format(#bosses - BOSS_SLOTS) or "")
+end
+
+local function renderItemColumn(entries)
+  local total = #entries
+  local maxScroll = math.max(0, total - COL_ROWS)
+  if state.colScroll > maxScroll then state.colScroll = maxScroll end
+  if state.sel > total then state.sel = 1 end
+
+  frame.colEmpty:SetShown(total == 0)
+  if total == 0 then
+    -- The mock's own words, in its own treatment: uppercase and in the Major
+    -- red, not a grey sentence. It is a STATE, and the design gives states the
+    -- same weight as data.
+    frame.colEmpty:SetText(state.source == "drops"
+      and "NO DROPS CURRENTLY"
+      or "NO ITEMS FOR THIS BOSS")
+    if ns.Style then frame.colEmpty:SetTextColor(ns.Style.rgb(ns.Style.COLOR.major)) end
+    frame.colMore:SetText("")
+    for i = 1, COL_ROWS do frame.itemRows[i]:Hide() end
+    return
+  end
+
+  local S = ns.Style
+  for i = 1, COL_ROWS do
+    local row, e = frame.itemRows[i], entries[i + state.colScroll]
+    if not e then
+      row:Hide()
+    else
+      local idx = i + state.colScroll
+      row.entryIndex, row.itemID, row.itemName, row.link = idx, e.itemID, e.name, e.link
+
+      row.name:SetText(e.name or "?")
+
+      -- The verdict word, then the slot. "NOT FOR YOU" is deliberately DISTINCT
+      -- from "unscored": one is the system working, the other is our data
+      -- falling short, and conflating them hides a real gap.
+      local verdict, vColor
+      if e.ineligible then
+        verdict, vColor = "NOT FOR YOU", S and S.COLOR.grey
+      elseif e.reason then
+        verdict, vColor = "UNSCORED", S and S.COLOR.red
+      elseif e.isUpgrade == false then
+        verdict, vColor = "NO UPGRADE", S and S.COLOR.grey
       else
-        chip.badge:SetText(BADGE_LABEL[e.badge or "sidegrade"] or "")
-        local bc = BADGE_COLOR[e.badge or "sidegrade"] or MUTED
-        chip.badge:SetTextColor(bc[1], bc[2], bc[3])
+        local label, color = badgeOf(e.badge)
+        verdict, vColor = (label or ""):upper(), color
       end
-      -- Shown even when the item is "not for you": that verdict is about armour
-      -- type, and a grade is still the truth about the item.
-      local qText, qColor = qualityTag(e.quality)
-      chip.quality:SetText(qText or "")
-      if qColor then chip.quality:SetTextColor(qColor[1], qColor[2], qColor[3]) end
-      local isSel = (base + i == state.sel)
-      chip.sel:SetShown(isSel)
-      -- The rim carries the selection; the fill stays put so the text on it does
-      -- not shift brightness between states.
-      if chip.rim and ns.Style then
-        chip.rim:SetColor(isSel and ns.Style.COLOR.gold or ns.Style.COLOR.border, isSel and 1 or 1)
+      local slotLine = ns.ItemSlotLine(e)
+      local sep = (verdict ~= "" and slotLine ~= "") and " • " or ""
+      if S then
+        -- Each run closes with |r before the next opens. Nesting colour codes
+        -- without a reset is accepted by some clients and not others, and the
+        -- failure is a whole line taking the first colour.
+        row.sub:SetText(
+          S.code(vColor or S.COLOR.grey) .. verdict .. "|r"
+          .. S.code(S.COLOR.grey) .. sep .. "|r"
+          .. slotLine)
+      else
+        row.sub:SetText(verdict .. sep .. slotLine)
       end
-      chip:Show()
+
+      row.markTarget:SetShown(e.targeted and true or false)
+      row.markBis:SetShown((e.quality and e.quality.bis) and true or false)
+
+      local selected = (idx == state.sel)
+      row._selected = selected
+      if S then
+        row.bg:SetColorTexture(S.COLOR.purple.r, S.COLOR.purple.g, S.COLOR.purple.b,
+          selected and 0.2 or 0.1)
+      end
+      row:Show()
     end
   end
 
-  local paged = total > CHIPS_PER_PAGE
-  frame.chipMore:SetText(paged and ("%d/%d"):format(state.chipPage + 1, pages) or "")
-  frame.chipPrev:SetShown(paged)
-  frame.chipNext:SetShown(paged)
-  if paged then
-    frame.chipPrev:SetEnabled(state.chipPage > 0)
-    frame.chipNext:SetEnabled(state.chipPage < pages - 1)
+  frame.colMore:SetText(total > COL_ROWS
+    and ("%d–%d of %d · scroll"):format(state.colScroll + 1,
+      math.min(total, state.colScroll + COL_ROWS), total) or "")
+end
+
+--- The pane's three header blocks: the viewer's own verdict, their place on the
+--- ladder, and the numbers behind it.
+local function renderPaneHeader(entry)
+  frame.hUpgradeLabel:SetText("Upgrade for You:")
+  local S = ns.Style
+
+  if not entry then
+    frame.hUpgrade:SetText("—")
+    if S then frame.hUpgrade:SetTextColor(S.rgb(S.COLOR.grey)) end
+  elseif entry.ineligible then
+    frame.hUpgrade:SetText("Not For You")
+    if S then frame.hUpgrade:SetTextColor(S.rgb(S.COLOR.grey)) end
+  elseif entry.reason then
+    frame.hUpgrade:SetText("Unscored")
+    if S then frame.hUpgrade:SetTextColor(S.rgb(S.COLOR.red)) end
+  elseif entry.isUpgrade == false then
+    frame.hUpgrade:SetText("No Upgrade")
+    if S then frame.hUpgrade:SetTextColor(S.rgb(S.COLOR.grey)) end
+  else
+    local label, color = badgeOf(entry.badge)
+    frame.hUpgrade:SetText(label or "?")
+    if S and color then frame.hUpgrade:SetTextColor(S.rgb(color)) end
   end
+
+  frame.hStandLabel:SetText("Your Standing:")
+  local me = myEntry()
+  if me and me.rank then
+    local n, suffix = ns.Ordinal(me.rank)
+    frame.hStand:SetText((n or "?") .. (suffix or ""))
+  else
+    frame.hStand:SetText("—")
+  end
+
+  if me and me.pr then
+    frame.hEpgp:SetText(("Priority: %.2f\nEffort Points: %s\nGear Points: %s")
+      :format(me.pr, tostring(me.ep), tostring(me.gp)))
+  elseif ns.Payload.Current() then
+    frame.hEpgp:SetText("No EPGP standing\nyet this season")
+  else
+    frame.hEpgp:SetText("")
+  end
+end
+
+--- The facts line beneath the header: gain, gap, quality and target state.
+---
+--- ⚠️ NO "Cost: 100 GP" YET, and it is not being faked. The design shows the
+--- item's GP price, but the addon has no way to compute one: the raid payload
+--- carries each raider's EP/GP/PR and nothing about what an ITEM costs, and the
+--- pricing formula lives on the site. A number invented here would be a raw
+--- figure with an authoritative label, which is the exact failure Core §7.7
+--- forbids. The segment appears when the payload carries a price.
+local function renderFacts(entry, ranked)
+  if not entry then frame.facts:SetText("") return end
+  local S = ns.Style
+  local parts = {}
+
+  if (entry.gain or 0) > 0 and not entry.ineligible then
+    parts[#parts + 1] = ("+%d ilvl"):format(entry.gain)
+  end
+
+  -- The viewer's own gap from the leader, read off the ranking rather than
+  -- recomputed — and ABSENT rather than zero when the sort cannot guarantee
+  -- score order, which is what makes a gap meaningful at all.
+  local me = (UnitName("player") or ""):lower()
+  for i, r in ipairs(ranked or {}) do
+    if (r.name or ""):lower() == me then
+      if r.gap and i > 1 then
+        parts[#parts + 1] = ("%d behind"):format(r.gap)
+      elseif i == 1 then
+        parts[#parts + 1] = "top of the list"
+      end
+      break
+    end
+  end
+
+  local q = entry.quality
+  if q and q.bis and S then
+    parts[#parts + 1] = S.code(S.COLOR.bis) .. (ns.BIS_LONG[q.bis] or "BIS") .. "|r"
+  elseif q and q.grade and S then
+    local tag = qualityTag(q)
+    if tag then parts[#parts + 1] = tag .. " grade" end
+  end
+
+  if entry.targeted and S then
+    parts[#parts + 1] = S.code(S.COLOR.target) .. "Targeted" .. "|r"
+  end
+
+  if #parts == 0 then
+    frame.facts:SetText(entry.reason or "")
+  else
+    local sep = S and (S.code(S.COLOR.grey) .. "  " .. BAR .. "  |r") or ("  " .. BAR .. "  ")
+    frame.facts:SetText(table.concat(parts, sep))
+  end
+end
+
+--- The selected item's identity row, and who won it.
+local function renderItemIdentity(entry)
+  if not entry then
+    frame.itemIcon:Hide()
+    frame.itemHover:Hide()
+    frame.itemName:SetText("")
+    frame.itemSub:SetText("")
+    frame.wonDiv:Hide()
+    frame.wonLabel:Hide()
+    frame.wonBy:SetText("")
+    return
+  end
+
+  local icon = entry.icon
+  if not icon and GetItemIcon then icon = GetItemIcon(entry.itemID) end
+  frame.itemIcon:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+  frame.itemIcon:Show()
+  frame.itemHover.link = entry.link
+  frame.itemHover:Show()
+
+  frame.itemName:SetText(entry.name or "?")
+
+  -- Slot, armour type, track and the item level this difficulty drops it at —
+  -- the facts that say WHICH version of the item this is. All four came off the
+  -- scoring pass the column already ran.
+  local bits = {}
+  local slotLine = ns.ItemSlotLine(entry)
+  if slotLine ~= "" then bits[#bits + 1] = slotLine end
+  if entry.candidateTrack then bits[#bits + 1] = entry.candidateTrack end
+  if (entry.candidateIlvl or 0) > 0 then
+    bits[#bits + 1] = ("ilvl %d"):format(entry.candidateIlvl)
+  end
+  frame.itemSub:SetText(table.concat(bits, " • "))
+
+  -- WON BY, from the RECORDER. nil is a real answer and is shown as one: nothing
+  -- in the addon registers that a roll ENDED, only that one started, so "still
+  -- open" and "we never found out" are indistinguishable from here. Saying
+  -- nothing is honest; a countdown or a "pending" would not be.
+  local winner = entry.winner or (ns.Record and ns.Record.WinnerFor(entry.itemID))
+  frame.wonDiv:SetShown(winner ~= nil)
+  frame.wonLabel:SetShown(winner ~= nil)
+  frame.wonBy:SetText(winner or "")
 end
 
 local function renderRanking(itemID)
   -- RankingFor, not RankRaiders: when the runner has broadcast a ranking for
-  -- this item, theirs is the one everyone shows. See Loot.RankingFor.
-  local ranked, all, meta, fromRunner = ns.Loot.RankingFor(itemID)
-  setHeaders("Raider", "Upgrade", "Gain", "Priority")
+  -- this item, theirs is the one everyone shows.
+  local ranked, _all, meta, fromRunner = ns.Loot.RankingFor(itemID)
+  setHeaders("RAIDER", "UPGRADE", "GAIN", "PRIORITY")
 
   if not ranked then
     -- ⚠️ SAY WHAT IS SHOWN, NOT ONLY WHAT IS MISSING. The grades and BIS marks
-    -- in the strip above are the VIEWER'S OWN — scored from their equipped gear
+    -- in the column are the VIEWER'S OWN — scored from their equipped gear
     -- against the addon's baked-in tables, so they are fully correct with no
-    -- roster loaded. Reading "nothing imported" directly beneath a strip full
-    -- of live grades makes both halves look broken when neither is.
-    frame.sub:SetText("No raid data — the grades above are yours. "
-      .. "Press Import Raid Night to rank the raid for this item.")
-    -- Cleared too: column headings over a permanently empty list are the other
-    -- half of what makes this read as a failure rather than a state.
+    -- roster loaded. Reading "nothing imported" beside a full column makes both
+    -- halves look broken when neither is.
     setHeaders()
     frame.more:SetText("")
+    frame.note:SetText("The column is scored for you from your own gear. "
+      .. "Press Import Raid Night to rank the raid for this item.")
     hideRows(1)
-    return
+    return nil
   end
-
-  -- The reporting gap is named on the line that already describes the list.
-  -- A raider who is not reporting is still ranked, from the snapshot, and is
-  -- never silently dropped — but the runner is the person who needs to know how
-  -- much of this list is live and how much is a snapshot.
-  local usable = meta.usable or #ranked
-  local sub = meta.total and ("%d of %d raiders can use it"):format(usable, meta.total)
-    or ("%d raiders can use it"):format(usable)
-  if fromRunner then
-    -- Named, because "why does my list differ from what I would have worked
-    -- out" has exactly one answer and it should not be a mystery.
-    sub = sub .. ("  ·  ranked by %s"):format(fromRunner)
-  else
-    local gear = ns.GearReportingSummary()
-    if gear and gear.reporting > 0 then
-      sub = sub .. ("  ·  %d of %d reporting live gear"):format(gear.reporting, gear.total)
-    end
-  end
-  frame.sub:SetText(sub)
 
   local total = #ranked
-  local maxScroll = math.max(0, total - VISIBLE_ROWS)
-  if state.scroll > maxScroll then state.scroll = maxScroll end
+  local maxScroll = math.max(0, total - RANK_ROWS)
+  if state.rankScroll > maxScroll then state.rankScroll = maxScroll end
 
   if total == 0 then
     frame.more:SetText("")
+    frame.note:SetText("Nobody on the roster can use this.")
     hideRows(1)
-    return
+    return ranked
   end
 
   local me = (UnitName("player") or ""):lower()
-  local shown = math.min(total - state.scroll, VISIBLE_ROWS)
+  local shown = math.min(total - state.rankScroll, RANK_ROWS)
+  local S = ns.Style
+  local sawAdhoc = false
+
+  -- ⚠️ JOINT RANKING ON TIES, COMPUTED OVER THE WHOLE LIST. Two raiders on the
+  -- same score share a place and the next one skips — 1, 2, 2, 4 — which is what
+  -- the design shows and what a tie MEANS. Numbering them 2 and 3 asserts an
+  -- order the scorer did not produce, and the person shown "third" would
+  -- reasonably read it as having lost.
+  --
+  -- The whole list, not the visible rows: a place depends on every row ABOVE it,
+  -- so deriving it from the previous VISIBLE row restarts the numbering at the
+  -- top of each scroll page, and a tie straddling the boundary comes apart.
+  --
+  -- A received ranking carries no scores — the wire deliberately never sends
+  -- them (Session 249) — so those rows fall through to their ordinal, which is
+  -- correct: the runner already resolved the ties when they ranked it.
+  local place = {}
+  for i = 1, total do
+    local r, prev = ranked[i], ranked[i - 1]
+    if prev and prev.result and r.result
+       and prev.result.raw_score ~= nil
+       and prev.result.raw_score == r.result.raw_score then
+      place[i] = place[i - 1]
+    else
+      place[i] = i
+    end
+  end
 
   for i = 1, shown do
     local row = frame.rows[i]
-    local r = ranked[i + state.scroll]
+    local idx = i + state.rankScroll
+    local r = ranked[idx]
     resetRow(row)
 
-    row.rank:SetText(tostring(i + state.scroll))
+    row.rank:SetText(tostring(place[idx] or idx))
     row.rank:SetTextColor(unpack(MUTED))
 
-    row.name:SetText(r.name or "?")
+    local displayName = r.name or "?"
+    if r.adhoc then
+      -- AN AD-HOC RAIDER IS MARKED: somebody the raid-night export has never
+      -- heard of, resolved entirely from what we could read off them in game.
+      -- "Who is that" is the question a runner has when an unfamiliar name
+      -- appears, and the asterisk answers it before they ask.
+      displayName = displayName .. "*"
+      sawAdhoc = true
+    end
+    row.name:SetText(displayName)
     local cc = CLASS_COLOR[r.class or ""] or WHITE
     row.name:SetTextColor(cc[1], cc[2], cc[3])
 
-    row.badge:SetText(BADGE_LABEL[r.result.badge] or "")
-    local bc = BADGE_COLOR[r.result.badge] or MUTED
-    row.badge:SetTextColor(bc[1], bc[2], bc[3])
-
-    -- Per-raider, because a grade belongs to a SPEC: two people contesting one
-    -- trinket can hold different letters, and that is what explains their order.
+    -- The UPGRADE column carries the badge, the grade or BIS mark, and the gap,
+    -- in that order — the design's "BIS Major" and "Major −16".
+    local upgrade = {}
     local qText, qColor = qualityTag(r.quality)
+    if qText and S and qColor then
+      upgrade[#upgrade + 1] = ("|cff%02x%02x%02x%s|r"):format(
+        qColor[1] * 255, qColor[2] * 255, qColor[3] * 255, qText)
+    end
+    local label, color = badgeOf(r.result and r.result.badge)
+    if label and S and color then
+      upgrade[#upgrade + 1] = S.code(color) .. label .. "|r"
+    end
+    -- Gap is ABSENT, not zero, when the sort cannot guarantee score order.
+    if r.gap and idx > 1 then
+      if r.gap == 0 then
+        upgrade[#upgrade + 1] = (S and S.code(S.COLOR.textDim) or "") .. "tie"
+      else
+        upgrade[#upgrade + 1] = (S and S.code(S.COLOR.textDim) or "") .. tostring(r.gap)
+      end
+    end
+    row.upgrade:SetText(table.concat(upgrade, " "))
+
     -- A raider ranked as one spec while standing in another gets a marker, and
-    -- the sentence goes in the row tooltip — the column is 28px, which is not
-    -- room to explain anything. ns.SpecSplitTag stays quiet unless the spec
-    -- change actually changes this item's grade.
+    -- the sentence goes in the row tooltip. ns.SpecSplitTag stays quiet unless
+    -- the spec change actually changes this item's grade.
     local splitMark, splitName, splitHelp = ns.SpecSplitTag(r)
     row.splitName, row.splitHelp = splitName, splitHelp
-    row.quality:SetText((qText or "") .. (splitMark or ""))
-    if qColor then row.quality:SetTextColor(qColor[1], qColor[2], qColor[3]) end
-
-    -- Gap is ABSENT, not zero, when the sort cannot guarantee score order.
-    if r.gap == nil or (i + state.scroll) == 1 then
-      row.gap:SetText("")
-    elseif r.gap == 0 then
-      row.gap:SetText("tie")
-    else
-      row.gap:SetText(tostring(r.gap))
+    if splitMark then
+      row.upgrade:SetText(row.upgrade:GetText() .. (S and S.code(S.COLOR.gold) or "") .. splitMark)
     end
-    row.gap:SetTextColor(unpack(MUTED))
 
     -- One field on both paths (Loot.RankRaiders sets it, the wire carries it).
-    -- Subtracting equipped ilvl here would read 0 for a received row and render
-    -- as the item's own level rather than a gain.
     local gain = r.ilvlGain or 0
-    row.ilvl:SetText(gain > 0 and ("+%d ilvl"):format(gain) or "")
-    row.ilvl:SetTextColor(unpack(MUTED))
+    row.gain:SetText(gain > 0 and ("+%d"):format(gain) or "")
 
     if r.pr then
-      row.pr:SetText(("PR %.2f"):format(r.pr))
+      row.pr:SetText(("%.2f"):format(r.pr))
       row.pr:SetTextColor(unpack(WHITE))
     else
       row.pr:SetText("—")
@@ -1121,25 +1682,12 @@ local function renderRanking(itemID)
     end
 
     -- Which TIER this raider's gear came from. Three-tier provenance is only
-    -- worth having if it is visible: "ranked from what they are wearing right
-    -- now" and "ranked from a snapshot that may be hours old" are different
-    -- claims about the same row.
+    -- worth having if it is visible.
     local srcText, srcColor, srcHelp = ns.ProvenanceTag(r.equipped)
     row.src:SetText(srcText or "")
-    if srcColor then
-      row.src:SetTextColor(srcColor[1], srcColor[2], srcColor[3])
-    end
-    row.srcHelp = srcHelp
-    row.srcName = r.name
-
-    -- ⚠️ AN AD-HOC RAIDER IS MARKED. They are somebody the raid-night export
-    -- has never heard of — an alt, a trial, a pug — resolved entirely from what
-    -- we could read off them in game. Everything about their row is a degree
-    -- less certain than the rest of the list, and, more practically, "who is
-    -- that" is the question a runner has when an unfamiliar name appears in a
-    -- ranking. The asterisk answers it before they have to ask.
+    if srcColor then row.src:SetTextColor(srcColor[1], srcColor[2], srcColor[3]) end
+    row.srcHelp, row.srcName = srcHelp, r.name
     if r.adhoc then
-      row.name:SetText((r.name or "?") .. "|cff888899*|r")
       row.srcHelp = (srcHelp and (srcHelp .. "\n\n") or "")
         .. "Not on tonight's raid-night export — read from them in game. "
         .. "No EPGP standing exists for them."
@@ -1151,288 +1699,280 @@ local function renderRanking(itemID)
   hideRows(shown + 1)
 
   -- Rows that do not fit are COUNTED, never silently cut off.
-  if total > VISIBLE_ROWS then
-    frame.more:SetText(("showing %d–%d of %d · scroll for more")
-      :format(state.scroll + 1, state.scroll + shown, total))
+  local bits = {}
+  local usable = (meta and meta.usable) or total
+  bits[#bits + 1] = (meta and meta.total)
+    and ("%d of %d raiders can use it"):format(usable, meta.total)
+    or ("%d raiders can use it"):format(usable)
+  if fromRunner then
+    -- Named, because "why does my list differ from what I would have worked out"
+    -- has exactly one answer and it should not be a mystery.
+    bits[#bits + 1] = ("ranked by %s"):format(fromRunner)
   else
-    frame.more:SetText("")
+    local gear = ns.GearReportingSummary()
+    if gear and gear.reporting > 0 then
+      bits[#bits + 1] = ("%d of %d reporting live gear"):format(gear.reporting, gear.total)
+    end
   end
+  if total > RANK_ROWS then
+    bits[#bits + 1] = ("showing %d–%d · scroll for more")
+      :format(state.rankScroll + 1, state.rankScroll + shown)
+  end
+  frame.more:SetText(table.concat(bits, "  ·  "))
+
+  frame.note:SetText(sawAdhoc
+    and "*  Not on tonight's raid roster | Upgrade score calculated from equipped gear"
+    or "")
+
+  return ranked
 end
 
-local function renderItemList()
-  local entries = stripEntries()
-  frame.strip:Show()
-  renderStrip(entries)
+local function renderLoot()
+  local entries = itemEntries()
+  Panel._entries = entries
+  renderBossStrip()
 
-  if #entries == 0 then
-    frame.context:SetText(state.tab == "Drops" and "Waiting for loot" or "No items for this boss")
-    frame.sub:SetText(state.tab == "Drops"
-      and "Rolls appear here as they happen. /la test <itemID> fakes one."
-      or "")
+  -- The boss context: which boss, and how much of its table matters to you.
+  local bosses = bossList()
+  local boss = bosses[state.bossIndex]
+  frame.bossName:SetText(boss and boss.name or "No boss data")
+  local bis, targets = ns.CountsForItems(entries)
+  local S = ns.Style
+  if S then
+    frame.bossSub:SetText("For You: "
+      .. S.code(S.COLOR.bis) .. bis .. " BIS|r"
+      .. S.code(S.COLOR.grey) .. " " .. BAR .. " |r"
+      .. S.code(S.COLOR.target) .. targets .. " Targets|r")
+  else
+    frame.bossSub:SetText(("For You: %d BIS %s %d Targets"):format(bis, BAR, targets))
+  end
+
+  renderItemColumn(entries)
+
+  local entry = entries[state.sel]
+
+  -- NO SELECTION MEANS NO PANE, exactly as the 0-Drops mock draws it. The whole
+  -- right-hand side goes away rather than standing there empty.
+  if not entry then
+    showPaneSurface(false)
+    showLootPaneParts(false)
     setHeaders()
     frame.more:SetText("")
+    frame.note:SetText("")
     hideRows(1)
     return
   end
 
-  if state.sel > #entries then state.sel = 1 end
-  local sel = entries[state.sel]
+  showPaneSurface(true)
+  showLootPaneParts(true)
+  renderPaneHeader(entry)
+  renderItemIdentity(entry)
 
-  frame.context:SetText(("%s   |cff888888(%d of %d)|r")
-    :format(sel.name or "?", state.sel, #entries))
-  frame.contextHover.link = sel.link
-  frame.contextHover:Show()
-  renderRanking(sel.itemID)
+  local ranked = renderRanking(entry.itemID)
+  renderFacts(entry, ranked)
 end
 
-local function renderTargets()
-  frame.strip:Hide()
-  for i = 1, CHIPS_PER_PAGE do frame.chips[i]:Hide() end
-  frame.chipMore:SetText("")
-  frame.chipPrev:Hide()
-  frame.chipNext:Hide()
+-- ---------------------------------------------------------------------------
+-- Standings, and the two views parked behind it
+-- ---------------------------------------------------------------------------
 
-  local browsing = state.targetMode == "browse"
-  local count = ns.Targets and ns.Targets.Count() or 0
+--- The personal rail: priority, EP/GP, attendance, last item won.
+---
+--- This is the old "Me" tab, folded into the Standings design where Jason put
+--- it. Nothing is lost by the tab going away — the rail says everything the card
+--- did, beside the table it is a position within.
+local function renderRail(total)
+  local S = ns.Style
+  local me = myEntry()
+  local blocks = frame.rail
 
-  if browsing then
-    local inst, enc = currentInstance(), currentEncounter()
-    frame.context:SetText(inst and inst.name or "No catalogue")
-    frame.sub:SetText(enc and enc.name
-      or "The Adventure Guide had nothing to enumerate here.")
-  else
-    frame.context:SetText("Your Targets")
-    frame.sub:SetText(("%d flagged on %s — right-click to remove"):format(
-      count, UnitName("player") or "this character"))
+  for _, b in ipairs(blocks) do
+    for _, key in ipairs({ "head", "big", "bigSuffix", "line1", "line2", "line3" }) do
+      b[key]:SetText("")
+    end
   end
 
-  -- Item names are long, so the name column takes the badge column's space and
-  -- the remaining facts move right. Set per render because the ranking rows want
-  -- the narrow name back.
-  setHeaders("Item", "", "Slot", "Source")
+  blocks[1].head:SetText("YOUR PRIORITY")
+  blocks[2].head:SetText("EARNED / SPENT")
+  blocks[3].head:SetText("ATTENDANCE")
+  blocks[4].head:SetText("LAST ITEM WON")
+
+  if not me then
+    blocks[1].line1:SetText(ns.Payload.Current()
+      and "You are not on the exported roster."
+      or "Nothing imported yet.")
+    return
+  end
+
+  if me.rank then
+    blocks[1].big:SetText("#" .. tostring(me.rank))
+    blocks[1].line1:SetText(("of %d • PR %.2f"):format(total, me.pr or 0))
+  else
+    blocks[1].big:SetText("—")
+    blocks[1].line1:SetText("No standing yet this season")
+  end
+
+  if S then
+    blocks[2].line1:SetText("EP " .. S.code(S.COLOR.target) .. ns.Commify(me.ep) .. "|r")
+    blocks[2].line2:SetText("GP " .. S.code(S.COLOR.major) .. ns.Commify(me.gp) .. "|r")
+  else
+    blocks[2].line1:SetText("EP " .. ns.Commify(me.ep))
+    blocks[2].line2:SetText("GP " .. ns.Commify(me.gp))
+  end
+
+  -- NIGHTS PRESENT, never the site's weighted attendance percentage. They answer
+  -- different questions and publishing one under the other's label is exactly
+  -- how the two come to disagree in front of the raid.
+  if me.nightsOf and me.nightsOf > 0 then
+    blocks[3].big:SetText(tostring(me.nights or 0))
+    -- The suffix hangs off the figure's own width so "12/21" and "2/3" both sit
+    -- correctly, rather than at a fixed offset that only suits single digits.
+    blocks[3].bigSuffix:ClearAllPoints()
+    blocks[3].bigSuffix:SetPoint("BOTTOMLEFT", blocks[3].big, "BOTTOMLEFT",
+      blocks[3].big:GetStringWidth() + 1, 3)
+    blocks[3].bigSuffix:SetText("/" .. tostring(me.nightsOf))
+    -- ⚠️ THE DESIGN'S THIRD LINE HERE READS "of 17 • PR 3.9", which is the
+    -- PRIORITY block's caption duplicated and not updated — "of 17" says nothing
+    -- about attendance and the PR disagrees with the one three blocks up. This
+    -- says what the figure above it counts instead. Flagged rather than
+    -- reproduced; if the intent was something else, it is a one-line change.
+    blocks[3].line1:SetText("raid nights this season")
+  else
+    blocks[3].big:SetText("—")
+    blocks[3].line1:SetText("no raid nights recorded yet")
+  end
+
+  if me.lastItem then
+    -- The design wraps a long item name across two lines rather than truncating
+    -- it, which is right: the name is the answer, and half of it is not.
+    local name = me.lastItem
+    if #name > 20 then
+      local cut = name:sub(1, 20):match("^.*%s") or name:sub(1, 20)
+      blocks[4].line1:SetText((cut:gsub("%s+$", "")))
+      blocks[4].line2:SetText(name:sub(#cut + 1))
+    else
+      blocks[4].line1:SetText(name)
+    end
+    blocks[4].line3:SetText(ns.LongAge(me.lastItemDays) or "")
+  else
+    blocks[4].line1:SetText("Nothing on record")
+  end
+end
+
+local function renderStandingsList()
+  local rows, total = ns.StandingsRows()
+  renderRail(total)
+
+  if #rows == 0 then
+    frame.stNote:SetText(ns.Payload.Current()
+      and "No EPGP standings for this season yet."
+      or "Nothing imported yet — press Import Raid Night.")
+    for i = 1, ST_ROWS do frame.stRows[i]:Hide() end
+    return
+  end
+  frame.stNote:SetText("")
+
+  local maxScroll = math.max(0, #rows - ST_ROWS)
+  if state.rankScroll > maxScroll then state.rankScroll = maxScroll end
+
+  local me = (UnitName("player") or ""):lower()
+  for i = 1, ST_ROWS do
+    local row, r = frame.stRows[i], rows[i + state.rankScroll]
+    if not r then row:Hide() else
+      row.rank:SetText(tostring(r.rank))
+      row.rank:SetTextColor(unpack(MUTED))
+
+      row.name:SetText(r.name or "?")
+      local cc = CLASS_COLOR[r.class or ""] or WHITE
+      row.name:SetTextColor(cc[1], cc[2], cc[3])
+
+      row.ep:SetText(ns.Commify(r.ep))
+      row.gp:SetText(ns.Commify(r.gp))
+      row.pr:SetText(r.pr and ("%.2f"):format(r.pr) or "—")
+      -- Em-dash for a raider who has never received an item: genuinely absent
+      -- data, not a zero (Core §1.1).
+      row.last:SetText(ns.ShortAge(r.lastItemDays) or "—")
+
+      -- Not in the mock, kept deliberately: finding yourself in a table of
+      -- twenty is the first thing anyone does with it, and the row that says
+      -- #6 in the rail should be visible in the list without counting.
+      row.hl:SetShown((r.name or ""):lower() == me)
+      row:Show()
+    end
+  end
+end
+
+--- The target browser — raids, dungeons and world bosses, filtered to what this
+--- character can use, which is the ONLY surface that reaches past tonight's raid.
+---
+--- ⚠️ NO CALLER, AND THAT IS A GAP, NOT DEAD CODE. It had a tab of its own before
+--- the three-tab redesign, and neither the Loot nor the Standings design has a
+--- door into it. Right-clicking an item on the Loot tab still targets, so the
+--- FLAGGING gesture survives; what has no way in is BROWSING the catalogue for
+--- something that has not dropped. Kept intact rather than deleted, because a
+--- capability disappearing because a mock did not include it is not a decision
+--- this file gets to make. It wants a home in one of the remaining designs.
+local function renderTargetsView()
+  local browsing = state.targetMode == "browse"
+  local inst, enc = currentInstance(), currentEncounter()
+
+  frame.itemName:SetText(browsing and (inst and inst.name or "No catalogue") or "Your Targets")
+  frame.itemSub:SetText(browsing and (enc and enc.name or "") or
+    ("%d flagged on %s — right-click to remove"):format(
+      ns.Targets and ns.Targets.Count() or 0, UnitName("player") or "this character"))
+
+  setHeaders("ITEM", "", "SLOT", "SOURCE")
 
   local rows, warming = targetRows()
   if #rows == 0 then
     frame.more:SetText("")
+    frame.note:SetText(warming and "Loading item data from the client…"
+      or (browsing and "" or "Nothing flagged yet. Browse the catalogue and right-click an item."))
     hideRows(1)
-    if warming then
-      frame.sub:SetText("Loading item data from the client…")
-    elseif not browsing then
-      frame.sub:SetText("Nothing flagged yet. Browse the catalogue and right-click an item.")
-    end
     return
   end
 
   local total = #rows
-  if state.scroll > math.max(0, total - VISIBLE_ROWS) then
-    state.scroll = math.max(0, total - VISIBLE_ROWS)
-  end
+  local maxScroll = math.max(0, total - RANK_ROWS)
+  if state.rankScroll > maxScroll then state.rankScroll = maxScroll end
 
-  for i = 1, VISIBLE_ROWS do
-    local row = frame.rows[i]
-    local r = rows[i + state.scroll]
-    if not r then
-      row:Hide()
-    else
+  for i = 1, RANK_ROWS do
+    local row, r = frame.rows[i], rows[i + state.rankScroll]
+    if not r then row:Hide() else
       resetRow(row)
       row.itemID, row.link = r.itemID, r.link
       row.meta = { name = r.name, icon = r.icon, slot = r.slot, source = r.source }
-
       row.icon:SetTexture(r.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
       row.icon:Show()
 
-      row.rank:SetText("")
-      -- The marker sits with the NAME rather than in its own column so it reads
-      -- identically here and on a chip, where there is no room for a column.
       local marked = ns.Targets and ns.Targets.Has(r.itemID)
-      row.name:SetWidth(200)
-      row.name:SetText((marked and (TARGET_MARK .. " ") or "") .. (r.name or "?"))
-      row.name:SetTextColor(unpack(marked and GOLD or WHITE))
-
-      row.badge:SetText("")
-
-      -- Blizzard's own "very rare" flag — the same signal that decides whether a
-      -- piece can reach Myth 9 in the vault. Worth surfacing on a planning
-      -- screen: it is exactly the item you would target.
-      row.gap:SetText(r.veryRare and "|cffa335eerare|r" or "")
-      row.ilvl:SetText(r.slot or "")
-      row.ilvl:SetTextColor(unpack(MUTED))
+      row.name:SetWidth(150)
+      row.name:SetText(r.name or "?")
+      row.name:SetTextColor(unpack(marked and ns.TARGET_COLOR or WHITE))
+      row.upgrade:SetText(r.veryRare and "|cffa335eerare|r" or "")
+      row.gain:SetText(r.slot or "")
       row.pr:SetText(r.source or "")
       row.pr:SetTextColor(unpack(MUTED))
       row:Show()
     end
   end
 
-  if total > VISIBLE_ROWS then
-    frame.more:SetText(("showing %d-%d of %d — scroll for the rest"):format(
-      state.scroll + 1, math.min(total, state.scroll + VISIBLE_ROWS), total))
-  else
-    frame.more:SetText("")
-  end
+  frame.more:SetText(total > RANK_ROWS
+    and ("showing %d–%d of %d · scroll for more"):format(
+      state.rankScroll + 1, math.min(total, state.rankScroll + RANK_ROWS), total) or "")
 end
 
-local function renderMe()
-  frame.strip:Hide()
-  for i = 1, CHIPS_PER_PAGE do frame.chips[i]:Hide() end
-  frame.chipMore:SetText("")
+local function renderStandingsTab()
+  -- ⚠️ NO PANE ON THIS TAB. The design puts the table straight on the window
+  -- ground; the purple surface belongs to the Loot tab's detail pane and drawing
+  -- it here would box the table in a panel the design does not have.
+  showPaneSurface(false)
+  showLootPaneParts(false)
   setHeaders()
   frame.more:SetText("")
-
-  local char = ns.ResolveCharacter()
-  frame.context:SetText(UnitName("player") or "You")
-  frame.sub:SetText(("%s %s%s"):format(
-    tostring(char.className), tostring(char.specName),
-    char.heroTree and (" · " .. char.heroTree) or ""))
-
-  local me, raid = myEntry(), ns.Payload.Current()
-  local lines = {}
-
-  if not raid then
-    lines[#lines + 1] = "Nothing imported yet — press Import Raid Night."
-  elseif not me then
-    lines[#lines + 1] = "You are not on the exported roster."
-    lines[#lines + 1] = "Rankings still work; your own row just will not appear."
-  else
-    if me.pr then
-      lines[#lines + 1] = ("Priority:  %s of %d")
-        :format(me.rank and ("#" .. me.rank) or "unranked", raid.ladder and #raid.ladder or 0)
-      lines[#lines + 1] = ("EP %s · GP %s · PR %.2f")
-        :format(tostring(me.ep), tostring(me.gp), me.pr)
-    else
-      lines[#lines + 1] = "No EPGP standing yet this season."
-      lines[#lines + 1] = "Rankings order by upgrade size until the ledger fills."
-    end
-
-    -- Nights present, NOT the site's weighted attendance percentage. Different
-    -- question, deliberately a different number.
-    if me.nightsOf and me.nightsOf > 0 then
-      lines[#lines + 1] = ("Attendance:  %d of %d raid nights"):format(me.nights or 0, me.nightsOf)
-    elseif me.nightsOf == 0 then
-      lines[#lines + 1] = "Attendance:  no raid nights recorded this season yet"
-    end
-
-    if me.lastItem then
-      local when = (me.lastItemDays or 0) == 0 and "today"
-        or (me.lastItemDays == 1 and "yesterday")
-        or (me.lastItemDays < 14 and ("%d days ago"):format(me.lastItemDays))
-        or (me.lastItemDays < 60 and ("%d weeks ago"):format(math.floor(me.lastItemDays / 7)))
-        or ("%d months ago"):format(math.floor(me.lastItemDays / 30))
-      lines[#lines + 1] = ("Last item:   %s, %s"):format(me.lastItem, when)
-    else
-      lines[#lines + 1] = "Last item:   nothing on record"
-    end
-
-    lines[#lines + 1] = ""
-    lines[#lines + 1] = ("Gear snapshot: %s"):format(ns.Payload.GearAgeText())
-  end
-
-  for i = 1, VISIBLE_ROWS do
-    local row, text = frame.rows[i], lines[i]
-    if not text then row:Hide() else
-      resetRow(row)
-      row.name:SetWidth(400)
-      row.name:SetText(text)
-      row.name:SetTextColor(unpack(WHITE))
-      row.hl:Hide()
-      row:Show()
-    end
-  end
-end
-
-local function renderStandings()
-  frame.strip:Hide()
-  for i = 1, CHIPS_PER_PAGE do frame.chips[i]:Hide() end
-  frame.chipMore:SetText("")
-  setHeaders("Raider", "", "EP / GP", "Priority")
-
-  local raid = ns.Payload.Current()
-  frame.context:SetText("Standings")
-
-  local ladder = raid and raid.ladder or nil
-  if not ladder or #ladder == 0 then
-    frame.sub:SetText(raid and "No EPGP standings for this season yet."
-                           or "Nothing imported yet — press Import Raid Night.")
-    frame.more:SetText("")
-    hideRows(1)
-    return
-  end
-
-  local total = #ladder
-  local maxScroll = math.max(0, total - VISIBLE_ROWS)
-  if state.scroll > maxScroll then state.scroll = maxScroll end
-
-  frame.sub:SetText(("%d ranked"):format(total))
-  local me = (UnitName("player") or ""):lower()
-  local shown = math.min(total - state.scroll, VISIBLE_ROWS)
-
-  for i = 1, shown do
-    local row, s = frame.rows[i], ladder[i + state.scroll]
-    resetRow(row)
-    row.rank:SetText(tostring(s.rank or (i + state.scroll)))
-    row.rank:SetTextColor(unpack(MUTED))
-    row.name:SetText(s.n or "?"); row.name:SetTextColor(unpack(WHITE))
-    row.ilvl:SetText(("%s / %s"):format(tostring(s.ep), tostring(s.gp)))
-    row.ilvl:SetTextColor(unpack(MUTED))
-    row.pr:SetText(("%.2f"):format(s.pr or 0)); row.pr:SetTextColor(unpack(WHITE))
-    row.hl:SetShown((s.n or ""):lower() == me)
-    row:Show()
-  end
-  hideRows(shown + 1)
-
-  if total > VISIBLE_ROWS then
-    frame.more:SetText(("showing %d–%d of %d · scroll for more")
-      :format(state.scroll + 1, state.scroll + shown, total))
-  else
-    frame.more:SetText("")
-  end
-end
-
--- ---------------------------------------------------------------------------
--- Interaction
--- ---------------------------------------------------------------------------
-
-function Panel.Scroll(delta)
-  state.scroll = math.max(0, state.scroll + delta)
-  Panel.Refresh()
-end
-
-function Panel.PageChips(delta)
-  state.chipPage = math.max(0, state.chipPage + delta)
-  Panel.Refresh()
-end
-
--- Panel.CycleBoss / CycleInstance / CycleEncounter and Panel.OpenBossMenu are
--- gone. The arrow pairs that called the cyclers were replaced by the dropdowns,
--- which left three public functions with no caller anywhere in the addon — an
--- invitation to bind a key to a control that no longer exists. The shared
--- makeDropdown owns opening and filling all three pickers now, so there is one
--- implementation to be right rather than three to keep in step.
-
---- Show the tabs that apply right now and space them evenly.
----
---- Positions are assigned HERE rather than at build time because the Runner tab
---- comes and goes with the payload; laying out once would leave a hole where it
---- used to be, or crowd the others permanently to reserve room for it.
-local function layoutTabs()
-  local visible = {}
-  for _, name in ipairs(TABS) do
-    local show = (name ~= "Runner") or (ns.Payload and ns.Payload.Current() ~= nil)
-    if show then visible[#visible + 1] = name else frame.tabs[name]:Hide() end
-  end
-
-  -- If the tab we are on just disappeared — the payload was cleared while the
-  -- Runner tab was open — fall back rather than render a tab that is not there.
-  local stillThere = false
-  for _, name in ipairs(visible) do if name == state.tab then stillThere = true end end
-  if not stillThere then state.tab = "Drops" end
-
-  local gap = math.floor((FRAME_W - 24 - 100 - 12) / math.max(#visible, 1))
-  for i, name in ipairs(visible) do
-    local b = frame.tabs[name]
-    b:ClearAllPoints()
-    b:SetPoint("TOPLEFT", 12 + (i - 1) * gap, -28)
-    b:Show()
-  end
+  frame.note:SetText("")
+  hideRows(1)
+  renderStandingsList()
 end
 
 --- The runner's own view: who is running loot, what is loaded, who is reporting.
@@ -1441,34 +1981,31 @@ end
 --- in Comms.lua so the headless harness can test it — this function decides
 --- nothing and computes nothing.
 local function renderRunner()
-  frame.strip:Hide()
-  for i = 1, CHIPS_PER_PAGE do frame.chips[i]:Hide() end
-  frame.chipMore:SetText("")
   setHeaders()
-  frame.more:SetText("")
+  showPaneSurface(true)
+  showLootPaneParts(false)
+  frame.itemName:Show()
+  frame.itemSub:Show()
 
   local r = ns.Comms and ns.Comms.RunnerReport()
   if not r then
-    frame.context:SetText("Runner")
-    frame.sub:SetText("Comms did not load.")
+    frame.itemName:SetText("Runner")
+    frame.itemSub:SetText("Comms did not load.")
     hideRows(1)
     return
   end
 
-  frame.context:SetText("Runner")
-  frame.sub:SetText(r.seasonName and ("%s · %d raiders, %d ranked"):format(
+  frame.itemName:SetText("Runner")
+  frame.itemSub:SetText(r.seasonName and ("%s · %d raiders, %d ranked"):format(
     r.seasonName, r.raiders, r.ranked) or "Nothing imported yet")
 
   local lines = {}
-  local function add(text) lines[#lines + 1] = text end
+  local function add(t) lines[#lines + 1] = t end
 
   -- WHO IS RUNNING LOOT — first, because it is the one thing this tab exists to
-  -- make unambiguous.
-  --
-  -- ⚠️ EVERY BRANCH NAMES THE BUTTON AS IT IS CURRENTLY LABELLED. Both are keyed
-  -- on HasExplicitClaim, so a branch that says "press Run Loot Tonight" cannot
-  -- appear beside a button reading "Stop Running Loot" — which it did, and sent
-  -- Jason round two presses to reach the state one should have given him.
+  -- make unambiguous. Every branch names the button AS IT IS CURRENTLY
+  -- LABELLED; both are keyed on HasExplicitClaim, so a branch saying "press Run
+  -- Loot Tonight" cannot appear beside a button reading "Stop Running Loot".
   if r.runnerIsMe then
     add("|cff44ff44You are running loot tonight.|r")
     add("The raid follows your rankings, and late joiners get the roster from you.")
@@ -1479,15 +2016,9 @@ local function renderRunner()
     add("|cffF3C56BYou are answering for tonight's data|r — because you imported it,")
     add("not because anyone claimed it. Press Run Loot Tonight to make it official.")
   elseif r.payloadFrom then
-    -- We RECEIVED tonight's data over comms rather than importing it, and have
-    -- not claimed. The sender is answering for it; naming them is more use than
-    -- "nobody has claimed", which is true and unhelpful.
     add("|cff888899Nobody has claimed the runner role.|r")
     add(("You have tonight's data from %s, who is answering for it."):format(r.payloadFrom))
   elseif r.hasPayload then
-    -- Imported it and then stood down. NOBODY is answering — including us — so
-    -- a late joiner asking for the roster gets silence. Said plainly, because
-    -- there is no other symptom of it anywhere.
     add("|cffF3C56BNobody is answering for tonight's data.|r")
     add("You imported it and then stood down. Press Run Loot Tonight to answer again.")
   else
@@ -1515,24 +2046,19 @@ local function renderRunner()
       add(("Reporting live: %d · %d corrected by a win tonight"):format(r.liveGear, r.corrected))
     end
 
-    -- Named, capped, and the remainder COUNTED rather than trimmed away. Solo
-    -- there is no channel for anyone to report on, so the gap carries no
-    -- information and is not shown at all.
     if r.channel and #r.notReporting > 0 then
       local shown = {}
       for i = 1, math.min(6, #r.notReporting) do shown[#shown + 1] = r.notReporting[i] end
-      local text = "   Not reporting: " .. table.concat(shown, ", ")
+      local t = "   Not reporting: " .. table.concat(shown, ", ")
       if #r.notReporting > #shown then
-        text = text .. (" and %d more"):format(#r.notReporting - #shown)
+        t = t .. (" and %d more"):format(#r.notReporting - #shown)
       end
-      add(text)
+      add(t)
       add("   |cff888899They are still ranked, from the site snapshot.|r")
     end
   end
 
-  -- ⚠️ WHETHER IT WILL FIRE, NOT JUST WHETHER IT IS ON. A switch reading "On"
-  -- beside a group it will never fire in is the same lie the runner button told
-  -- when its label disagreed with the text next to it.
+  -- ⚠️ WHETHER IT WILL FIRE, NOT JUST WHETHER IT IS ON.
   add("")
   if not r.autoPost then
     add("|cff888899Auto-post is off|r — drops are posted to chat only when you press Post.")
@@ -1563,9 +2089,7 @@ local function renderRunner()
     add(("Running the addon: %d — %s"):format(#r.peers, table.concat(names, ", ")))
   end
 
-  -- SPEC DISAGREEMENTS. Reported for a person to act on, never acted on here:
-  -- an inspection sees what someone is wearing this minute, which is not the
-  -- same question as what they raid as. See Roster.SpecDiscrepancies.
+  -- SPEC DISAGREEMENTS. Reported for a person to act on, never acted on here.
   if #r.specMismatches > 0 then
     add("")
     add(("|cffF3C56BSpec differs from the roster for %d:|r"):format(#r.specMismatches))
@@ -1580,149 +2104,202 @@ local function renderRunner()
     add("   |cff888899Scored as the roster says. Fix it on the site, not here.|r")
   end
 
-  for i = 1, VISIBLE_ROWS do
-    local row, text = frame.rows[i], lines[i]
-    if not text then row:Hide() else
+  local maxScroll = math.max(0, #lines - RANK_ROWS)
+  if state.rankScroll > maxScroll then state.rankScroll = maxScroll end
+
+  for i = 1, RANK_ROWS do
+    local row, line = frame.rows[i], lines[i + state.rankScroll]
+    if not line then row:Hide() else
       resetRow(row)
-      row.name:SetWidth(460)
-      row.name:SetText(text)
+      row.name:SetWidth(DIV_W - 20)
+      row.name:SetText(line)
       row.name:SetTextColor(unpack(WHITE))
       row.hl:Hide()
       row:Show()
     end
   end
+  frame.more:SetText(#lines > RANK_ROWS
+    and ("showing %d–%d of %d · scroll for more"):format(
+      state.rankScroll + 1, math.min(#lines, state.rankScroll + RANK_ROWS), #lines) or "")
+end
+
+-- ---------------------------------------------------------------------------
+-- Interaction
+-- ---------------------------------------------------------------------------
+
+function Panel.Scroll(delta)
+  state.rankScroll = math.max(0, state.rankScroll + delta)
+  Panel.Refresh()
+end
+
+function Panel.ScrollColumn(delta)
+  state.colScroll = math.max(0, state.colScroll + delta)
+  Panel.Refresh()
+end
+
+--- Show the tabs that apply right now.
+---
+--- ⚠️ THE RUNNER TAB RENDERS ONLY FOR THE RUNNER (Session 249). Hiding is
+--- HYGIENE, not a gate — the addon's data is a Lua table in the player's own
+--- memory — and the real gate is the protocol rule that only a client which
+--- IMPORTED the export may hold the role. But a tab that disappears mid-session
+--- must SAY who took over and move the viewer to Loot; a silent vanish is the
+--- exact failure being fixed everywhere else.
+local function layoutTabs()
+  local runner = ns.Comms and ns.Comms.IsRunner and ns.Comms.IsRunner()
+  local visible = {}
+  for _, name in ipairs(TABS) do
+    local show = (name ~= "Runner") or runner
+    if show then visible[#visible + 1] = name else frame.tabs[name]:Hide() end
+  end
+
+  if state.tab == "Runner" and not runner then
+    local r = ns.Comms and ns.Comms.RunnerReport and ns.Comms.RunnerReport()
+    local who = r and r.runner
+    ns.Print(who
+      and ("%s is running loot now — moved you back to Loot."):format(who)
+      or "You are no longer running loot — moved you back to Loot.")
+    state.tab = "Loot"
+  end
+
+  for i, name in ipairs(visible) do
+    local b = frame.tabs[name]
+    b:ClearAllPoints()
+    b:SetPoint("TOPLEFT", PAD + (i - 1) * TAB_PITCH, -TAB_Y)
+    if b.SetPillState then b:SetPillState(name == state.tab) end
+    b:Show()
+  end
+end
+
+local function renderFooterGear()
+  local S = ns.Style
+  local gear = ns.GearReportingSummary()
+  local mine = ns.Comms and ns.Comms.gear
+    and ns.Comms.gear[ns.Comms.Normalize((UnitName("player") or ""))]
+  local live = mine and next(mine) ~= nil
+
+  if S then
+    frame.gearLine1:SetText(("Your Gear: %s%s|r"):format(
+      S.code(live and S.COLOR.target or S.COLOR.grey), live and "LIVE" or "SNAPSHOT"))
+  else
+    frame.gearLine1:SetText("Your Gear: " .. (live and "LIVE" or "SNAPSHOT"))
+  end
+  frame.gearLine2:SetText(gear
+    and ("%d of %d Reporting"):format(gear.reporting, gear.total)
+    or "No raid data imported")
 end
 
 function Panel.Refresh()
   if not frame or not frame:IsShown() then return end
 
   layoutTabs()
-  for name, b in pairs(frame.tabs) do b:SetEnabled(name ~= state.tab) end
 
-  -- Rows are RECYCLED across tabs, so anything one tab sets has to be cleared
-  -- here or it bleeds into the next. An item icon left behind on a raider row is
-  -- the visible half; a stale itemID is the dangerous half, because it would
-  -- make right-click flag whatever the row used to be.
-  for i = 1, VISIBLE_ROWS do
+  -- Rows are RECYCLED across views, so anything one view sets has to be cleared
+  -- here or it bleeds into the next. An item icon left on a raider row is the
+  -- visible half; a stale itemID is the dangerous half, because it would make
+  -- right-click flag whatever the row used to be.
+  for i = 1, RANK_ROWS do
     local row = frame.rows[i]
-    row.name:SetWidth(140)
+    row.name:SetWidth(100)
     row.icon:Hide()
     row.itemID, row.link, row.meta = nil, nil, nil
-    -- Same reason as the line above: a spec-split tooltip left on a recycled row
-    -- would explain the PREVIOUS occupant's spec while naming this one.
     row.splitName, row.splitHelp = nil, nil
+    row.srcHelp, row.srcName = nil, nil
   end
 
-  local diff = ns.Settings.Get("difficulty")
-  local key = ns.DifficultyKey()
-  frame.diff:SetText(diff == "AUTO"
-    and ("Auto: %s"):format(({ n = "Normal", h = "Heroic", m = "Mythic" })[key] or "?")
-    or diff:sub(1, 1) .. diff:sub(2):lower())
+  local onLoot = state.tab == "Loot"
+  local onRunner = state.tab == "Runner"
+  local onStandings = state.tab == "Standings"
 
-  -- Item hover only means something where an item is selected.
-  frame.contextHover:SetShown(state.tab == "Drops" or state.tab == "Boss")
-
-  local onBoss = state.tab == "Boss"
-  local onTargets = state.tab == "Targets"
-  local browsing = onTargets and state.targetMode == "browse"
-
-  frame.bossDrop:SetShownAll(onBoss)
-  frame.bossName:SetShown(onBoss)
-  if onBoss then
-    local bosses = bossList()
-    if state.bossIndex > #bosses then state.bossIndex = 1 end
-    local boss = bosses[state.bossIndex]
-    local entries = {}
-    for _, b in ipairs(bosses) do entries[#entries + 1] = { label = bossLabel(b) } end
-    frame.bossDrop:SetEntries(entries, state.bossIndex,
-      boss and bossLabel(boss) or "No boss data")
-    -- The name beside the control is now the raid, not a repeat of the boss:
-    -- the dropdown already says which boss, and this is the context it sits in.
-    local total = 0
-    for _, b in ipairs(bosses) do total = total + (b.bis or 0) end
-    frame.bossName:SetText(total > 0
-      and ("|cffff0080%d BIS|r across %d bosses"):format(total, #bosses)
-      or ("%d bosses"):format(#bosses))
+  -- The boss strip, the context line and the two filter toggles belong to the
+  -- Loot tab: on the others they would offer navigation that changes nothing.
+  frame.strip:SetShown(onLoot)
+  frame.stripMore:SetShown(onLoot)
+  frame.bossName:SetShown(onLoot)
+  frame.bossSub:SetShown(onLoot)
+  for _, b in ipairs({ frame.togDrops, frame.togTable, frame.togUsable, frame.togAll }) do
+    b:SetShown(onLoot)
+  end
+  frame.col:SetShown(onLoot)
+  frame.colEmpty:SetShown(false)
+  frame.colMore:SetShown(onLoot)
+  if not onLoot then
+    for i = 1, COL_ROWS do frame.itemRows[i]:Hide() end
+    -- Dropped with the list it describes. A stale cache would let the Post
+    -- button act on an item that is no longer on screen.
+    Panel._entries = nil
   end
 
-  -- The instance/encounter selectors belong to BROWSING, not to the tab: on the
-  -- flagged view they would offer navigation that changes nothing on screen.
-  frame.instDrop:SetShownAll(browsing)
-  frame.encDrop:SetShownAll(browsing)
-  frame.encName:SetShown(browsing)
-  frame.targetMode:SetShown(onTargets)
-  if onTargets then
-    local count = ns.Targets and ns.Targets.Count() or 0
-    frame.targetMode:SetText(browsing
-      and ("My Targets (%d)"):format(count)
-      or "Browse Catalogue")
-    if browsing then
-      -- Both pickers carry a BIS count for the same reason the boss one does:
-      -- on a planning tab, "which of these is worth my time" is the whole
-      -- question, and a bare list of names cannot answer it.
-      --
-      -- Each map is built ONCE here and read per entry. Asking per entry instead
-      -- would re-walk the payload for every line in both lists.
-      local instCounts = ns.BisCountsByInstance()
-      local bossCounts = ns.BisCountsByBoss()
+  if onLoot and frame.togDrops.SetPillState then
+    frame.togDrops:SetPillState(state.source == "drops")
+    frame.togTable:SetPillState(state.source == "table")
+    frame.togUsable:SetPillState(state.filter == "usable")
+    frame.togAll:SetPillState(state.filter == "all")
+  end
 
-      local insts = instanceList()
-      if state.instIndex > #insts then state.instIndex = 1 end
-      local instEntries = {}
-      for _, i in ipairs(insts) do
-        instEntries[#instEntries + 1] = { label = pickerLabel(i.name, instCounts[i.id]) }
-      end
-      local inst = insts[state.instIndex]
-      frame.instDrop:SetEntries(instEntries, state.instIndex,
-        inst and pickerLabel(inst.name, instCounts[inst.id]) or "no instances")
+  -- The Standings tab's own furniture. The provisional switcher that used to
+  -- live here is gone: the design has no such control, and the personal card it
+  -- offered is now the rail down the left.
+  frame.standingsView:Hide()
+  frame.instDrop:Hide()
+  frame.encDrop:Hide()
 
-      local encs = encounterList()
-      if state.encIndex > #encs then state.encIndex = 1 end
-      local encEntries = {}
-      for _, e in ipairs(encs) do
-        encEntries[#encEntries + 1] = { label = pickerLabel(e.name, bossCounts[e.id]) }
-      end
-      local enc = encs[state.encIndex]
-      frame.encDrop:SetEntries(encEntries, state.encIndex,
-        enc and pickerLabel(enc.name, bossCounts[enc.id]) or "no encounters")
-      frame.encName:SetText("")
+  frame.season:SetShown(onStandings)
+  frame.stDiv:SetShown(onStandings)
+  frame.stList:SetShown(onStandings)
+  frame.stNote:SetShown(onStandings)
+  for _, h in ipairs(frame.stHead) do h:SetShown(onStandings) end
+  for _, b in ipairs(frame.rail) do
+    for _, key in ipairs({ "head", "big", "bigSuffix", "line1", "line2", "line3" }) do
+      b[key]:SetShown(onStandings)
     end
   end
+  if not onStandings then
+    for i = 1, ST_ROWS do frame.stRows[i]:Hide() end
+  else
+    local raid = ns.Payload.Current()
+    frame.season:SetText(raid and raid.seasonName or "")
+  end
 
-  local onRunner = state.tab == "Runner"
+  clearPane()
 
-  if onTargets then renderTargets()
-  elseif onRunner then renderRunner()
-  elseif state.tab == "Drops" or onBoss then renderItemList()
-  elseif state.tab == "Me" then renderMe()
-  else renderStandings() end
+  if onLoot then
+    renderLoot()
+  elseif onRunner then
+    renderRunner()
+  else
+    renderStandingsTab()
+  end
 
-  frame.post:SetShown(not onRunner and Panel.CurrentItemID() ~= nil)
+  -- POST IS RUNNER-ONLY. Two people posting puts two different lists in raid
+  -- chat for one item, and chat is the only thing a non-installer ever sees.
+  frame.post:SetShown(onLoot and (ns.Comms and ns.Comms.IsRunner and ns.Comms.IsRunner())
+    and Panel.CurrentItemID() ~= nil)
 
   frame.runToggle:SetShown(onRunner)
   frame.autoPost:SetShown(onRunner)
   if onRunner then
     -- Labelled by what pressing it DOES, and keyed on the same fact the panel
     -- text is keyed on so the two can never contradict each other.
-    frame.runToggle:SetText((ns.Comms and ns.Comms.HasExplicitClaim())
-      and "Stop Running Loot" or "Run Loot Tonight")
-    frame.autoPost:SetText((ns.Settings and ns.Settings.Get("autoPost"))
-      and "Auto-Post: On" or "Auto-Post: Off")
+    local claimed = ns.Comms and ns.Comms.HasExplicitClaim()
+    setLabel(frame.runToggle, claimed and "Stop Running Loot" or "Run Loot Tonight")
+    local auto = ns.Settings and ns.Settings.Get("autoPost")
+    setLabel(frame.autoPost, auto and "Auto-Post: On" or "Auto-Post: Off")
+    if frame.autoPost.SetPillState then frame.autoPost:SetPillState(auto and true or false) end
   end
 
-  local me = myEntry()
-  if me and me.pr then
-    frame.footer:SetText(("You: #%s · EP %s · GP %s · PR %.2f")
-      :format(tostring(me.rank or "?"), tostring(me.ep), tostring(me.gp), me.pr))
-  elseif me then
-    frame.footer:SetText("You: no EPGP standing yet this season")
-  else
-    frame.footer:SetText("")
-  end
+  renderFooterGear()
 end
 
 function Panel.Show()
   if not frame then build() end
+  -- ⚠️ THE OPENING LIST DEPENDS ON WHERE YOU ARE STANDING (Jason). Inside a raid
+  -- the question is what dropped — and an empty drops list is still information
+  -- there, because something is going to arrive. Anywhere else it is what CAN
+  -- drop, since nothing ever will. Re-evaluated on every open, so a toggle made
+  -- during a session sticks until the panel is closed.
+  state.source = ns.DefaultLootSource()
+  state.sel, state.colScroll, state.rankScroll = 1, 0, 0
   -- The panel is the one window with no dock to fall back on — its build-time
   -- CENTER+260 IS the default — so it restores here rather than in
   -- DockBesidePanel.

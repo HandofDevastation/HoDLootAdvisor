@@ -2128,6 +2128,398 @@ end)()
         okEmpty and type(emptyRes) == "table" and next(emptyRes) == nil)
 end)()
 
+-- ── The item column's ordering ladder (Session 250) ─────────────────────────
+--
+-- ONE LADDER FOR EVERY MODE (Jason, Session 249):
+--   Targeted -> BIS (Overall -> Raid -> M+) -> Major -> Moderate -> Minor
+--   -> Sidegrade -> Not an upgrade -> Not for you
+--
+-- This is the ONLY place it is tested, because the surface that uses it is
+-- Panel.lua and no harness loads that. The logic was put in Core.lua precisely
+-- so this file could reach it.
+
+header("Item ordering — the ladder the Loot tab's column sorts on")
+
+;(function()
+  local B = ns.ITEM_BAND
+  check("the ladder's bands are exported", type(B) == "table")
+
+  -- Each rung, on its own, in the order the rule states.
+  local function band(e) return ns.ItemBand(e) end
+
+  check("a target sits on the top rung",
+        band({ targeted = true, badge = "sidegrade" }) == B.targeted)
+  check("overall BIS outranks raid BIS",
+        band({ quality = { bis = "overall" } }) < band({ quality = { bis = "raid" } }))
+  check("raid BIS outranks M+ BIS",
+        band({ quality = { bis = "raid" } }) < band({ quality = { bis = "mplus" } }))
+  check("BIS outranks a Major upgrade",
+        band({ quality = { bis = "mplus" } }) < band({ badge = "major", isUpgrade = true }))
+  check("Major outranks Moderate",
+        band({ badge = "major", isUpgrade = true })
+        < band({ badge = "moderate", isUpgrade = true }))
+  check("Moderate outranks Minor",
+        band({ badge = "moderate", isUpgrade = true })
+        < band({ badge = "minor", isUpgrade = true }))
+  check("Minor outranks Sidegrade",
+        band({ badge = "minor", isUpgrade = true })
+        < band({ badge = "sidegrade", isUpgrade = true }))
+  check("Sidegrade outranks 'not an upgrade'",
+        band({ badge = "sidegrade", isUpgrade = true })
+        < band({ badge = "major", isUpgrade = false }))
+  check("'not an upgrade' outranks 'not for you'",
+        band({ badge = "major", isUpgrade = false }) < band({ ineligible = true }))
+
+  -- ⚠️ THE RULE JASON STATED FLATLY, and the one a reasonable implementation
+  -- gets wrong: a target pins to the top EVEN WHEN THE VIEWER CANNOT USE THE
+  -- ITEM. A Resto Druid may legitimately be chasing Feral gear. An
+  -- implementation that checked eligibility first would put this last.
+  check("a target pins above everything even when it is NOT usable",
+        band({ targeted = true, ineligible = true }) == B.targeted)
+  check("...and specifically above an overall-BIS item that is usable",
+        band({ targeted = true, ineligible = true })
+        < band({ quality = { bis = "overall" } }))
+
+  -- An item we could not score is not the same as one that scored badly, but it
+  -- is not an upgrade we can vouch for either.
+  check("an unscored item lands with the non-upgrades, not with the badges",
+        band({ reason = "not in this season's loot table" }) == B.notAnUpgrade)
+  check("a nil entry is handled rather than erroring", band(nil) == B.notForYou)
+
+  -- ── The sort itself ───────────────────────────────────────────────────────
+  local list = {
+    { name = "Zeta sidegrade", badge = "sidegrade", isUpgrade = true, gain = 1 },
+    { name = "Alpha major",    badge = "major",     isUpgrade = true, gain = 10 },
+    { name = "Beta major",     badge = "major",     isUpgrade = true, gain = 30 },
+    { name = "Unusable target", targeted = true, ineligible = true },
+    { name = "Best in slot",   quality = { bis = "overall" } },
+    { name = "Cannot equip",   ineligible = true },
+  }
+  ns.OrderItems(list)
+  local order = {}
+  for i, e in ipairs(list) do order[i] = e.name end
+  check("the whole list sorts into the ladder",
+        table.concat(order, " | ") ==
+        "Unusable target | Best in slot | Beta major | Alpha major | Zeta sidegrade | Cannot equip",
+        table.concat(order, " | "))
+
+  -- TIES BREAK BY UPGRADE SIZE, THEN NAME — so the column is stable between
+  -- refreshes. A selector whose rows move under the pointer gets misclicked
+  -- during the only sixty seconds anyone is looking at it.
+  check("within a band the bigger upgrade sorts first",
+        list[3].name == "Beta major" and list[4].name == "Alpha major")
+
+  local tied = {
+    { name = "Bravo", badge = "major", isUpgrade = true, gain = 5 },
+    { name = "Alpha", badge = "major", isUpgrade = true, gain = 5 },
+  }
+  ns.OrderItems(tied)
+  check("an exact tie in upgrade size falls back to the name",
+        tied[1].name == "Alpha" and tied[2].name == "Bravo")
+
+  check("sorting an empty list is not an error", #ns.OrderItems({}) == 0)
+  check("a non-table is returned untouched rather than erroring",
+        ns.OrderItems(nil) == nil)
+end)()
+
+header("The column's second line, the standing ordinal, and the header counts")
+
+;(function()
+  -- Armour reads slot then armour type; a weapon reads its type alone, because
+  -- "Main Hand, 1H Axe" says the same thing twice in a 198px row.
+  check("armour reads slot then armour type",
+        ns.ItemSlotLine({ slotText = "Chest", armorType = "Plate" }) == "Chest, Plate",
+        ns.ItemSlotLine({ slotText = "Chest", armorType = "Plate" }))
+  check("a weapon reads its type alone",
+        ns.ItemSlotLine({ slotText = "Two-Hand", armorType = "Polearm" }) == "Polearm",
+        ns.ItemSlotLine({ slotText = "Two-Hand", armorType = "Polearm" }))
+  check("an unknown subtype falls through to the weapon shape, never to blank",
+        ns.ItemSlotLine({ slotText = "Main Hand", armorType = "Warglaive" }) == "Warglaive")
+  check("with no armour type the slot stands alone",
+        ns.ItemSlotLine({ slotText = "Trinket" }) == "Trinket")
+  check("with nothing at all it is empty rather than nil",
+        ns.ItemSlotLine({}) == "")
+  check("a nil entry is handled", ns.ItemSlotLine(nil) == "")
+
+  -- ⚠️ 11, 12 AND 13 TAKE "th" DESPITE ENDING IN 1, 2 AND 3. A raid of 20+
+  -- reaches every one of them, so this is not a corner.
+  local function ord(n) local a, b = ns.Ordinal(n) return (a or "?") .. (b or "") end
+  check("1st / 2nd / 3rd",
+        ord(1) == "1st" and ord(2) == "2nd" and ord(3) == "3rd",
+        ord(1) .. " " .. ord(2) .. " " .. ord(3))
+  check("4th and 11th, 12th, 13th are all 'th'",
+        ord(4) == "4th" and ord(11) == "11th" and ord(12) == "12th" and ord(13) == "13th",
+        ord(11) .. " " .. ord(12) .. " " .. ord(13))
+  check("21st, 22nd, 23rd pick their suffix up again",
+        ord(21) == "21st" and ord(22) == "22nd" and ord(23) == "23rd",
+        ord(21) .. " " .. ord(22) .. " " .. ord(23))
+  check("111th, 112th, 113th stay 'th' two hundreds up",
+        ord(111) == "111th" and ord(112) == "112th" and ord(113) == "113th")
+  check("a non-number answers nil rather than erroring", ns.Ordinal(nil) == nil)
+
+  -- THE HEADER COUNTS THE LIST IT IS ABOUT TO DRAW, so it cannot claim a BIS the
+  -- column below does not show.
+  local bis, targets = ns.CountsForItems({
+    { quality = { bis = "overall" } },
+    { quality = { bis = "raid" }, targeted = true },
+    { quality = { grade = "a" } },
+    { targeted = true },
+    {},
+  })
+  check("BIS entries are counted whatever kind of BIS they are", bis == 2, bis)
+  check("targets are counted independently of BIS", targets == 2, targets)
+  local zb, zt = ns.CountsForItems({})
+  check("an empty list counts zero and zero", zb == 0 and zt == 0)
+  local nb, nt = ns.CountsForItems(nil)
+  check("a nil list is handled", nb == 0 and nt == 0)
+end)()
+
+header("Today's drops and the winner lookup (what the Loot tab reads)")
+
+;(function()
+  -- WHY THE PANEL READS THE RECORDER AND NOT Loot.recent: the in-memory roll
+  -- list is wiped by a /reload and never learns a WINNER, because the roll event
+  -- fires when the window OPENS and who won arrives minutes later on a rescan.
+  local db = _G.HoDLootAdvisorDB
+  local saved = db.loot
+  local today = os.date("%Y-%m-%d")
+
+  db.loot = { sessions = {
+    { date = "1999-01-01", items = { { itemID = 111, itemName = "Ancient", winner = "Nobody" } } },
+    { date = today, items = {
+        { itemID = 222, itemName = "First drop",  winner = "Vörnix" },
+        { itemID = 333, itemName = "Second drop" },
+    } },
+    { date = today, items = {
+        { itemID = 444, itemName = "Third drop", winner = "Dåmir" },
+    } },
+  } }
+
+  local drops = ns.Record.RecentDrops()
+  check("only today's runs are read", #drops == 3, #drops)
+  check("newest first", drops[1].itemID == 444, drops[1] and drops[1].itemID)
+  check("a run from another day is not included", (function()
+    for _, e in ipairs(drops) do if e.itemID == 111 then return false end end
+    return true
+  end)())
+  check("the cap is honoured", #ns.Record.RecentDrops(2) == 2)
+
+  check("a settled item reports its winner", ns.Record.WinnerFor(444) == "Dåmir",
+        tostring(ns.Record.WinnerFor(444)))
+  check("...across more than one run today", ns.Record.WinnerFor(222) == "Vörnix")
+
+  -- ⚠️ nil IS A REAL ANSWER AND MUST NOT BE DRESSED UP. Nothing in the addon
+  -- registers that a roll ENDED — only that one started — so "still open" and
+  -- "we never found out" are indistinguishable from here. The panel shows the
+  -- absence rather than a countdown or a "pending" it cannot stand behind.
+  check("an unsettled item answers nil, not a placeholder",
+        ns.Record.WinnerFor(333) == nil, tostring(ns.Record.WinnerFor(333)))
+  check("yesterday's winner does not leak into today",
+        ns.Record.WinnerFor(111) == nil, tostring(ns.Record.WinnerFor(111)))
+  check("an unknown item answers nil", ns.Record.WinnerFor(999999) == nil)
+  check("a nil item id is handled", ns.Record.WinnerFor(nil) == nil)
+
+  db.loot = saved
+end)()
+
+header("The badge ramp — one table, three surfaces")
+
+;(function()
+  -- The item column, the detail header and the ranked rows all read Style.BADGE.
+  -- Three copies of this is how the strip and the ranking list came to disagree
+  -- about Moderate before.
+  local S = ns.Style
+  check("the ramp is on the namespace", type(S.BADGE) == "table")
+  for _, key in ipairs({ "major", "moderate", "minor", "sidegrade" }) do
+    local label, color = S.Badge(key)
+    check(("%s has a label and a colour"):format(key),
+          type(label) == "string" and label ~= "" and type(color) == "table"
+          and color.r ~= nil, tostring(label))
+  end
+  -- ⚠️ TWO VALUES, ALWAYS. `local a, b = S and S.Badge(k)` adjusts the `and` to
+  -- ONE value and silently drops the colour — which it did, at three call sites,
+  -- before this check existed.
+  local label, color = S.Badge("major")
+  check("Major's colour is the design's red, not the old green",
+        color and math.floor(color.r * 255 + 0.5) == 255
+             and math.floor(color.g * 255 + 0.5) == 89,
+        color and ("%d,%d,%d"):format(color.r * 255, color.g * 255, color.b * 255))
+  check("an unknown badge falls back to a drawable label rather than nothing",
+        (S.Badge("wat")) == "Sidegrade")
+  check("a nil badge does the same", (S.Badge(nil)) == "Sidegrade")
+
+  -- BIS AND THE TARGET MARK MUST NOT SHARE A HUE (Session 249). Both were the
+  -- brand gold, which is exactly the collision the rule forbids.
+  local bisTag, bisColor = ns.QualityTag({ bis = "overall" })
+  check("BIS still tags as BIS", bisTag == "BIS")
+  check("BIS and the target marker are different colours",
+        bisColor and ns.TARGET_COLOR
+        and not (bisColor[1] == ns.TARGET_COLOR[1]
+                 and bisColor[2] == ns.TARGET_COLOR[2]
+                 and bisColor[3] == ns.TARGET_COLOR[3]))
+end)()
+
+-- ── The Standings tab (Session 250) ─────────────────────────────────────────
+
+header("Standings — number formatting, ages, and the ladder/roster join")
+
+;(function()
+  check("thousands are separated", ns.Commify(1240) == "1,240", ns.Commify(1240))
+  check("...and so are millions", ns.Commify(1234567) == "1,234,567", ns.Commify(1234567))
+  check("three digits are left alone", ns.Commify(199) == "199")
+  check("exactly four digits gain one separator", ns.Commify(1000) == "1,000")
+  check("a fractional GP is floored, not rounded up",
+        ns.Commify(37.339) == "37", ns.Commify(37.339))
+  check("negatives keep their sign", ns.Commify(-1240) == "-1,240", ns.Commify(-1240))
+  check("zero is zero, never blank", ns.Commify(0) == "0")
+
+  -- The LAST ITEM column's compact age.
+  check("under a week reads in days", ns.ShortAge(2) == "2 days", ns.ShortAge(2))
+  check("one day is singular", ns.ShortAge(1) == "1 day")
+  check("seven days is one week, singular", ns.ShortAge(7) == "1 wk", ns.ShortAge(7))
+  check("six weeks", ns.ShortAge(45) == "6 wks", ns.ShortAge(45))
+  check("today reads as zero days rather than blank", ns.ShortAge(0) == "0 days")
+  -- ⚠️ nil MEANS NEVER RECEIVED AN ITEM, which is genuinely absent data and gets
+  -- the em-dash — NOT a zero, which would claim they got something today.
+  check("unknown answers nil so the column can draw an em-dash", ns.ShortAge(nil) == nil)
+
+  check("the long form says today", ns.LongAge(0) == "today")
+  check("...yesterday", ns.LongAge(1) == "yesterday")
+  check("...days inside a fortnight", ns.LongAge(5) == "5 days ago")
+  check("...weeks beyond it", ns.LongAge(21) == "3 weeks ago", ns.LongAge(21))
+  check("...months beyond two", ns.LongAge(103) == "3 months ago", ns.LongAge(103))
+  check("unknown answers nil", ns.LongAge(nil) == nil)
+
+  -- ── The ladder/roster join ────────────────────────────────────────────────
+  local savedCurrent, savedByName = ns.Payload.Current, ns.Payload.byName
+  ns.Payload.Current = function()
+    return { ladder = {
+      { n = "Vörnix",  ep = 1240, gp = 247, pr = 5.02, rank = 1 },
+      { n = "Dåmir",   ep = 1190, gp = 289, pr = 4.12, rank = 2 },
+      { n = "Ghostly", ep = 900,  gp = 250, pr = 3.60, rank = 3 },
+    } }
+  end
+  ns.Payload.byName = {
+    ["vörnix"] = { n = "Vörnix", c = "Warlock", lastItemDays = 42 },
+    ["dåmir"]  = { n = "Dåmir",  c = "Demon Hunter" },
+    -- Ghostly is on the ladder and NOT on the roster.
+  }
+
+  local rows, total = ns.StandingsRows()
+  check("every ladder entry becomes a row", #rows == 3, #rows)
+  check("the total is the ladder's length, for the rail's 'of N'", total == 3, total)
+  check("the rank comes from the ladder, not from the row's position",
+        rows[1].rank == 1 and rows[2].rank == 2)
+  check("EP, GP and priority ride through", rows[1].ep == 1240 and rows[1].gp == 247
+        and rows[1].pr == 5.02)
+  check("class is joined from the roster, for the name colour",
+        rows[1].class == "Warlock" and rows[2].class == "Demon Hunter",
+        tostring(rows[1].class))
+  check("last-item age is joined too", rows[1].lastItemDays == 42)
+  check("a roster row with no last item leaves it absent, not zero",
+        rows[2].lastItemDays == nil)
+
+  -- ⚠️ A LADDER NAME WITH NO ROSTER ROW IS STILL SHOWN. Dropping it would be the
+  -- silent omission this project keeps writing rules about, and it is exactly
+  -- what a main swap or a late roster edit produces.
+  check("a ladder entry missing from the roster is NOT dropped",
+        rows[3] ~= nil and rows[3].name == "Ghostly", rows[3] and rows[3].name)
+  check("...it just has no class to colour by", rows[3].class == nil)
+  check("...and its standing still shows", rows[3].pr == 3.60)
+
+  ns.Payload.Current = function() return nil end
+  local none, zero = ns.StandingsRows()
+  check("with nothing imported it is empty rather than an error",
+        type(none) == "table" and #none == 0 and zero == 0)
+
+  ns.Payload.Current, ns.Payload.byName = savedCurrent, savedByName
+end)()
+
+header("Which list the Loot tab opens on")
+
+;(function()
+  -- IN A RAID, WHAT DROPPED IS THE QUESTION; anywhere else, what CAN drop.
+  local saved = ns.CurrentContentScope
+  ns.CurrentContentScope = function() return "raid" end
+  check("inside a raid it opens on Current Drops",
+        ns.DefaultLootSource() == "drops", ns.DefaultLootSource())
+  ns.CurrentContentScope = function() return "mplus" end
+  check("a keystone dungeon opens on the Full Loot Table — group loot is not a thing there",
+        ns.DefaultLootSource() == "table", ns.DefaultLootSource())
+  ns.CurrentContentScope = function() return nil end
+  check("out in the world it opens on the Full Loot Table",
+        ns.DefaultLootSource() == "table", ns.DefaultLootSource())
+  ns.CurrentContentScope = saved
+end)()
+
+-- ── Every helper the window files call actually exists ──────────────────────
+--
+-- ⚠️ THE WINDOW FILES SHIP HAVING NEVER RUN. No harness loads Panel.lua,
+-- LoadWindow.lua or RecordWindow.lua — stubbing enough of WoW's widget API to
+-- build them would test the stub — so a misremembered helper name in one of them
+-- is invisible until it errors in front of the raid.
+--
+-- This does not run them. It READS them, pulls out every `ns.Thing(` and
+-- `ns.Thing.Other(` they call, and checks the name is really on the namespace.
+-- That catches the single most likely fault in an untested file — calling
+-- something that does not exist — without pretending to test the drawing.
+--
+-- Deliberately restricted to CALLS. Data fields are populated lazily
+-- (Payload.byName only exists once a payload has loaded), so requiring those to
+-- be present here would fail on a namespace that is behaving correctly.
+
+header("Window files reference only helpers that exist")
+
+;(function()
+  -- The three files no harness loads, and which therefore cannot be on the
+  -- namespace while this runs.
+  local DEFERRED = { Panel = true, LoadWindow = true, RecordWindow = true }
+
+  local WINDOWS = { "Panel.lua", "LoadWindow.lua", "RecordWindow.lua" }
+
+  for _, path in ipairs(WINDOWS) do
+    local fh = io.open(path, "r")
+    if not fh then
+      check(("%s can be read"):format(path), false, "not found")
+    else
+      local src = fh:read("*a")
+      fh:close()
+
+      -- Strip comments first: this file's own prose names helpers it does not
+      -- call, and a doc comment mentioning a renamed function should not fail
+      -- a build.
+      src = src:gsub("%-%-%[%[.-%]%]", " "):gsub("%-%-[^\n]*", " ")
+
+      local missing, seen = {}, {}
+      -- Two levels: ns.Foo( and ns.Foo.Bar(
+      for a, b in src:gmatch("ns%.([%a_][%w_]*)%.([%a_][%w_]*)%s*%(") do
+        local key = a .. "." .. b
+        if not seen[key] and not DEFERRED[a] then
+          seen[key] = true
+          local parent = ns[a]
+          if type(parent) ~= "table" then
+            missing[#missing + 1] = key .. " (ns." .. a .. " is " .. type(parent) .. ")"
+          elseif parent[b] == nil then
+            missing[#missing + 1] = key
+          end
+        end
+      end
+      for a in src:gmatch("ns%.([%a_][%w_]*)%s*%(") do
+        if not seen[a] and not DEFERRED[a] then
+          seen[a] = true
+          if ns[a] == nil then missing[#missing + 1] = a end
+        end
+      end
+
+      check(("%s calls no helper that is missing"):format(path), #missing == 0,
+            #missing > 0 and table.concat(missing, ", ") or nil)
+      -- Not vacuous: a file whose scan found nothing would pass silently.
+      check(("...and the scan actually found calls in %s"):format(path),
+            next(seen) ~= nil)
+    end
+  end
+end)()
+
 -- ── Result ──────────────────────────────────────────────────────────────────
 
 io.write("\n", ("═"):rep(72), "\n")

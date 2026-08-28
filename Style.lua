@@ -75,6 +75,23 @@ Style.COLOR = {
   elevated  = hex("1a1a2e"),
   border    = hex("2a2a45"),
 
+  -- ── The panel's own ground (Session 250, from Jason's Figma) ──────────────
+  -- The redesigned panel sits on a DARKER base than the rest of the addon and
+  -- is rimmed in a light warm grey rather than the navy hairline. Added as new
+  -- tokens rather than by retuning `bg`/`border`, because those two are what
+  -- every OTHER window (Import, Loot Log, Settings) is painted with, and this
+  -- pass has a mock for the panel only. Repointing them would restyle three
+  -- windows nobody has designed yet, sight unseen and with no harness.
+  ground    = hex("060714"),   -- panel + footer fill
+  rim       = hex("d9cee2"),   -- hairline, drawn at 0.4 alpha
+  -- The bottom warmth: a vertical wash from transparent to orange over the
+  -- lower 60% of the window. WoW gradients have two stops and no midpoint, so
+  -- the 40% stop in the design becomes the TEXTURE'S HEIGHT rather than a
+  -- third colour — same result, and it cannot drift the way a guessed
+  -- mid-colour would.
+  glowAlpha = 0.12,
+  glowFrom  = 0.40,            -- fraction of the window height the wash starts at
+
   -- Text (--text-primary / --text-secondary / --text-muted)
   text      = hex("e8e8f0"),
   textDim   = hex("9090b0"),
@@ -92,7 +109,51 @@ Style.COLOR = {
   purple    = hex("8031ff"),
   hotPink   = hex("ff0080"),   -- --hue-hot-pink, the BIS colour (Session 245)
   white     = hex("ffffff"),
+
+  -- ── Semantics the redesign introduces (Session 250) ──────────────────────
+  -- MAJOR IS RED HERE, NOT GREEN. The mock's badge ramp reads
+  -- major #ff595b -> moderate #ff7729 -> grey, which is a heat scale rather
+  -- than the good/bad scale the old panel used (green Major, amber Moderate).
+  -- Not a stylistic tweak to fold in quietly: it inverts what a colour MEANS,
+  -- so it is a named token and the ramp lives in one table below.
+  major     = hex("ff595b"),
+  -- BIS OWNS A YELLOW, AND THE TARGET OWNS THE GREEN. Session 249 settled that
+  -- these two marks must not share a hue and that BIS holds the gold-ish one;
+  -- the mock picks the exact pair. The old code had BIS on the brand gold
+  -- (#f3c56b) and the target marker on the SAME gold, which is precisely the
+  -- collision that rule forbids.
+  bis       = hex("fff468"),
+  target    = hex("20ba56"),
+  -- --hue-bright-purple. The Standings rail's section headings, and DISTINCT
+  -- from `purple` (--hue-tab-stroke, the control fill) even though the two are
+  -- neighbours: one is a surface, the other is type on it.
+  railHead  = hex("936bff"),
+  -- The title's brand gradient (#a8442d -> #4a3580) FLATTENED TO ITS MIDPOINT.
+  -- ⚠️ WoW fontstrings take a colour, never a gradient — there is no SetGradient
+  -- on a FontString and no way to clip a gradient texture to glyphs. This is the
+  -- honest single-colour stand-in and it is the one place the panel cannot match
+  -- the design; see the note in build().
+  brand     = hex("793c56"),
 }
+
+-- The badge ramp, in ONE place. Panel rows, the detail header and the item
+-- column all read it, so a retune moves every surface at once instead of three
+-- tables drifting apart — which is how the strip and the ranking list ended up
+-- disagreeing about Moderate before.
+Style.BADGE = {
+  major     = { label = "Major",     color = "major" },
+  moderate  = { label = "Moderate",  color = "orange" },
+  minor     = { label = "Minor",     color = "textDim" },
+  sidegrade = { label = "Sidegrade", color = "grey" },
+}
+
+--- The label and colour for a badge key. Falls back to Sidegrade's greyed
+--- treatment rather than to nothing, so an unknown key is visible as a row
+--- rather than as a blank cell that reads like a rendering fault.
+function Style.Badge(key)
+  local b = Style.BADGE[key or ""] or Style.BADGE.sidegrade
+  return b.label, Style.COLOR[b.color] or Style.COLOR.grey
+end
 
 --- r, g, b for a colour, so call sites stay short at the WoW API boundary.
 function Style.rgb(c)
@@ -210,6 +271,145 @@ function Style.Tag(parent, width, height)
   return tag
 end
 
+--- The redesigned panel's ground: a near-black fill, a warm wash rising from the
+--- bottom, and a light hairline rim.
+---
+--- OPT-IN, not applied by Style.Window. Only the panel has a design; painting
+--- the other three windows this way would be inventing three more.
+---
+--- ⚠️ THE WASH IS A SIZED TEXTURE, NOT A THREE-STOP GRADIENT. WoW's SetGradient
+--- takes exactly two colours, so the design's "transparent until 40%, orange at
+--- 100%" becomes a texture occupying the BOTTOM 60% that fades in across its own
+--- height. That reproduces the stop exactly instead of approximating it with a
+--- guessed middle colour.
+function Style.PanelGround(frame, height)
+  local C = Style.COLOR
+
+  -- ⚠️ REPLACE THE SHARED SURFACE, NEVER LAYER OVER IT. Style.Window has already
+  -- painted a fill, a navy hairline rim, a title-bar band and the line beneath
+  -- it. Adding a second fill and a second rim on top drew BOTH: a light rim
+  -- outside a dark one with a black band across the top, which is what the panel
+  -- shipped looking like. Everything the window put down comes off first.
+  if frame.bgTex then frame.bgTex:Hide() end
+  if frame.headTex then frame.headTex:Hide() end
+  if frame.headLine then frame.headLine:Hide() end
+  if frame.rim then
+    for _, side in ipairs({ "top", "bottom", "left", "right" }) do
+      if frame.rim[side] then frame.rim[side]:Hide() end
+    end
+  end
+
+  local bg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
+  bg:SetAllPoints()
+  bg:SetColorTexture(C.ground.r, C.ground.g, C.ground.b, 1)
+  frame.bgTex = bg
+
+  local glow = frame:CreateTexture(nil, "BACKGROUND", nil, -7)
+  glow:SetPoint("BOTTOMLEFT", 1, 1)
+  glow:SetPoint("BOTTOMRIGHT", -1, 1)
+  glow:SetHeight(math.floor((height or frame:GetHeight() or 560) * (1 - C.glowFrom)))
+  glow:SetColorTexture(1, 1, 1, 1)
+  -- CreateColor is guarded: it is a modern-client global, and a missing one must
+  -- leave a flat panel rather than error on the frame that draws everything.
+  if CreateColor and glow.SetGradient then
+    -- VERTICAL puts the FIRST colour at the bottom. The warmth belongs at the
+    -- bottom edge, so the opaque end goes first.
+    pcall(glow.SetGradient, glow, "VERTICAL",
+      CreateColor(C.orange.r, C.orange.g, C.orange.b, C.glowAlpha),
+      CreateColor(C.orange.r, C.orange.g, C.orange.b, 0))
+  else
+    glow:SetColorTexture(C.orange.r, C.orange.g, C.orange.b, C.glowAlpha * 0.5)
+  end
+  frame.glowTex = glow
+
+  frame.rim = Style.Rim(frame, C.rim, 0.4)
+  return frame
+end
+
+--- A purple pill: the one control shape the redesign uses for tabs, the two
+--- filter toggles and the footer buttons.
+---
+--- ⚠️ MARKED _hodStyled SO THE BUTTON SWEEP SKIPS IT. Style.Window hooks OnShow
+--- to reskin every text button beneath it into the flat elevated treatment; a
+--- pill that did not opt out would be painted purple here and grey a frame
+--- later, which is the sort of fault that only appears in game.
+---
+--- `on` is the selected state: solid purple. Off is the same hue at 30%, which
+--- is how the design distinguishes them — never a different colour, so the group
+--- still reads as one control.
+function Style.Pill(parent, width, height, label, size)
+  local btn = CreateFrame("Button", nil, parent)
+  btn._hodStyled = true
+  btn:SetSize(width, height or 24)
+
+  btn.fill = btn:CreateTexture(nil, "BACKGROUND")
+  btn.fill:SetAllPoints()
+
+  -- ⚠️ BUILT THE WAY GLOOM'S BUILD BARN BUILDS ITS BUTTONS, EXACTLY. The first
+  -- version of this used Style.Text plus an explicit SetWidth and shipped a row
+  -- of purple blocks with NO LABEL ON ANY OF THEM — eleven controls, every one
+  -- blank. Three things differed from the recipe that has been drawing fine in
+  -- the other addon for months: a fixed width on the fontstring, word wrap
+  -- turned off, and no SetFontString wiring. Which of the three did it is not
+  -- established, and guessing one is how it comes back; this removes all three
+  -- and matches the proven recipe instead.
+  --
+  -- SetFontString is the one worth keeping regardless of cause: without it
+  -- btn:SetText() silently updates nothing, so any future call site that reaches
+  -- for the standard Button method gets a label that never changes.
+  btn.text = btn:CreateFontString(nil, "OVERLAY")
+  Style.SetFont(btn.text, Style.FONT.titleMed, Style.SIZE[size or "head"])
+  btn.text:SetTextColor(Style.rgb(Style.COLOR.white))
+  btn.text:SetJustifyH("CENTER")
+  btn.text:SetPoint("CENTER")
+  btn:SetFontString(btn.text)
+  btn.text:SetText(label or "")
+
+  --- on = selected/active. enabled = false dims the whole pill, for a control
+  --- that is present but cannot act yet.
+  ---
+  --- The state is REMEMBERED on the button, because hover has to restore it: the
+  --- fill's alpha is the only thing separating on from off, so a hover that set
+  --- it and an OnLeave that reset it to a constant would silently promote every
+  --- inactive pill the pointer crossed.
+  --- ⚠️ THE COLOUR IS OPAQUE AND THE LEVEL IS SetAlpha — NEVER BOTH. Baking the
+  --- alpha into SetColorTexture as well makes the two multiply, and the off
+  --- state comes out far brighter than the design's 30%: on screen all four
+  --- filter pills read as selected. This is written down in Gloom's Build Barn
+  --- for the same reason, and this file did it wrong anyway.
+  ---
+  --- ⚠️ THE LABEL DIMS ON A TAB AND NOT ON A FILTER TOGGLE, because that is what
+  --- the design does and the two are saying different things. An inactive TAB is
+  --- a place you are not — the whole control recedes, text included. An inactive
+  --- FILTER is a choice still on offer, so its fill dims and its label stays
+  --- white and readable. Dimming both everywhere made the four filter pills look
+  --- disabled rather than unselected.
+  local OFF, ON = 0.3, 1
+  btn._dimText = true
+  function btn:SetPillState(on, enabled)
+    self._on = on and true or false
+    self._alpha = self._on and ON or OFF
+    self.fill:SetAlpha(self._alpha)
+    self.text:SetAlpha((self._dimText == false) and 1 or self._alpha)
+    self:SetAlpha((enabled == false) and 0.4 or 1)
+    self:EnableMouse(enabled ~= false)
+  end
+  btn.fill:SetColorTexture(Style.COLOR.purple.r, Style.COLOR.purple.g, Style.COLOR.purple.b, 1)
+  btn:SetPillState(false)
+
+  btn:HookScript("OnEnter", function(s)
+    if s._on then return end
+    s.fill:SetAlpha(0.55)
+    if s._dimText ~= false then s.text:SetAlpha(0.8) end
+  end)
+  btn:HookScript("OnLeave", function(s)
+    if s._on then return end
+    s.fill:SetAlpha(s._alpha or OFF)
+    if s._dimText ~= false then s.text:SetAlpha(s._alpha or OFF) end
+  end)
+  return btn
+end
+
 -- ── Reskinning Blizzard templates ──────────────────────────────────────────
 --
 -- Every window here is built on BasicFrameTemplateWithInset and every button on
@@ -309,9 +509,13 @@ function Style.Window(frame)
   head:SetColorTexture(Style.rgb(Style.COLOR.bgAlt))
   frame.headTex = head
 
+  -- Kept on the frame so a window that supplies its own ground (Style.PanelGround)
+  -- can take it back off. It used to be a local, which is why the redesigned
+  -- panel could hide the title band but not the line under it.
   local headLine = Style.Divider(frame, Style.COLOR.border, 1)
   headLine:SetPoint("TOPLEFT", 1, -27)
   headLine:SetPoint("TOPRIGHT", -1, -27)
+  frame.headLine = headLine
 
   if frame.TitleText then
     Style.SetFont(frame.TitleText, Style.FONT.title, Style.SIZE.title)

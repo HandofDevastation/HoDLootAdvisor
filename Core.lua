@@ -288,6 +288,14 @@ end
 -- wins, so showing both would imply a sum that is not happening.
 local QUALITY_MUTED = { 0.533, 0.533, 0.600 }
 local QUALITY_GOLD  = { 0.953, 0.773, 0.420 }
+-- ⚠️ BIS AND THE TARGET MARK MUST NOT SHARE A HUE (Session 249). Both used to be
+-- the brand gold, which is exactly the collision that rule forbids — a gold mark
+-- beside a gold tag says nothing about which is which. Jason's design settles the
+-- pair: BIS takes the yellow, the target takes the green.
+local BIS_COLOR    = { 1.000, 0.957, 0.408 }   -- #fff468
+local TARGET_COLOR = { 0.125, 0.729, 0.337 }   -- #20ba56
+ns.BIS_COLOR    = BIS_COLOR
+ns.TARGET_COLOR = TARGET_COLOR
 local GRADE_COLOR = {
   s = { 1.000, 0.420, 0.420 }, a = { 0.980, 0.640, 0.320 },
   b = { 0.784, 0.588, 0.180 }, c = { 0.627, 0.627, 0.690 },
@@ -302,7 +310,7 @@ ns.BIS_LONG = BIS_LONG
 --- Returns text plus colour so every surface renders it identically.
 local function qualityTag(q)
   if not q then return nil end
-  if q.bis then return BIS_SHORT[q.bis] or "BIS", QUALITY_GOLD end
+  if q.bis then return BIS_SHORT[q.bis] or "BIS", BIS_COLOR end
   if q.grade then
     return q.grade == "defensive" and "DEF" or q.grade:upper(),
            GRADE_COLOR[q.grade] or QUALITY_MUTED
@@ -495,6 +503,238 @@ function ns.BisCountsByInstance()
     if instanceID then out[instanceID] = (out[instanceID] or 0) + n end
   end
   return out
+end
+
+-- ---------------------------------------------------------------------------
+-- Ordering the item column (Session 250)
+-- ---------------------------------------------------------------------------
+--
+-- ONE LADDER FOR EVERY MODE, settled by Jason in Session 249:
+--
+--   Targeted -> BIS (Overall -> Raid -> M+) -> Major -> Moderate -> Minor
+--   -> Sidegrade -> Not an upgrade -> Not for you
+--
+-- ⚠️ TARGETS PIN TO THE TOP REGARDLESS OF USABILITY (Jason, flatly). A target is
+-- an actively chosen thing, so an item somebody has decided they want outranks
+-- the machine's opinion of it — including "your class cannot wear this", because
+-- a Resto Druid may legitimately be chasing Feral gear.
+--
+-- TIES BREAK BY UPGRADE SIZE, THEN NAME, so the list does not reshuffle between
+-- refreshes. That matters more than it looks: the column is a SELECTOR, and a
+-- selector whose rows move under the pointer is one that gets misclicked during
+-- the only sixty seconds anybody is looking at it.
+--
+-- In Core rather than Panel.lua because it is pure logic and Panel.lua is the
+-- one file no harness loads — the fourth time this project has had to move
+-- something for that reason.
+
+-- Lower sorts first. Gaps left between bands so a future rung (a second BIS
+-- kind, say) can be inserted without renumbering the ones around it.
+local ITEM_BAND = {
+  targeted     = 0,
+  bisOverall   = 10,
+  bisRaid      = 11,
+  bisMplus     = 12,
+  major        = 20,
+  moderate     = 21,
+  minor        = 22,
+  sidegrade    = 23,
+  notAnUpgrade = 30,
+  notForYou    = 40,
+}
+ns.ITEM_BAND = ITEM_BAND
+
+local BIS_BAND = {
+  overall = ITEM_BAND.bisOverall,
+  raid    = ITEM_BAND.bisRaid,
+  mplus   = ITEM_BAND.bisMplus,
+}
+local BADGE_BAND = {
+  major     = ITEM_BAND.major,
+  moderate  = ITEM_BAND.moderate,
+  minor     = ITEM_BAND.minor,
+  sidegrade = ITEM_BAND.sidegrade,
+}
+
+--- Which rung of the ladder one scored item sits on.
+---
+--- `entry` is the panel's item record: targeted, quality (grade + bis), badge,
+--- ineligible, and whether it scored as an upgrade at all.
+function ns.ItemBand(entry)
+  if not entry then return ITEM_BAND.notForYou end
+  -- FIRST, and before eligibility: see the pin rule above.
+  if entry.targeted then return ITEM_BAND.targeted end
+  if entry.ineligible then return ITEM_BAND.notForYou end
+  local bis = entry.quality and entry.quality.bis
+  if bis then return BIS_BAND[bis] or ITEM_BAND.bisMplus end
+  -- An item we could not score at all is not the same as one that scored badly,
+  -- but it is not an upgrade we can vouch for either — it sits with them rather
+  -- than being promoted by an absent badge.
+  if entry.reason or not entry.badge then return ITEM_BAND.notAnUpgrade end
+  if entry.isUpgrade == false then return ITEM_BAND.notAnUpgrade end
+  return BADGE_BAND[entry.badge] or ITEM_BAND.sidegrade
+end
+
+--- Sort a list of item entries into the ladder, in place, and return it.
+function ns.OrderItems(entries)
+  if type(entries) ~= "table" then return entries end
+  for _, e in ipairs(entries) do
+    e.band = ns.ItemBand(e)
+  end
+  table.sort(entries, function(a, b)
+    if a.band ~= b.band then return a.band < b.band end
+    -- Upgrade SIZE, not raw score: the score is never displayed and two items
+    -- from different bands are not comparable on it anyway. Within one band the
+    -- ilvl gain is the honest tiebreak and it is a number both sides can see.
+    local ga, gb = a.gain or 0, b.gain or 0
+    if ga ~= gb then return ga > gb end
+    return (a.name or "") < (b.name or "")
+  end)
+  return entries
+end
+
+--- "Chest, Plate" · "1H Axe" · "Trinket" — the item column's second line.
+---
+--- Armour reads SLOT then ARMOUR TYPE; a weapon reads its type alone, because
+--- "Main Hand, 1H Axe" says the same thing twice in a 198px row. Driven by
+--- whether the armour type is one of the four armour classes rather than by a
+--- weapon list, so a subtype we have never seen falls through to the weapon
+--- shape instead of vanishing.
+local ARMOR_CLASS = { Cloth = true, Leather = true, Mail = true, Plate = true }
+
+function ns.ItemSlotLine(entry)
+  if not entry then return "" end
+  local slot, armor = entry.slotText, entry.armorType
+  if armor and ARMOR_CLASS[armor] then
+    return slot and slot ~= "" and (slot .. ", " .. armor) or armor
+  end
+  if armor and armor ~= "" then return armor end
+  return slot or ""
+end
+
+--- "1st" · "2nd" · "13th" · "21st" — the detail header's standing.
+--- Returns the number and the suffix separately, because the design sets them at
+--- different sizes (24px on the digits, 18px on the suffix).
+function ns.Ordinal(n)
+  if type(n) ~= "number" then return nil, nil end
+  local abs = math.floor(math.abs(n))
+  local suffix = "th"
+  -- 11, 12 and 13 take "th" despite ending in 1, 2 and 3 — the case every
+  -- hand-rolled version of this gets wrong, and a raid of 20+ reaches it.
+  local lastTwo = abs % 100
+  if lastTwo < 11 or lastTwo > 13 then
+    local last = abs % 10
+    if last == 1 then suffix = "st"
+    elseif last == 2 then suffix = "nd"
+    elseif last == 3 then suffix = "rd" end
+  end
+  return tostring(abs), suffix
+end
+
+--- How many of a list of items are BIS for the viewer, and how many they have
+--- targeted — the boss header's "For You: 1 BIS | 2 Targets".
+---
+--- Counted off the SAME entries the column is about to draw, deliberately, so
+--- the header can never claim a BIS the list below does not show. Asking the
+--- payload separately is what let the picker labels and the list disagree.
+function ns.CountsForItems(entries)
+  local bis, targets = 0, 0
+  for _, e in ipairs(entries or {}) do
+    if e.quality and e.quality.bis then bis = bis + 1 end
+    if e.targeted then targets = targets + 1 end
+  end
+  return bis, targets
+end
+
+-- ---------------------------------------------------------------------------
+-- The Standings tab (Session 250)
+-- ---------------------------------------------------------------------------
+
+--- "1,240" — thousands separated, the way the design writes EP.
+--- Handles negatives and leaves anything non-numeric alone.
+function ns.Commify(n)
+  if type(n) ~= "number" then return tostring(n or "") end
+  local sign = n < 0 and "-" or ""
+  local whole = tostring(math.floor(math.abs(n)))
+  local out = whole
+  while true do
+    local swapped
+    out, swapped = out:gsub("^(%d+)(%d%d%d)", "%1,%2")
+    if swapped == 0 then break end
+  end
+  return sign .. out
+end
+
+--- "2 days" · "1 wk" · "6 wks" — the LAST ITEM column's compact age.
+--- nil for unknown, which the column renders as an em-dash: per Core §1.1 the
+--- dash is reserved for genuinely absent data, and "never received an item" is
+--- absent, not zero.
+function ns.ShortAge(days)
+  if type(days) ~= "number" then return nil end
+  if days < 7 then return ("%d day%s"):format(days, days == 1 and "" or "s") end
+  local wks = math.floor(days / 7)
+  return ("%d wk%s"):format(wks, wks == 1 and "" or "s")
+end
+
+--- "today" · "yesterday" · "5 days ago" · "3 weeks ago" · "2 months ago" —
+--- the long form the personal card uses. Extracted from the old Me tab so the
+--- two surfaces cannot drift into describing the same date differently.
+function ns.LongAge(days)
+  if type(days) ~= "number" then return nil end
+  if days == 0 then return "today" end
+  if days == 1 then return "yesterday" end
+  if days < 14 then return ("%d days ago"):format(days) end
+  if days < 60 then return ("%d weeks ago"):format(math.floor(days / 7)) end
+  return ("%d months ago"):format(math.floor(days / 30))
+end
+
+--- Which list the Loot tab should open on: "drops" or "table".
+---
+--- IN A RAID, WHAT DROPPED IS THE QUESTION; anywhere else it is what CAN drop.
+--- Jason's call, and it holds even when nothing has dropped yet — inside a raid
+--- an empty drops list is information ("nothing yet"), while outside one it is
+--- just an empty screen, because nothing is ever going to arrive.
+---
+--- Reuses ns.CurrentContentScope rather than reading GetInstanceInfo again: that
+--- is the settled seam for "where is this player standing", and a second copy is
+--- one of them going stale. A keystone dungeon answers "mplus", which correctly
+--- falls through to the full table — group loot does not happen there.
+function ns.DefaultLootSource()
+  return (ns.CurrentContentScope and ns.CurrentContentScope() == "raid")
+    and "drops" or "table"
+end
+
+--- The Standings table: the EPGP ladder, joined to the roster for the two things
+--- the ladder does not carry — a raider's CLASS (for the name colour) and when
+--- they last received an item.
+---
+--- ⚠️ DRIVEN BY THE LADDER, NOT THE ROSTER. The ladder is what the site ranked
+--- and it owns the rank numbers, ties included — this must not re-derive them.
+--- A ladder name with no roster row is still shown, uncoloured, rather than
+--- dropped: a raider missing from a standings table is the silent omission this
+--- project keeps writing rules about, and it is exactly the case a main-swap or
+--- a late roster edit produces.
+---
+--- Returns rows plus the ladder's total, which is the "of 17" on the personal
+--- rail — one number, read once, so the rail and the table cannot disagree.
+function ns.StandingsRows()
+  local raid = ns.Payload and ns.Payload.Current()
+  local ladder = raid and raid.ladder
+  if not ladder then return {}, 0 end
+
+  local byName = ns.Payload.byName or {}
+  local out = {}
+  for i, s in ipairs(ladder) do
+    local roster = s.n and byName[s.n:lower()]
+    out[#out + 1] = {
+      rank = s.rank or i,
+      name = s.n,
+      class = roster and roster.c or nil,
+      ep = s.ep, gp = s.gp, pr = s.pr,
+      lastItemDays = roster and roster.lastItemDays or nil,
+    }
+  end
+  return out, #ladder
 end
 
 --- Which body of content the player is in right now: "raid", "mplus", or nil

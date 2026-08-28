@@ -33,6 +33,14 @@ local GLOBALS = {
   "EJ_SetDifficulty", "EJ_GetDifficulty", "EJ_IsValidInstanceDifficulty",
   "EJ_SetSearch", "EJ_ClearSearch", "EJ_GetNumSearchResults", "EJ_GetSearchResult",
   "EJ_GetCurrentInstance", "EJ_InstanceIsRaid", "EJ_ContentTab_Select",
+  -- BOSS PORTRAITS (Session 250). The redesigned panel's boss strip wants a
+  -- face per encounter, and whether the client can supply one was listed as
+  -- UNKNOWN — the alternative being to bundle art per tier the way Gloom's
+  -- Build Barn does, which needs new files every season and draws blank tiles
+  -- when somebody forgets. These are the two candidate routes: an icon path
+  -- straight off the creature record, or a display id that the portrait helper
+  -- renders. ASKED, not assumed — the whole point of this probe.
+  "EJ_GetCreatureInfo", "SetPortraitTextureFromCreatureDisplayID",
 }
 
 local NAMESPACED = {
@@ -421,6 +429,58 @@ function Journal.Loot(encounterID, opts)
   return out, cold
 end
 
+--- The boss's face, for the strip. Returns iconPath, displayID — either, both,
+--- or neither.
+---
+--- TWO ROUTES BECAUSE THE CLIENT MAY OFFER EITHER. EJ_GetCreatureInfo's fifth
+--- return is an icon PATH a texture can take directly; its fourth is a creature
+--- DISPLAY id, which SetPortraitTextureFromCreatureDisplayID renders into a
+--- texture instead. The caller takes whichever came back and falls back to a
+--- plain tile when neither did — so a client that answers nothing here costs a
+--- less pretty strip, never a blank one.
+---
+--- ⚠️ NOTHING HERE IS ASSERTED. Both names are in the probe list above precisely
+--- because this project has twice paid for a recalled API, and this returns nil
+--- rather than erroring when they are absent. Run /la journal in game to settle
+--- which route this client actually has.
+---
+--- Creature 1 is the encounter's headline boss. A council fight enumerates
+--- several; the first is the one the Adventure Guide itself shows.
+function Journal.EncounterPortrait(encounterID)
+  local creature = api("EJ_GetCreatureInfo")
+  local selEnc = api("EJ_SelectEncounter")
+  if not (creature and selEnc and encounterID) then return nil, nil end
+
+  local restore = saveState()
+
+  local instanceID = Journal.InstanceForEncounter(encounterID)
+  local selInst = api("EJ_SelectInstance")
+  if instanceID and selInst then call(selInst, instanceID) end
+  call(selEnc, encounterID)
+
+  -- id, name, description, displayInfo, iconImage, uiModelSceneID
+  local ok, ret = call(creature, 1, encounterID)
+  restore()
+  if not ok then return nil, nil end
+
+  local displayID = type(ret[4]) == "number" and ret[4] or nil
+  local icon = type(ret[5]) == "string" and ret[5] ~= "" and ret[5] or nil
+  -- A NUMBER is also a valid texture reference (a fileID), which is what modern
+  -- clients increasingly return where a path used to be. Accepting only strings
+  -- would have read "no portrait available" off a client that had one.
+  if not icon and type(ret[5]) == "number" and ret[5] > 0 then icon = ret[5] end
+
+  if ns.Diagnostics then
+    ns.Diagnostics.Note("journalPortrait", {
+      encounterID = encounterID, instanceID = instanceID,
+      returns = ret.n or 0, hasIcon = icon ~= nil, hasDisplayID = displayID ~= nil,
+      iconType = type(ret[5]),
+    })
+  end
+
+  return icon, displayID
+end
+
 -- ---------------------------------------------------------------------------
 -- The cached catalogue
 -- ---------------------------------------------------------------------------
@@ -432,10 +492,12 @@ end
 -- an item's NAME can (a cold cache), which is why the loot cache records whether
 -- it was complete and re-reads only when it was not.
 
-local cache = { instances = nil, encounters = {}, loot = {}, cold = {}, index = nil }
+local cache = { instances = nil, encounters = {}, loot = {}, cold = {},
+                index = nil, portraits = {} }
 
 function Journal.Invalidate()
-  cache = { instances = nil, encounters = {}, loot = {}, cold = {}, index = nil }
+  cache = { instances = nil, encounters = {}, loot = {}, cold = {},
+            index = nil, portraits = {} }
 end
 
 function Journal.CachedInstances()
@@ -451,6 +513,26 @@ function Journal.CachedEncounters(instanceID)
     cache.encounters[instanceID] = Journal.Encounters(instanceID)
   end
   return cache.encounters[instanceID]
+end
+
+--- The boss's face, read once per encounter and held.
+---
+--- CACHED INCLUDING THE MISS. Reading a portrait drives the real Adventure Guide
+--- — select instance, select encounter, put it back — and the strip asks for
+--- every boss on every refresh, so an uncached miss would do that nine times a
+--- frame for a client that cannot answer at all. The negative result is the one
+--- most worth remembering.
+---
+--- Returns iconPath, displayID; both may be nil.
+function Journal.CachedPortrait(encounterID)
+  if not encounterID then return nil, nil end
+  local hit = cache.portraits[encounterID]
+  if hit == nil then
+    local icon, displayID = Journal.EncounterPortrait(encounterID)
+    hit = { icon = icon, displayID = displayID }
+    cache.portraits[encounterID] = hit
+  end
+  return hit.icon, hit.displayID
 end
 
 --- Which instance an encounter belongs to.
