@@ -10,6 +10,42 @@ on:
 permissions:
   contents: write
 
+# ── WHY THE TOKENS LIVE AT JOB LEVEL (Session 250) ───────────────────────────
+# They were on the packager STEP, and the CurseForge one did not reach the
+# script: the run printed "CurseForge ID: 1671489" with no "[token set]" beside
+# it, while GitHub's own token on the very same step printed "[token set]" and
+# worked. The packager is a COMPOSITE action, and step-level env reaching a
+# composite's inner steps is a known-unreliable corner of Actions. Job-level env
+# is inherited unambiguously, so the variable is declared where there is no
+# question about it.
+#
+# ⚠️ A MISSING TOKEN IS SILENT BY DESIGN. The packager treats "no token" as
+# "do not publish there" — no error, no warning, exit 0. That is correct
+# behaviour and it is also why this went unnoticed: a release that uploaded
+# nowhere looked identical to one that worked. The verification step below
+# exists so it can never be silent again.
+env:
+  GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── CurseForge ─────────────────────────────────────────────────────────────
+  # WHY, given the standing GitHub-Releases-only decision: WoWUp's GitHub
+  # provider is broken for UPDATES (WowUp.CF issues #103/#107 — it fetches the
+  # API asset URL without the octet-stream header and unzips GitHub's JSON), and
+  # the fix has sat unshipped since February. The only per-user workaround is a
+  # GitHub personal access token, which is not a thing a guild can ask of its
+  # raiders. CurseForge is what WowUp-CF is built around, so a listing there
+  # makes install and update work with nothing asked of the person installing.
+  #
+  # The WowUp Hub was investigated and rejected on evidence: its GitHub-source
+  # catalogue holds THIRTY-THREE addons in total, with no self-serve submission
+  # route. It is not a path available to us.
+  # BOTH NAMES, from the one secret. The packager checks CF_API_KEY first and
+  # falls back to CF_API_TOKEN, and the project's own documented example workflow
+  # uses CF_API_KEY — so this matches the form everyone else runs rather than
+  # depending on the alias. The repository secret stays named CF_API_TOKEN.
+  CF_API_KEY: ${{ secrets.CF_API_TOKEN }}
+  CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -19,27 +55,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Says out loud whether each credential arrived, WITHOUT printing any of
+      # them. A secret's value is masked in logs anyway; what was missing was
+      # any statement that it was absent at all.
+      - name: Check publishing credentials
+        run: |
+          if [ -n "$CF_API_TOKEN" ]; then
+            echo "CurseForge token: present (${#CF_API_TOKEN} chars)"
+          else
+            echo "::warning::CurseForge token MISSING — the packager will publish"\
+                 "to GitHub only and will not say so. Check the CF_API_TOKEN"\
+                 "repository secret."
+          fi
+          if [ -n "$GITHUB_OAUTH" ]; then
+            echo "GitHub token: present"
+          else
+            echo "::error::GitHub token missing — no release will be created."
+          fi
+
       - name: Package and create GitHub release
         uses: BigWigsMods/packager@v2
-        env:
-          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
-
-          # ── CurseForge (added Session 250) ────────────────────────────────
-          # WHY, given the standing GitHub-Releases-only decision: WoWUp's
-          # GitHub provider is broken for UPDATES (WowUp.CF issues #103/#107 —
-          # it fetches the API asset URL without the octet-stream header and
-          # unzips GitHub's JSON), and the fix has sat unshipped since
-          # February. The workaround is a personal access token per user, which
-          # is not something a guild can ask of its raiders. CurseForge is what
-          # WowUp-CF is built around, so a listing there makes install and
-          # update work with nothing asked of the person installing.
-          #
-          # The WowUp Hub was investigated and rejected on evidence: its
-          # GitHub-source catalogue holds THIRTY-THREE addons total, with no
-          # self-serve submission route. It is not a path we can take.
-          #
-          # ⚠️ ABSENT SECRET = NO UPLOAD, NOT A FAILED BUILD. The packager
-          # skips any destination whose token is missing, so this stays inert
-          # until CF_API_TOKEN exists in the repo secrets and the project id is
-          # on the .toc. Tagging a release keeps working either way.
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
