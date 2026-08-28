@@ -6,6 +6,12 @@
 ## SavedVariables: HoDLootAdvisorDB
 ## SavedVariablesPerCharacter: HoDLootAdvisorCharDB
 
+# ⚠️ FILL THIS IN AFTER CREATING THE CURSEFORGE PROJECT, uncommented, with the
+# numeric Project ID shown on the project's page. The packager reads it from
+# here to know what to upload to; without it the CurseForge step is skipped and
+# only the GitHub Release is cut. See .github/workflows/release.yml.
+# ## X-Curse-Project-ID: 000000
+
 # Load order matters: the baked data table must exist before anything reads it,
 # and Scoring must be on the namespace before Loot drives it.
 LootData.lua

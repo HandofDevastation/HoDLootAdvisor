@@ -22,6 +22,24 @@ jobs:
       - name: Package and create GitHub release
         uses: BigWigsMods/packager@v2
         env:
-          # Only the built-in token — no CurseForge/Wago/WowInterface secrets,
-          # so the packager publishes a GitHub Release and nothing else.
           GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+
+          # ── CurseForge (added Session 250) ────────────────────────────────
+          # WHY, given the standing GitHub-Releases-only decision: WoWUp's
+          # GitHub provider is broken for UPDATES (WowUp.CF issues #103/#107 —
+          # it fetches the API asset URL without the octet-stream header and
+          # unzips GitHub's JSON), and the fix has sat unshipped since
+          # February. The workaround is a personal access token per user, which
+          # is not something a guild can ask of its raiders. CurseForge is what
+          # WowUp-CF is built around, so a listing there makes install and
+          # update work with nothing asked of the person installing.
+          #
+          # The WowUp Hub was investigated and rejected on evidence: its
+          # GitHub-source catalogue holds THIRTY-THREE addons total, with no
+          # self-serve submission route. It is not a path we can take.
+          #
+          # ⚠️ ABSENT SECRET = NO UPLOAD, NOT A FAILED BUILD. The packager
+          # skips any destination whose token is missing, so this stays inert
+          # until CF_API_TOKEN exists in the repo secrets and the project id is
+          # on the .toc. Tagging a release keeps working either way.
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
