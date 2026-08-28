@@ -2452,6 +2452,56 @@ header("Which list the Loot tab opens on")
   ns.CurrentContentScope = saved
 end)()
 
+-- ── Every file compiles under the Lua the GAME runs ─────────────────────────
+--
+-- ⚠️ WOW IS LUA 5.1 AND THE luac ON A DEV MACHINE IS NOT. Session 250 shipped a
+-- Panel.lua that `luac -p` passed and the game REFUSED: as one function, build()
+-- closed over more than 60 upvalues, which is a hard limit in 5.1 and was raised
+-- to 255 in 5.2. The file never compiled, ns.Panel was never set, and /la
+-- answered "panel did not load" — with the whole addon otherwise working, so
+-- nothing pointed at the panel.
+--
+-- Every file-scope constant a function references costs one upvalue, so this is
+-- a limit a growing builder crosses silently and a modern parser will never
+-- mention. Checked here for EVERY file, not just the window ones.
+--
+-- Skipped rather than failed when no 5.1 parser is installed: this must not
+-- block the harness on a machine without luajit, but a skip is REPORTED so the
+-- absence of the check is never mistaken for the check passing.
+
+header("Every file compiles under Lua 5.1 — the version the game runs")
+
+;(function()
+  local probe = io.popen("luajit -v 2>/dev/null")
+  local version = probe and probe:read("*a") or ""
+  if probe then probe:close() end
+
+  if not version:match("LuaJIT") then
+    io.write("  SKIP no Lua 5.1 parser found — install luajit to enable this check\n")
+    io.write("       (brew install luajit). The game is 5.1; a 5.4/5.5 luac is not\n")
+    io.write("       evidence, and this is the check that would have caught the\n")
+    io.write("       60-upvalue limit that stopped Panel.lua loading in Session 250.\n")
+    return
+  end
+
+  local FILES = {
+    "LootData.lua", "Style.lua", "Scoring.lua", "Core.lua", "Settings.lua",
+    "Payload.lua", "Diagnostics.lua", "Comms.lua", "Roster.lua", "Journal.lua",
+    "Targets.lua", "Tooltip.lua", "Record.lua", "Loot.lua",
+    -- THE WINDOW FILES ESPECIALLY. Nothing else in this harness loads them, so
+    -- without this they reach the game entirely unparsed.
+    "LoadWindow.lua", "RecordWindow.lua", "Panel.lua",
+  }
+
+  for _, path in ipairs(FILES) do
+    local pipe = io.popen(("luajit -bl %q 2>&1 >/dev/null"):format(path))
+    local err = pipe and pipe:read("*a") or "could not run luajit"
+    if pipe then pipe:close() end
+    check(("%s compiles under 5.1"):format(path), err == "",
+          err ~= "" and (err:gsub("%s+$", "")) or nil)
+  end
+end)()
+
 -- ── Every helper the window files call actually exists ──────────────────────
 --
 -- ⚠️ THE WINDOW FILES SHIP HAVING NEVER RUN. No harness loads Panel.lua,

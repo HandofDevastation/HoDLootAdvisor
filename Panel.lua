@@ -552,7 +552,7 @@ end
 -- Build
 -- ---------------------------------------------------------------------------
 
-local function build()
+local function buildChrome()
   -- ⚠️ NO BLIZZARD TEMPLATE. This was BasicFrameTemplateWithInset, and the inset
   -- border kept drawing however many of its regions Style.Window took off — a
   -- second rim around the content that survived three attempts to hide it.
@@ -620,6 +620,9 @@ local function build()
     frame.tabs[name] = b
   end
 
+end
+
+local function buildLootControls()
   -- ── Boss context, left of the strip ───────────────────────────────────────
   frame.bossName = at(text(frame, "label", "head", "orange"), 21, CTX_Y, 200)
   frame.bossSub  = at(text(frame, "body", "small", "text"), 21, CTX_Y + 18, 200)
@@ -696,6 +699,9 @@ local function build()
   frame.colMore = at(text(frame, "body", "tiny", "textDim"),
     COL_X, COL_TOP + COL_ROWS * ITEM_PITCH + 2, COL_W)
 
+end
+
+local function buildStandingsTab()
   -- ── Standings tab ─────────────────────────────────────────────────────────
   -- The season, on the tab row's right. Only this tab shows it: the Loot design
   -- leaves that space empty, and a label that appears on one tab and not another
@@ -743,6 +749,9 @@ local function build()
   frame.stNote = at(text(frame, "body", "small", "textDim"), ST_NAME, ST_TOP + 8, 340)
   frame.stNote:SetWordWrap(true)
 
+end
+
+local function buildDetailPane()
   -- ── The detail pane ───────────────────────────────────────────────────────
   frame.pane = CreateFrame("Frame", nil, frame)
   frame.pane:SetPoint("TOPLEFT", PANE_X, -PANE_Y)
@@ -835,6 +844,9 @@ local function build()
   frame.note = at(text(frame, "body", "tiny", "textDim"), C_RANK, NOTE_Y, DIV_W)
   frame.note:SetAlpha(0.5)
 
+end
+
+local function buildFooter()
   -- ── The bottom bar ────────────────────────────────────────────────────────
   -- FIXED, and present on EVERY tab. Import Raid Night in particular cannot move
   -- behind the Runner tab: it is how a non-runner BECOMES the runner, so it
@@ -891,6 +903,9 @@ local function build()
   end)
   frame.log:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
+end
+
+local function buildTabControls()
   -- ── Per-tab controls, in the pane's bottom-right ──────────────────────────
   -- POST IS RUNNER-ONLY (Session 249): two people posting puts two different
   -- lists in raid chat for one item, and chat is the only thing a non-installer
@@ -995,6 +1010,29 @@ local function build()
     state.rankScroll = 0
     Panel.Refresh()
   end)
+end
+
+-- ⚠️ SPLIT INTO SIX, AND NOT FOR TIDINESS. As ONE function this exceeded
+-- LUA 5.1'S LIMIT OF 60 UPVALUES and would not compile in the game at all —
+-- the file never loaded and /la reported "panel did not load". Every
+-- file-scope constant a function references costs one upvalue, and the
+-- redesign added roughly fifty geometry constants to a builder that already
+-- closed over dozens.
+--
+-- ⚠️ luac -p DID NOT CATCH IT, because the luac on this machine is 5.5 and
+-- 5.2 raised the limit to 255. Syntax that a modern Lua accepts is not
+-- evidence that WoW accepts it. Check window files with a 5.1 parser
+-- (luajit -bl) — see the harness note in test/smoke.lua.
+--
+-- Each part now closes over its own section's constants and nothing else,
+-- so adding a control to one of them cannot silently re-break the others.
+local function build()
+  buildChrome()
+  buildLootControls()
+  buildStandingsTab()
+  buildDetailPane()
+  buildFooter()
+  buildTabControls()
 end
 
 -- ---------------------------------------------------------------------------
