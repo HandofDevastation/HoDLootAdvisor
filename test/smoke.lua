@@ -161,6 +161,7 @@ stub.Fire("PLAYER_ENTERING_WORLD", true, false)
 
 -- ── Status ──────────────────────────────────────────────────────────────────
 
+do
 header("/la")
 stub.Slash("")
 
@@ -173,6 +174,7 @@ check("spec resolves to a stat ranking", ns.SpecFor(char) ~= nil)
 local pieces, setKnown = ns.TierPieceCount()
 check("tier piece count read from equipped set ids", pieces == 3 and setKnown,
       ("got %d (known=%s)"):format(pieces, tostring(setKnown)))
+end
 
 -- ── Gear track resolution ───────────────────────────────────────────────────
 
@@ -209,6 +211,7 @@ check("item link parses its bonus ids",
 
 -- ── Scoring, through the slash commands ─────────────────────────────────────
 
+do
 header("/la score  — an ordinary armour drop")
 stub.Slash("score " .. chestId .. " h")
 local chestOut = ns.Loot.ScoreItem(chestId, { difficulty = "h" })
@@ -242,11 +245,13 @@ check("the token is an upgrade on TRACK, not item level",
       tokenOut.result.is_upgrade == true)
 check("set completion scored for a tier token", tokenOut.result.tier_bonus > 0,
       tokenOut.result.tier_bonus)
+end
 
 -- ── Eligibility ─────────────────────────────────────────────────────────────
 -- The case that prompted this layer: a Cloth tier token was scored a Major
 -- upgrade for a Hunter, because scoring has no opinion about armor types.
 
+do
 header("eligibility — items this character cannot use")
 
 local clothToken = findItem(function(_, it)
@@ -288,9 +293,11 @@ check("an item with no detectable primary stat is never excluded", okShared == t
 check("eligibility fails OPEN on a payload with no classes set",
       ns.CanUse({ armor = "Cloth" }, "Hunter", "Marksmanship") == true,
       "an over-broad list is fixable; an empty one reads as the addon being broken")
+end
 
 -- ── Degrading loudly ────────────────────────────────────────────────────────
 
+do
 header("items that cannot be scored — these must still be REPORTED")
 stub.Slash("score " .. omniId)
 stub.Slash("score 999999")
@@ -303,6 +310,7 @@ check("an omni-token still carries its name", omniOut.name ~= nil)
 local unknownOut = ns.Loot.ScoreItem(999999, { difficulty = "h" })
 check("an unrecognised item is reported unscored, with a reason",
       unknownOut.reason ~= nil, tostring(unknownOut.reason))
+end
 
 -- ── The raid payload ────────────────────────────────────────────────────────
 -- Decoded from a fixture produced by the REAL TypeScript encoder
@@ -372,6 +380,7 @@ end
 
 -- ── Corrupt and hostile input ───────────────────────────────────────────────
 
+do
 header("payload — refusing bad input")
 
 local truncated = encoded:sub(1, math.floor(#encoded * 0.8))
@@ -417,6 +426,7 @@ check("...and it is refused rather than silently accepted", hOk == nil)
 
 -- Reload the good payload — the hostile tests must not have disturbed it.
 ns.Payload.Store(ns.Payload.Decode(encoded))
+end
 
 -- ── Cross-raider ranking ────────────────────────────────────────────────────
 
@@ -908,6 +918,7 @@ check("an encounter id learned from a LOOT_HISTORY_* event is enumerated too",
 -- character were not part of the run's identity — two lockouts and two sets of
 -- loot silently collapsed into one session.
 
+do
 check("the run records which character was playing",
       run and run.character == "Gloomrift", run and run.character)
 
@@ -933,6 +944,7 @@ check("each run is attributed to the character that recorded it",
 
 -- Back to the main for the rest.
 stub.player.name = "Gloomrift"
+end
 
 -- ── Personal loot, and the personal/guild split ─────────────────────────────
 
@@ -1602,6 +1614,7 @@ end
 -- was recorded" — identical to a real failure. Every rejection is now counted
 -- with its reason, so /la loot status can tell the two apart.
 
+do
 R.declined = {}
 stub.items[270199] = { name = "A Blue Thing", quality = 3, ilvl = 280, itemType = "Armor" }
 local beforeDecline = select(2, R.Counts())
@@ -1621,6 +1634,7 @@ stub.Fire("ENCOUNTER_LOOT_RECEIVED", 0, 270199,
 check("lowering minQuality lets the same drop through",
       select(2, R.Counts()) == beforeDecline + 1)
 ns.Settings.Set("minQuality", "4")
+end
 
 -- ── The Journal probe ───────────────────────────────────────────────────────
 --
@@ -1630,6 +1644,7 @@ ns.Settings.Set("minQuality", "4")
 -- is built on what the probe found, and the probe must stay able to contradict
 -- it on a client where the answer has changed.
 
+do
 header("JOURNAL PROBE")
 
 local okProbe, probeResult = pcall(ns.Journal.Probe)
@@ -1702,6 +1717,7 @@ check("browsing an absent catalogue returns nothing rather than erroring",
 for name, fn in pairs(savedEJ) do _G[name] = fn end
 _G.C_EncounterJournal = savedNS
 ns.Journal.Invalidate()
+end
 
 -- ── Windows behave like windows ─────────────────────────────────────────────
 --
@@ -1850,6 +1866,7 @@ check("the throwaway raid was cleaned up", #R.Sessions("guild") == 2,
 -- its session and a late scan still lands. Before that binding existed, the
 -- winner everyone was waiting for was silently dropped on the floor.
 
+do
 local guildBefore = select(2, R.Counts("guild"))
 stub.instance.instanceType = "none"          -- back in a city
 check("we are genuinely outside an instance now", select(2, GetInstanceInfo()) == "none")
@@ -1874,6 +1891,7 @@ check("and it is filed under the character who was there",
       end)())
 
 stub.instance.instanceType = "raid"
+end
 
 -- ── Item data arrives late ──────────────────────────────────────────────────
 --
