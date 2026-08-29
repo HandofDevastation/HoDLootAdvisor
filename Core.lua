@@ -447,6 +447,63 @@ function ns.GearReportingSummary()
   return { reporting = reporting, total = #raid.roster, missing = missing }
 end
 
+--- Make sure every name on screen is a real one, and come back when it is not.
+---
+--- ⚠️ THE RECURRING ADDON BUG, FIXED AT THE SOURCE RATHER THAN PER VIEW (Jason,
+--- Session 253: "this has bitten us SO MANY TIMES... figure that shit out once
+--- and for all"). The shape is always identical: the client answers an item
+--- query with NOTHING the first time and loads it in the background, the frame
+--- draws once against that empty answer, and nothing ever draws again — so the
+--- data appears only when something else forces a redraw, which is why closing
+--- and reopening, or switching boss, "fixes" it.
+---
+--- TWO HALVES, AND ONLY HAVING ONE IS WHY IT KEPT COMING BACK:
+---   1. ASK. C_Item.RequestLoadItemDataByID tells the client to go and get it.
+---   2. COME BACK. An unconditional, coalesced re-render — NOT one that waits on
+---      GET_ITEM_INFO_RECEIVED, because that event only fires when the client
+---      actually had to load something. Journal.lua learned this the hard way
+---      and its comment says so; this is the same rule applied everywhere else.
+---
+--- ⚠️ AND IT UNFREEZES STORED PLACEHOLDERS. A drop recorded before its item
+--- resolved has "item:270160" written into SavedVariables. Redrawing renders the
+--- same frozen string forever, so refreshing alone never fixed it —
+--- Record.ResolveItemInfo has to re-read the record. Its own comment claims it
+--- is "called before anything DISPLAYS", and the panel — the main display —
+--- never called it. Only the Loot Log window did, which is exactly why the Loot
+--- Log looked right while the panel did not.
+---
+--- Safe to call on every refresh: it does nothing when every name is real.
+local itemWarmPending = false
+
+function ns.WarmItemNames(entries)
+  local unresolved = {}
+  for _, e in ipairs(entries or {}) do
+    local id = e and e.itemID
+    -- A name that is still the id placeholder is not a name.
+    local unnamed = (not e.name) or e.name == ""
+      or (id and e.name == ("item:" .. tostring(id)))
+    if id and unnamed then unresolved[#unresolved + 1] = id end
+  end
+  if #unresolved == 0 then return false end
+
+  local req = C_Item and C_Item.RequestLoadItemDataByID
+  if req then for _, id in ipairs(unresolved) do pcall(req, id) end end
+
+  if itemWarmPending then return true end
+  itemWarmPending = true
+  if C_Timer and C_Timer.After then
+    C_Timer.After(0.3, function()
+      itemWarmPending = false
+      -- Re-read the STORED records first, then redraw. In that order: the panel
+      -- renders from the record, so refreshing before resolving shows the same
+      -- placeholder again.
+      if ns.Record and ns.Record.ResolveItemInfo then pcall(ns.Record.ResolveItemInfo) end
+      if ns.Panel and ns.Panel.Refresh then pcall(ns.Panel.Refresh) end
+    end)
+  end
+  return true
+end
+
 --- How the inspection sweep is going: how many people standing here we can
 --- actually describe, out of how many are here at all.
 ---

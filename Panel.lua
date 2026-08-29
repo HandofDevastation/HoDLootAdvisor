@@ -1683,6 +1683,15 @@ local function itemEntries()
     end
   end
 
+  -- ⚠️ EVERY SOURCE PASSES THROUGH HERE, WHICH IS THE POINT (Session 253). Both
+  -- branches above build `out` — recorded drops and the journal's loot table —
+  -- and only the journal one ever asked the client to load a missing name or
+  -- booked a redraw. So a drop whose item had not resolved rendered as
+  -- "item:270160" and stayed that way until something unrelated forced a
+  -- redraw: the "it only shows up if I switch boss" bug, in its latest costume.
+  -- One call, at the one place both lists meet, rather than a fix per view.
+  ns.WarmItemNames(out)
+
   for _, e in ipairs(out) do scoreEntry(e) end
 
   -- USABLE ONLY HIDES WHAT YOU CANNOT EQUIP, EXCEPT WHAT YOU ASKED FOR. Targets

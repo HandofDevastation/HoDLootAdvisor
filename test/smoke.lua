@@ -982,6 +982,51 @@ check("a run can be re-tagged by hand", #R.Sessions("guild") == 3)
 R.SetKind(personalRuns[1].index, "personal")
 check("and tagged back", #R.Sessions("personal") == 1)
 
+-- ── A placeholder name asks the client, and comes back ──────────────────────
+--
+-- ⚠️ THE BUG THAT KEPT RETURNING IN DIFFERENT COSTUMES (Jason, Session 253:
+-- "this has bitten us SO MANY TIMES"). The client answers an item query with
+-- nothing on the first ask and loads it in the background; the frame draws once
+-- against that empty answer and never draws again, so the name appears only
+-- when something unrelated forces a redraw — closing and reopening, or
+-- switching boss. The journal path defended itself; the recorded-drops path did
+-- not, and a drop recorded before its item resolved had "item:NNN" frozen into
+-- SavedVariables where redrawing alone could never fix it.
+do
+  header("Unresolved item names ask the client and schedule a redraw")
+
+  stub.requestedItems = {}
+  local before = #stub.timers
+
+  local asked = ns.WarmItemNames({
+    { itemID = 270160, name = "Sunfury Chestguard" },   -- real name: leave alone
+    { itemID = 999001, name = "item:999001" },          -- the frozen placeholder
+    { itemID = 999002 },                                -- no name at all
+  })
+
+  check("an unresolved name is noticed", asked == true)
+  check("...and the client is asked for exactly the unresolved ones",
+        #stub.requestedItems == 2
+          and ((stub.requestedItems[1] == 999001 and stub.requestedItems[2] == 999002)
+            or (stub.requestedItems[1] == 999002 and stub.requestedItems[2] == 999001)),
+        table.concat(stub.requestedItems, ","))
+  check("...and a redraw is booked rather than waiting to be told",
+        #stub.timers > before, ("%d -> %d timers"):format(before, #stub.timers))
+
+  -- Coalesced: a second call while one is pending must not stack another.
+  local pending = #stub.timers
+  ns.WarmItemNames({ { itemID = 999003 } })
+  check("a second unresolved list does not stack a second redraw",
+        #stub.timers == pending, ("%d -> %d"):format(pending, #stub.timers))
+
+  -- And the quiet case: everything named, nothing asked, nothing booked.
+  stub.requestedItems = {}
+  local quiet = #stub.timers
+  local none = ns.WarmItemNames({ { itemID = 270160, name = "Sunfury Chestguard" } })
+  check("a fully-named list asks for nothing and books nothing",
+        none == false and #stub.requestedItems == 0 and #stub.timers == quiet)
+end
+
 -- ── The winner's REALM survives into the export ─────────────────────────────
 --
 -- Abirn has two REAL characters both called Abirnn — a Druid on Area-52 and a
