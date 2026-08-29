@@ -20,10 +20,39 @@ concurrency:
   group: loot-data
   cancel-in-progress: false
 
+# ── PUBLISHING CREDENTIALS (Session 254) ─────────────────────────────────────
+# ⚠️ THIS WORKFLOW HAD NO CURSEFORGE TOKEN AT ALL, and its release step carried
+# GITHUB_OAUTH on the STEP rather than the job. So every weekly data refresh
+# published to GitHub and silently skipped CurseForge — the packager treats a
+# missing token as "do not publish there", no error, exit 0, which is the exact
+# failure that cost two days in Session 253 and was fixed in release.yml only.
+# Left alone, CurseForge would have received the addon's CODE on every tag and
+# its DATA never, so the season's loot table would have frozen there at whatever
+# shipped first while GitHub users updated weekly.
+#
+# ⚠️ JOB LEVEL, NOT STEP LEVEL, and both names from the one secret — for the
+# reasons written out at length in release.yml. Do not move these onto the step.
+env:
+  GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+  CF_API_KEY: ${{ secrets.CF_API_TOKEN }}
+  CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
 jobs:
   refresh:
     runs-on: ubuntu-latest
     steps:
+      # Says in plain words whether the credential arrived, because the packager
+      # will not: a release that uploaded nowhere looks identical to one that
+      # worked.
+      - name: Check publishing credentials
+        run: |
+          if [ -n "$CF_API_TOKEN" ]; then
+            echo "CurseForge token: present (${#CF_API_TOKEN} chars)"
+          else
+            echo "::warning::CurseForge token MISSING — the packager will publish"\
+                 " to GitHub only and say nothing about it."
+          fi
+
       - name: Clone project
         uses: actions/checkout@v4
         with:
@@ -121,5 +150,3 @@ jobs:
       - name: Package and publish the release
         if: steps.diff.outputs.changed == 'true'
         uses: BigWigsMods/packager@v2
-        env:
-          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
