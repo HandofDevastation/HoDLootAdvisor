@@ -114,9 +114,15 @@ function Tip:AddLine(text, r, g, b, wrap)
   return self
 end
 
+--- ⚠️ wrap IS EXPLICITLY FALSE, NEVER ABSENT (Session 254). Leaving it nil sent
+--- nil into SetWordWrap, which THROWS — and an error inside OnEnter aborts the
+--- handler, so nothing drew at all. The tell was which tooltips survived: every
+--- one whose lines pass `true` explicitly worked, and the only one built from
+--- double lines did not. A two-column row cannot wrap anyway; the flag is here
+--- so no value reaching a setter is ever nil.
 function Tip:AddDoubleLine(left, right, lr, lg, lb, rr, rg, rb)
   pending.lines[#pending.lines + 1] = {
-    left = left or "", right = right or "",
+    left = left or "", right = right or "", wrap = false,
     color = color("text", lr, lg, lb), rightColor = color("text", rr, rg, rb),
   }
   return self
@@ -170,7 +176,10 @@ function Tip:Show()
 
   for i, line in ipairs(pending.lines) do
     local r = rowAt(i)
-    r.left:SetWordWrap(line.wrap)
+    -- Coerced at the setter as well as at the source: this is the call that
+    -- threw, and it should not be able to throw again whatever a caller passes.
+    r.left:SetWordWrap(line.wrap and true or false)
+    r.right:SetWordWrap(false)
     r.left:SetWidth(0)
     r.left:SetText(line.left)
     r.left:SetTextColor(line.color[1], line.color[2], line.color[3])

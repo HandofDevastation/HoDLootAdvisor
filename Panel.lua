@@ -121,19 +121,22 @@ local FOOT_Y, FOOT_H = 509, 51
 -- WIDER SINCE SESSION 251: the label now names the CONTENT as well as the
 -- difficulty ("Raid: Heroic"), which no longer fits 100px.
 local DIFF_X, DIFF_Y, DIFF_W, DIFF_H = 460, 60, 140, 24
--- Gap between the Vault/Voidcore checkbox and the difficulty control it sits
--- beside. The control is anchored to the dropdown's LEFT edge and sizes itself
--- from its label, so it grows LEFTWARDS towards the tab row.
+-- Gap between the Vault/Voidcore checkbox and the difficulty control it now sits
+-- ABOVE, right edges aligned.
 --
--- ⚠️ THERE IS A BUDGET AND IT IS NOT LARGE. The last tab ends at
--- PAD + 2*TAB_PITCH + TAB_W = 340, and the control's right edge is DIFF_X minus
--- this gap = 448, so the label has 108px before the two collide — and an overlap
--- would not merely look wrong, it would put two mouse-enabled frames on the same
--- pixels, where only one receives a click. Measured from the bundled font rather
--- than guessed: "Vault/Voidcore" in Khand-Medium at Style.SIZE.head is 69.4px,
--- plus a 14px box and a 6px gap = 89.4px, leaving ~19px clear. A longer label
--- needs re-measuring, not eyeballing.
-local VAULT_GAP = 12
+-- ⚠️ MOVED IN SESSION 254, AND THE OLD BUDGET IS GONE WITH IT. It used to sit on
+-- the TAB ROW, growing leftwards from the dropdown's left edge into 108px of
+-- clearance — which the comment here measured carefully and which turned out not
+-- to hold: Jason saw it overlapping the Runner tab, two mouse-enabled frames on
+-- the same pixels, exactly the failure the measurement was meant to prevent.
+-- Rather than re-measure a budget that was already too tight to be worth
+-- defending, the control moved above the dropdown, where the width available is
+-- the whole panel. THIS IS ALSO WHERE THE FIGMA FRAME PUTS IT (Jason) — the
+-- previous position was never the design's.
+--
+-- A LABEL MAY NOW GROW without threatening anything, which is the real gain: the
+-- tab row gains a fourth tab in the mock ("Slots") and would have collided again.
+local VAULT_GAP = 10
 
 -- ── Runner tab (Session 252, from Jason's mock) ─────────────────────────────
 -- Panel-relative, read off the Figma frame rather than eyeballed: the mock's
@@ -900,7 +903,8 @@ local function buildLootControls()
   -- exactly as the GP price shows nothing without its constants.
   frame.vault = ns.Style and ns.Style.Check(frame, "Vault/Voidcore", 14)
   if frame.vault then
-    frame.vault:SetPoint("TOPRIGHT", frame.diff, "TOPLEFT", -VAULT_GAP, -3)
+    -- Above the dropdown, right edges flush, as the Figma frame has it.
+    frame.vault:SetPoint("BOTTOMRIGHT", frame.diff, "TOPRIGHT", 0, VAULT_GAP)
     frame.vault:SetChecked(ns.VaultOn())
     frame.vault:SetScript("OnClick", function(self)
       self:SetChecked(not self:GetChecked())
