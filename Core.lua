@@ -817,7 +817,11 @@ function ns.TipLayout(lines, opts)
     if (l.rightW or 0) > 0 then
       w = (l.leftW or 0) + colGap + l.rightW
     elseif l.wrap then
-      w = math.min(l.leftW or 0, maxW)
+      -- ⚠️ SLACK, BECAUSE AN EXACT FIT IS NOT A FIT (Session 254). Giving a line
+      -- precisely its own measured width wraps it: the client's text metrics and
+      -- the font's advance widths disagree by a fraction, which is how two
+      -- sentences measuring 297.7 and 295.8 both folded inside a 300 ceiling.
+      w = math.min(math.ceil(l.leftW or 0) + 2, maxW)
     else
       w = l.leftW or 0
     end

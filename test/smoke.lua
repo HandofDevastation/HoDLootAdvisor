@@ -1117,6 +1117,17 @@ do
   check("the box ends one padding below the last row, with no trailing gap",
         three.h == three.y[3] + 11 + 10, three.h)
 
+  -- ⚠️ AN EXACT FIT IS NOT A FIT (Session 254). A wrapped line given precisely
+  -- its measured width folds anyway, because the client's text metrics and the
+  -- font's advance widths disagree by a fraction — which is how two sentences
+  -- measuring 297.7 and 295.8 both wrapped inside a 300 ceiling. The slack is
+  -- what stops that, and it must survive anyone "simplifying" the min().
+  check("a wrapped line is given slack over its measured width",
+        ns.TipLayout({ { leftW = 297.7, h = 11, wrap = true } }, opts).contentW == 300,
+        ns.TipLayout({ { leftW = 297.7, h = 11, wrap = true } }, opts).contentW)
+  check("...and the ceiling still bounds genuinely long prose",
+        ns.TipLayout({ { leftW = 569.5, h = 11, wrap = true } }, opts).contentW == 300)
+
   -- With no title at all the first row sits at the padding, not below a gap for
   -- a heading that was never drawn.
   local untitled = ns.TipLayout({ { leftW = 10, h = 11 } },

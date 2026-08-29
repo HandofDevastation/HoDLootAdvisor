@@ -35,7 +35,16 @@ ns.Tip = Tip
 -- alignment" and "7" from touching on the widest row.
 local PAD, LINE_GAP, TITLE_GAP, GAP_COL = 10, 3, 6, 18
 -- Wrapped prose gets a measured ceiling rather than growing to the screen.
-local MAX_W = 300
+--
+-- ⚠️ 300 WAS A HAIR TOO NARROW AND IT LOOKED SLOPPY (Jason, Session 254). The
+-- Import Raid Night tooltip's two sentences measure 297.7px and 295.8px in
+-- General Sans at 11 — summed from the bundled TTF, not guessed — so both sat
+-- inside the cap by two pixels and wrapped anyway, because the game's text
+-- metrics differ slightly from the font's advance widths. The same 0.7px margin
+-- that truncated a column header in Session 252.
+-- 360 clears both with real room, while genuinely long prose still folds: the
+-- Loot Log's line measures 569.5 and the targeting note 437.4.
+local MAX_W = 360
 
 local frame, title, rows
 local pending = { title = nil, titleColor = nil, lines = {} }
@@ -108,6 +117,16 @@ end
 function Tip:AddLine(text, r, g, b, wrap)
   if not pending.title and #pending.lines == 0 then
     return self:SetText(text, r, g, b)
+  end
+  -- ⚠️ A SPACER DIRECTLY UNDER THE TITLE IS REDUNDANT HERE (Jason, Session 254:
+  -- "why is there so much room under the header text line?"). Callers open with
+  -- a blank line because GameTooltip's heading sits tight against its body and
+  -- needed one; ours already carries titleGap, so the two stack into ~20px of
+  -- nothing. Dropped at the widget rather than at each call site, so the next
+  -- tooltip written from muscle memory cannot reintroduce it. Spacers BETWEEN
+  -- sections are untouched and still separate.
+  if (text == nil or text == "" or text == " ") and #pending.lines == 0 then
+    return self
   end
   pending.lines[#pending.lines + 1] =
     { left = text or "", color = color("text", r, g, b), wrap = wrap and true or false }

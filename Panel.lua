@@ -630,7 +630,6 @@ local function buildRankRow(parent, i)
       -- the badge and the gap but NOT the arithmetic behind them — everyone
       -- displays the runner's numbers by rule, and the factors were never on
       -- the wire.
-      ns.Tip:AddLine(" ")
       ns.Tip:AddLine(
         "The breakdown is not available: this ranking came from the loot runner, "
         .. "which sends each raider's result but not the factors behind it.",
@@ -640,7 +639,6 @@ local function buildRankRow(parent, i)
     end
 
     local f = r.factors
-    ns.Tip:AddLine(" ")
     -- ⚠️ THE ITEM-LEVEL FACTOR CAPS, and the cap is the whole reason a big GAIN
     -- can sit beside a small score gap. Saying so is the point of the line.
     local ilvlLine = ("%d"):format(f.ilvl_delta or 0)
