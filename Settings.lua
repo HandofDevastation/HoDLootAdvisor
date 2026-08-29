@@ -337,6 +337,19 @@ local function build()
   note:SetPoint("BOTTOM", 0, 19)
   note:SetText("Changes apply as you make them.")
 
+  -- ── Display readout ────────────────────────────────────────────────────────
+  --
+  -- Says whether this client is drawing the addon on whole pixels. It exists
+  -- because "the panel looks blurry" is otherwise unfalsifiable — it reads as a
+  -- matter of taste when it is in fact an arithmetic question with one answer.
+  -- ns.DisplayReport does the arithmetic (Core.lua, inside the harness's reach);
+  -- this only prints it.
+  frame.display = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  frame.display:SetPoint("BOTTOMLEFT", 18, 44)
+  frame.display:SetPoint("BOTTOMRIGHT", -18, 44)
+  frame.display:SetJustifyH("LEFT")
+  frame.display:SetJustifyV("BOTTOM")
+
   local close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
   close:SetSize(100, 24)
   close:SetPoint("BOTTOMRIGHT", -18, 12)
@@ -350,8 +363,30 @@ local function build()
   end)
 end
 
+--- The display readout's text. Separate from Refresh so the harness can check
+--- the WORDING against a known report rather than only the arithmetic.
+function Settings.DisplayLine(r)
+  if not r then return "Display: this client did not report a screen size." end
+  local head = ("Display: %d x %d  ·  scale %.4f  ·  1 unit = %.2f px")
+    :format(r.screenWidth, r.screenHeight, r.scale, r.pixelsPerUnit)
+  if r.aligned then
+    return head .. "\nText is landing on whole pixels — this is as sharp as it gets."
+  end
+  local worstPx = 0
+  for _, s in ipairs(r.sizes) do
+    if s.drift > worstPx then worstPx = s.drift end
+  end
+  return head .. ("\nText is landing BETWEEN pixels (worst size is %.2f px off), which is what")
+    :format(worstPx)
+    .. ("\nreads as blur. A scale of %.4f would put one unit on one pixel.")
+    :format(r.perfectScale)
+end
+
 function Settings.Refresh()
   if not frame then return end
+  if frame.display and ns.DisplayReport then
+    frame.display:SetText(Settings.DisplayLine(ns.DisplayReport()))
+  end
   for _, row in ipairs(frame.rows) do
     local v = Settings.Get(row.spec.key)
     if row.spec.kind == "toggle" then

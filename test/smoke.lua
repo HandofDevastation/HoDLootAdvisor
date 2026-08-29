@@ -3796,6 +3796,63 @@ header("Auto-open fires even when the rest of the roll handler breaks")
   ns.Loot.ScoreItem, ns.Panel, ns.Settings.Get = savedScore, savedPanel, savedGet
 end)()
 
+-- ── Is the panel drawing on whole pixels? ───────────────────────────────────
+--
+-- The arithmetic behind "it looks blurry". Blizzard's PixelUtil defines the
+-- conversion; ns.DisplayReport applies it. Covered here because the readout is
+-- the thing that tells Jason whether a font size is landing on a pixel or
+-- between two, and a readout that lies is worse than none.
+
+header("Pixel alignment — the arithmetic behind a blurry panel")
+
+;(function()
+  local realGPSS = _G.GetPhysicalScreenSize
+
+  -- The defining property: at scale 768/height, one UI unit IS one pixel. If
+  -- this ever stops holding, the readout's advice is wrong at every size.
+  local exact = true
+  for _, h in ipairs({ 768, 1080, 1440, 1794, 2160, 2880 }) do
+    _G.GetPhysicalScreenSize = function() return h, h end
+    local r = ns.DisplayReport(768 / h)
+    if not r or math.abs(r.pixelsPerUnit - 1) > 1e-9 or not r.aligned then exact = false end
+  end
+  check("at the pixel-perfect scale one unit is exactly one pixel, at every height", exact)
+
+  -- ⚠️ THE BUG THIS FILE CAUGHT. `local a, b = f and f()` adjusts to ONE value,
+  -- so the height arrived nil and every report said "no screen size". Pinned so
+  -- a tidy-up cannot reintroduce it.
+  _G.GetPhysicalScreenSize = function() return 3440, 1440 end
+  local r = ns.DisplayReport(1)
+  check("both screen dimensions survive the call", r ~= nil and r.screenWidth == 3440 and r.screenHeight == 1440,
+        r and (r.screenWidth .. "x" .. tostring(r.screenHeight)) or "nil report")
+
+  check("an unaligned scale is REPORTED as unaligned, not rounded away",
+        r and r.aligned == false, r and tostring(r.aligned))
+  check("...and it says which scale would fix it", r and math.abs(r.perfectScale - 768 / 1440) < 1e-9)
+
+  -- Every named size is measured, so none can drift unnoticed.
+  check("every role in the type scale is measured", r and #r.sizes == 5, r and #r.sizes)
+
+  -- A client that cannot answer must produce nil, not a confident wrong number.
+  _G.GetPhysicalScreenSize = nil
+  check("a client with no screen size reports nothing rather than guessing",
+        ns.DisplayReport(1) == nil)
+  check("...and the readout says so in words",
+        ns.Settings.DisplayLine(nil):find("did not report", 1, true) ~= nil,
+        ns.Settings.DisplayLine(nil))
+
+  -- The wording branches: aligned vs not. Both must be reachable and truthful.
+  _G.GetPhysicalScreenSize = function() return 2560, 1440 end
+  local sharp = ns.Settings.DisplayLine(ns.DisplayReport(768 / 1440))
+  local soft  = ns.Settings.DisplayLine(ns.DisplayReport(1))
+  check("an aligned client is told it is as sharp as it gets",
+        sharp:find("whole pixels", 1, true) ~= nil, sharp)
+  check("an unaligned client is told text lands between pixels",
+        soft:find("BETWEEN pixels", 1, true) ~= nil, soft)
+
+  _G.GetPhysicalScreenSize = realGPSS
+end)()
+
 -- ── Every file compiles under the Lua the GAME runs ─────────────────────────
 --
 -- ⚠️ WOW IS LUA 5.1 AND THE luac ON A DEV MACHINE IS NOT. Session 250 shipped a

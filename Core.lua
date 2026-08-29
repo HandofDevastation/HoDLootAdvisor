@@ -1708,6 +1708,81 @@ function ns.MakeWindow(frame)
   table.insert(UISpecialFrames, name)
 end
 
+-- ---------------------------------------------------------------------------
+-- Is the panel drawing on whole pixels?
+-- ---------------------------------------------------------------------------
+--
+-- WoW draws the interface in an abstract space that is 768 units tall and then
+-- stretches it onto the real screen. Blizzard's own PixelUtil states the
+-- conversion (Blizzard_SharedXML/PixelUtil.lua, read rather than recalled):
+--
+--     uiUnitFactor = 768 / physicalScreenHeight
+--     realPixels   = uiUnits * effectiveScale / uiUnitFactor
+--
+-- Substituting gives the whole story in one line:
+--
+--     realPixels = uiUnits * effectiveScale * physicalHeight / 768
+--
+-- When effectiveScale happens to EQUAL uiUnitFactor the two cancel and one unit
+-- is exactly one pixel — the "pixel perfect" scale every crisp UI runs at. At
+-- any other scale a font size of 12 lands on some fractional number of pixels,
+-- every glyph edge falls between two of them, and the client resamples. Nothing
+-- is wrong, nothing errors; it just goes soft. That is the entire mechanism
+-- behind "the addon looks blurry next to that other one".
+--
+-- ⚠️ LOGIC LIVES HERE, NOT IN A WINDOW FILE. The settings window only prints
+-- what this returns, so the arithmetic stays inside the harness's reach.
+--- @return table|nil report, nil when the client cannot answer
+function ns.DisplayReport(scaleOverride)
+  -- ⚠️ NOT `local sw, sh = GetPhysicalScreenSize and GetPhysicalScreenSize()`.
+  -- In a multiple assignment Lua adjusts `a and f()` to ONE value, so the height
+  -- silently arrives nil and the whole report returns "no screen size". Written
+  -- that way first; the harness below caught it before it reached the game.
+  if type(GetPhysicalScreenSize) ~= "function" then return nil end
+  local sw, sh = GetPhysicalScreenSize()
+  if type(sh) ~= "number" or sh <= 0 then return nil end
+
+  local scale = scaleOverride
+  if not scale then
+    scale = (UIParent and UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+  end
+
+  local factor  = 768 / sh
+  local perfect = factor                      -- the scale at which 1 unit = 1 pixel
+  local pxPerUnit = scale / factor            -- how many real pixels one unit covers
+
+  -- A size is exact when it lands on a whole pixel. Compare against the ROUNDED
+  -- value rather than testing equality on a float.
+  local function pixelsFor(size)
+    local px = size * pxPerUnit
+    local nearest = math.floor(px + 0.5)
+    return px, nearest, math.abs(px - nearest)
+  end
+
+  local sizes, worst = {}, 0
+  for _, role in ipairs({ "title", "head", "row", "small", "tiny" }) do
+    local size = ns.Style and ns.Style.SIZE and ns.Style.SIZE[role]
+    if size then
+      local px, nearest, err = pixelsFor(size)
+      sizes[#sizes + 1] = { role = role, size = size, pixels = px, nearest = nearest, drift = err }
+      if err > worst then worst = err end
+    end
+  end
+
+  return {
+    screenWidth  = sw,
+    screenHeight = sh,
+    scale        = scale,
+    perfectScale = perfect,
+    pixelsPerUnit = pxPerUnit,
+    aligned      = math.abs(pxPerUnit - math.floor(pxPerUnit + 0.5)) < 0.001,
+    worstDrift   = worst,          -- 0 = every size exact, 0.5 = worst possible
+    sizes        = sizes,
+    -- What a design should be drawn at so its numbers mean pixels.
+    designHeight = sh,
+  }
+end
+
 function ns.DockBesidePanel(frame, side)
   if not frame then return end
   ns.MakeWindow(frame)
