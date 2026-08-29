@@ -1093,6 +1093,42 @@ function ns.HasVaultData()
   return (((ns.Data() or {}).tracks or {}).vault) ~= nil
 end
 
+--- The rank an item level sits at on a GIVEN track, or nil if it is not a rung
+--- of that track. The track is supplied because the ladder overlaps: 318 is
+--- Hero 5/6 and Myth 1/6, and only the caller knows which one it means.
+function ns.LadderRank(track, ilvl)
+  local data = ns.Data()
+  for _, rung in ipairs(((data or {}).tracks or {}).ladder or {}) do
+    if rung.track == track and rung.ilvl == ilvl then return rung.rank end
+  end
+  return nil
+end
+
+--- An item link that tooltips at a SPECIFIC track and item level — whatever the
+--- scorer just decided this item is worth showing as.
+---
+--- ⚠️ THE TOOLTIP MUST BE DERIVED FROM THE SCORE, NOT RECOMPUTED ALONGSIDE IT.
+--- Shipping the Vault toggle without this put "Myth · ilvl 318" on the detail
+--- line and "Hero 3/6, Item Level 311" in the tooltip an inch away, because the
+--- link was still built from the DROP's bonus id. That is the two-authorities
+--- failure the catalogue-link rule already names, and it is the second time this
+--- panel has produced it — so the fix is not another parallel calculation but a
+--- single input: the level the scorer arrived at.
+---
+--- ⚠️ NIL WHEN THE LEVEL HAS NO BONUS ID, and the caller keeps whatever link it
+--- had. Myth ranks 7-9 (337/341/344) are the live case: the ascended drops from
+--- the last two bosses have no mined bonus id, so their tooltip stays at the
+--- drop's own link rather than being given an invented one.
+function ns.TooltipLinkFor(itemID, track, ilvl)
+  if not (itemID and track and ilvl) then return nil end
+  local rank = ns.LadderRank(track, ilvl)
+  if not rank then return nil end
+  local ids = ns.BonusIdsForTrack(track, rank)
+  if #ids == 0 then return nil end
+  return ("item:%d:0:0:0:0:0:0:0:0:0:0:0:%d:%s")
+    :format(itemID, #ids, table.concat(ids, ":"))
+end
+
 --- Move a candidate item level up to what the Great Vault would hand over.
 --- Returns ilvl, bonusIDs, reward — unchanged when there is no vault data.
 ---

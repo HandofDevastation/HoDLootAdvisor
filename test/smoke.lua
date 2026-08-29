@@ -2860,6 +2860,62 @@ header("Dungeons as a content mode — tiles, pooled loot, and scoring")
           "no item in the payload drops above 334 — the carve-out is untested")
   end
 
+  -- ── THE TOOLTIP MOVES WITH THE NUMBER ─────────────────────────────────────
+  -- This shipped broken: the detail line read "Myth · ilvl 318" while the
+  -- tooltip an inch away read "Hero 3/6, Item Level 311", because the link still
+  -- carried the DROP's bonus id. The tooltip is now derived from the score.
+  check("318 is Myth 1/6 and Hero 5/6 on the same ladder",
+        ns.LadderRank("Myth", 318) == 1 and ns.LadderRank("Hero", 318) == 5,
+        "the overlap is why the link needs an explicit track")
+
+  -- ⚠️ PINNED TO HEROIC ON PURPOSE. The ambient setting here is MPLUS, which
+  -- ns.DifficultyKey() resolves to "m" — track Myth — and that is the SAME track
+  -- the vault reward uses, so a link built from the drop's difficulty and a link
+  -- built from the vault's track come out IDENTICAL and the check below passes
+  -- with the fix removed. Found by revert-checking it: the guard was fine, the
+  -- fixture had chosen the one value that could not fail.
+  local pinnedDiff = ns.Settings.Get("difficulty")
+  ns.Settings.Set("difficulty", "HEROIC")
+  check("the drop track and the vault track now genuinely differ",
+        ns.DIFFICULTY_TRACK[ns.DifficultyKey()] == "Hero",
+        "otherwise the tooltip checks below are vacuous")
+
+  local vaultLink = ns.TooltipLinkFor(chestId, "Myth", 318)
+  local dropLink  = ns.TooltipLinkFor(chestId, "Hero", 311)
+  check("a tooltip link can be built for the vault level", vaultLink ~= nil)
+  check("...carrying MYTH 1/6's bonus id, not Hero's",
+        (ns.ParseItemLink(vaultLink) or {}).bonusIDs
+          and ns.ParseItemLink(vaultLink).bonusIDs[1] == ns.BonusIdsForTrack("Myth", 1)[1],
+        tostring(vaultLink))
+  check("...and it differs from the drop level's link", vaultLink ~= dropLink,
+        "identical links are how the two numbers came to disagree")
+
+  -- ⚠️ THE ASCENDED GAP IS HONEST, NOT AN INVENTED ID. Myth 7-9 (337/341/344)
+  -- have no mined bonus id — they are NOT the next three numbers, since every
+  -- block is six ids then a gap of two — so the caller keeps the link it had.
+  check("no tooltip link is invented for an ascended level",
+        ns.TooltipLinkFor(chestId, "Myth", 344) == nil,
+        tostring(ns.TooltipLinkFor(chestId, "Myth", 344)))
+
+  ns.Settings.Set("difficulty", pinnedDiff)
+
+  -- The case Jason actually hit: a DUNGEON item in vault mode.
+  local dRec = ns.JournalRecord(twoHand)
+  local dVault = ns.Loot.ScoreItem(880002, { record = dRec, itemLink = twoHand.link,
+                                             catalogue = true, vault = true })
+  local dDrop  = ns.Loot.ScoreItem(880002, { record = dRec, itemLink = twoHand.link,
+                                             catalogue = true })
+  check("a dungeon item in vault mode scores at Myth 1/6 (318)",
+        dVault.candidateIlvl == 318 and dVault.candidateTrack == "Myth",
+        ("%s / %s"):format(tostring(dVault.candidateIlvl), tostring(dVault.candidateTrack)))
+  check("...against Hero 3/6 (311) as a drop",
+        dDrop.candidateIlvl == ns.MPLUS_ILVL and dDrop.candidateTrack == "Hero",
+        ("%s / %s"):format(tostring(dDrop.candidateIlvl), tostring(dDrop.candidateTrack)))
+  check("...and its tooltip link follows the score rather than the drop",
+        ns.TooltipLinkFor(880002, dVault.candidateTrack, dVault.candidateIlvl)
+          ~= ns.TooltipLinkFor(880002, dDrop.candidateTrack, dDrop.candidateIlvl),
+        "this is the exact pair that read 318 on screen and 311 in the tooltip")
+
   -- ── When the toggle is OFFERED ────────────────────────────────────────────
   -- ⚠️ NOT ON AUTO. The panel is then following whichever instance you stand in,
   -- so "the vault level of whatever this is" names no content — and it would

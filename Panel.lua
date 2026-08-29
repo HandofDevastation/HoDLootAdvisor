@@ -1236,6 +1236,23 @@ local function scoreEntry(e)
   -- SECOND time on every refresh just to learn its track and item level.
   e.candidateTrack = scored.candidateTrack
   e.candidateIlvl = scored.candidateIlvl
+
+  -- ⚠️ THE TOOLTIP IS BUILT FROM THE SCORE, so it cannot say something different
+  -- from the line beside it. The Vault toggle shipped without this and put "Myth
+  -- · ilvl 318" on the detail line next to a tooltip reading "Hero 3/6, Item
+  -- Level 311" — the link was still carrying the DROP's bonus id. Deriving it
+  -- here means every future thing that moves the candidate level (vault today,
+  -- whatever next) moves the tooltip with it for free.
+  --
+  -- A CATALOGUE ROW HAS NO REAL LINK TO LOSE, and a real DROP keeps its own:
+  -- e.catalogue marks the browse list, and only there is the link ours to
+  -- replace. nil means no bonus id exists for that level (the ascended ranks),
+  -- and the existing link stands.
+  if e.catalogue then
+    e.link = ns.TooltipLinkFor(e.itemID, scored.candidateTrack, scored.candidateIlvl)
+             or e.link
+  end
+
   e.targeted = ns.Targets and ns.Targets.Has(e.itemID) or false
   return e
 end
@@ -1369,7 +1386,11 @@ local function itemEntries()
     for id, it in pairs((ns.ContentMode() == "mplus") and {} or ((data or {}).items or {})) do
       if it.boss == boss.id and not seen[id] then
         seen[id] = true
-        out[#out + 1] = { itemID = id, name = it.name }
+        -- Catalogue too, even with no link of its own: these rows are browsing,
+        -- not a drop, so their tooltip is scoreEntry's to build. Without the
+        -- flag they fell back to a link carrying the DROP's bonus id and
+        -- contradicted the item level printed beside them in vault mode.
+        out[#out + 1] = { itemID = id, name = it.name, catalogue = true }
       end
     end
 
