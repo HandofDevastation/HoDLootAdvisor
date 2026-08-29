@@ -489,6 +489,71 @@ local function buildRankRow(parent, i)
   row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
   row.icon:Hide()
 
+  -- ── The GAIN cell's own hover target ──────────────────────────────────────
+  -- "+23" is an ARITHMETIC RESULT with both operands off screen, and the whole
+  -- column is a wall of them. This says where the number came from.
+  --
+  -- A separate frame rather than the row's tooltip: the row already explains the
+  -- provenance marker and the spec-split marker, and folding a third unrelated
+  -- explanation into the same popup means you get all three wherever you point.
+  --
+  -- ⚠️ IT MUST RE-SHOW THE ROW HIGHLIGHT. A mouse-enabled child takes the hover,
+  -- so the row's OnLeave fires as the pointer crosses into this — leaving the
+  -- highlight off while the pointer is still visibly on the row.
+  row.gainHit = CreateFrame("Frame", nil, row)
+  row.gainHit:SetPoint("TOPLEFT", row.gain, "TOPLEFT", 0, 3)
+  row.gainHit:SetPoint("BOTTOMRIGHT", row.gain, "BOTTOMRIGHT", 0, -3)
+  row.gainHit:EnableMouse(true)
+  row.gainHit:SetScript("OnEnter", function(self)
+    local r = row.gainInfo
+    row.hl:Show()
+    if not r then return end
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:AddLine(("+%d item levels"):format(r.gain or 0), 1, 1, 1)
+
+    if r.equippedIlvl then
+      local function rung(track, ilvl)
+        local rank = track and ilvl and ns.LadderRank(track, ilvl)
+        return rank and ("%s %d/6"):format(track, rank) or (track or "")
+      end
+      GameTooltip:AddLine(" ")
+      GameTooltip:AddDoubleLine("This item",
+        ("%d  %s"):format(r.candidateIlvl or 0, rung(r.candidateTrack, r.candidateIlvl)),
+        0.6, 0.6, 0.7, 1, 1, 1)
+      if r.equippedIlvl > 0 then
+        GameTooltip:AddDoubleLine("They have",
+          ("%d  %s"):format(r.equippedIlvl, rung(r.equippedTrack, r.equippedIlvl)),
+          0.6, 0.6, 0.7, 1, 1, 1)
+      else
+        -- ⚠️ AN EMPTY SLOT IS NOT A ZERO-ILVL ITEM. Left as "0" the subtraction
+        -- reads as a 318-point upgrade over something they are wearing.
+        GameTooltip:AddDoubleLine("They have", "nothing in that slot",
+          0.6, 0.6, 0.7, 1, 1, 1)
+      end
+      GameTooltip:AddDoubleLine("Gain", ("+%d"):format(r.gain or 0),
+        0.6, 0.6, 0.7, 0.953, 0.773, 0.420)
+      if r.vault then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Item level shown is the Vault / Voidcore reward, not the drop.",
+          0.6, 0.6, 0.7, true)
+      end
+    else
+      -- ⚠️ SAY WHY, RATHER THAN SHOW A BLANK. A ranking from the runner carries
+      -- the gain but NOT the gear behind it — everyone displays the runner's
+      -- numbers by rule, and their equipped state was never on the wire.
+      GameTooltip:AddLine(" ")
+      GameTooltip:AddLine(
+        "The breakdown is not available: this ranking came from the loot runner, "
+        .. "which sends each raider's gain but not the gear it was measured against.",
+        0.6, 0.6, 0.7, true)
+    end
+    GameTooltip:Show()
+  end)
+  row.gainHit:SetScript("OnLeave", function()
+    row.hl:Hide()
+    GameTooltip:Hide()
+  end)
+
   row:SetScript("OnClick", function(self, button)
     if not self.itemID then return end
     if button == "RightButton" then toggleTarget(self.itemID, self.meta) end
@@ -582,6 +647,10 @@ local function resetRow(row)
     local fsObj = row[key]
     if fsObj and fsObj.SetText then fsObj:SetText("") end
   end
+  -- Rows are RECYCLED, so a stale breakdown would explain the previous
+  -- occupant's number under the new one — the same trap the TEXT_KEYS sweep
+  -- above exists for.
+  row.gainInfo = nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -982,7 +1051,16 @@ local function buildDetailPane()
   frame.head[1] = at(text(frame, "label", "tiny", "text"), C_NAME, RANK_HEAD_Y, 90)
   frame.head[2] = at(text(frame, "label", "tiny", "text"), C_UPGRADE, RANK_HEAD_Y, 110)
   frame.head[3] = atRight(text(frame, "label", "tiny", "text"), C_GAIN_R, RANK_HEAD_Y, 44)
-  frame.head[4] = atRight(text(frame, "label", "tiny", "text"), C_PRIORITY_R, RANK_HEAD_Y, 48)
+  -- ⚠️ 64, NOT 48 — "PRIORITY" MEASURES 47.3px AND WAS TRUNCATING TO "PRIORI…".
+  -- The field had been sized to the string with 0.7px to spare, which is not a
+  -- margin: the game's own text measurement differs slightly from the font's
+  -- advance widths (kerning, hinting, rounding), so it tipped over. Nothing had
+  -- to move — the header is right-aligned at C_PRIORITY_R, so widening it grows
+  -- LEFTWARDS into empty space, and the GAIN column's right edge is at
+  -- C_GAIN_R (499) against this field's new left edge at 527.
+  -- Header widths are now sized with real slack. Measured, not eyeballed:
+  -- RAIDER 37.3 / UPGRADE 49.2 / GAIN 25.9 / PRIORITY 47.3 at 10px Semibold.
+  frame.head[4] = atRight(text(frame, "label", "tiny", "text"), C_PRIORITY_R, RANK_HEAD_Y, 64)
 
   frame.list = CreateFrame("Frame", nil, frame)
   frame.list:SetPoint("TOPLEFT", C_RANK, -RANK_TOP)
@@ -2015,6 +2093,20 @@ local function renderRanking(itemID)
     -- One field on both paths (Loot.RankRaiders sets it, the wire carries it).
     local gain = r.ilvlGain or 0
     row.gain:SetText(gain > 0 and ("+%d"):format(gain) or "")
+
+    -- What the GAIN cell's tooltip explains. `equipped` is present only on a
+    -- LOCALLY scored row — a ranking received from the runner carries the gain
+    -- and nothing to subtract it from — and the tooltip says so rather than
+    -- rendering an empty breakdown.
+    local selEntry = Panel._entries and Panel._entries[state.sel]
+    row.gainInfo = {
+      gain           = gain,
+      candidateIlvl  = selEntry and selEntry.candidateIlvl,
+      candidateTrack = selEntry and selEntry.candidateTrack,
+      equippedIlvl   = r.equipped and (r.equipped.ilvl or 0) or nil,
+      equippedTrack  = r.equipped and r.equipped.track or nil,
+      vault          = ns.VaultOn(),
+    }
 
     if r.pr then
       row.pr:SetText(("%.2f"):format(r.pr))
