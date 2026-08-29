@@ -789,6 +789,59 @@ function ns.ItemSlotLine(entry)
   return slot or ""
 end
 
+--- The tooltip's box, from measured text. No frames: this is the arithmetic
+--- behind Tip.lua, which is a window file the harness cannot load.
+---
+--- `lines` are measured entries { leftW, rightW, h, wrap }; opts carries the
+--- design's spacing plus the title's own measurements. Returns the frame's size
+--- and the y offset of every line, so the widget positions and never computes.
+---
+--- ⚠️ A DOUBLE LINE'S WIDTH IS BOTH COLUMNS PLUS THE TROUGH, not the wider of
+--- the two. Taking the max is the easy mistake and it lets a label and its value
+--- touch on exactly the widest row — the one most worth reading.
+---
+--- ⚠️ maxW CAPS PROSE, NEVER A TWO-COLUMN ROW. A wrapped paragraph should fold;
+--- a label and a number have nowhere to fold TO, so capping them would overlap
+--- the columns rather than narrow them.
+function ns.TipLayout(lines, opts)
+  opts = opts or {}
+  local pad      = opts.pad or 10
+  local lineGap  = opts.lineGap or 3
+  local titleGap = opts.titleGap or 6
+  local colGap   = opts.colGap or 18
+  local maxW     = opts.maxW or 300
+
+  local contentW = opts.titleW or 0
+  for _, l in ipairs(lines or {}) do
+    local w
+    if (l.rightW or 0) > 0 then
+      w = (l.leftW or 0) + colGap + l.rightW
+    elseif l.wrap then
+      w = math.min(l.leftW or 0, maxW)
+    else
+      w = l.leftW or 0
+    end
+    if w > contentW then contentW = w end
+  end
+
+  local y = pad
+  if (opts.titleH or 0) > 0 then y = y + opts.titleH + titleGap end
+
+  local ys = {}
+  for i, l in ipairs(lines or {}) do
+    ys[i] = y
+    y = y + (l.h or 0)
+    if i < #lines then y = y + lineGap end
+  end
+
+  return {
+    contentW = contentW,
+    w = contentW + pad * 2,
+    h = y + pad,
+    y = ys,
+  }
+end
+
 --- "1st" · "2nd" · "13th" · "21st" — the detail header's standing.
 --- Returns the number and the suffix separately, because the design sets them at
 --- different sizes (24px on the digits, 18px on the suffix).

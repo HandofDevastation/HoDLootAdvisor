@@ -1074,6 +1074,57 @@ do
         ns.ItemSlotLine({ slotText = "HANDS", armorType = "Plate" }) == "Hands, Plate")
 end
 
+-- ── The addon's own tooltip measures its own box ────────────────────────────
+--
+-- ⚠️ THE TOOLTIP IS A WINDOW FILE THE HARNESS CANNOT LOAD, so its ARITHMETIC
+-- lives in Core and is tested here — the same rule that moved the item-name fill
+-- out of Panel.lua in Session 253. Tip.lua measures the text and positions the
+-- fontstrings; every number it uses comes from this function.
+do
+  header("The tooltip's box is computed from measured text")
+
+  local opts = { pad = 10, lineGap = 3, titleGap = 6, colGap = 18, maxW = 300,
+                 titleW = 120, titleH = 13 }
+
+  -- ⚠️ A DOUBLE LINE IS BOTH COLUMNS PLUS THE TROUGH. Taking the WIDER of the
+  -- two is the easy mistake, and it lets a label and its value touch on exactly
+  -- the widest row — the one most worth reading.
+  local box = ns.TipLayout({ { leftW = 100, rightW = 20, h = 11 } }, opts)
+  check("a two-column row is as wide as both columns and the trough",
+        box.contentW == 138, box.contentW)
+  check("...and the frame adds the padding on both sides",
+        box.w == 158, box.w)
+
+  -- The title is content too: a long heading over short rows sets the width.
+  check("a wide title widens the box",
+        ns.TipLayout({ { leftW = 20, h = 11 } }, opts).contentW == 120)
+
+  -- ⚠️ maxW CAPS PROSE, NEVER A TWO-COLUMN ROW: a paragraph folds, a label and a
+  -- number have nowhere to fold to, so capping them overlaps the columns.
+  check("long prose is capped so it wraps",
+        ns.TipLayout({ { leftW = 900, h = 11, wrap = true } }, opts).contentW == 300)
+  check("...but a wide two-column row is NOT capped, it stays legible",
+        ns.TipLayout({ { leftW = 400, rightW = 40, h = 11 } }, opts).contentW == 458)
+
+  -- Vertical stacking: title, then rows separated by the line gap only BETWEEN
+  -- them — a trailing gap would sit inside the bottom padding and read as slop.
+  local three = ns.TipLayout(
+    { { leftW = 10, h = 11 }, { leftW = 10, h = 11 }, { leftW = 10, h = 11 } }, opts)
+  check("the first row clears the title", three.y[1] == 10 + 13 + 6, three.y[1])
+  check("rows stack by their own height plus the gap",
+        three.y[2] == three.y[1] + 14 and three.y[3] == three.y[2] + 14,
+        table.concat(three.y, ","))
+  check("the box ends one padding below the last row, with no trailing gap",
+        three.h == three.y[3] + 11 + 10, three.h)
+
+  -- With no title at all the first row sits at the padding, not below a gap for
+  -- a heading that was never drawn.
+  local untitled = ns.TipLayout({ { leftW = 10, h = 11 } },
+    { pad = 10, lineGap = 3, titleGap = 6, colGap = 18, maxW = 300,
+      titleW = 0, titleH = 0 })
+  check("an untitled tooltip starts at the padding", untitled.y[1] == 10, untitled.y[1])
+end
+
 -- ── A placeholder name asks the client, and comes back ──────────────────────
 --
 -- ⚠️ THE BUG THAT KEPT RETURNING IN DIFFERENT COSTUMES (Jason, Session 253:

@@ -34,6 +34,7 @@ Roster.lua
 Journal.lua
 Targets.lua
 Tooltip.lua
+Tip.lua
 Record.lua
 Loot.lua
 LoadWindow.lua

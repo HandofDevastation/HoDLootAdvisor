@@ -527,14 +527,14 @@ local function buildBossTile(parent, i)
   end)
   tile:SetScript("OnEnter", function(self)
     if not self.bossName then return end
-    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-    GameTooltip:SetText(self.bossName, 1, 1, 1)
+    ns.Tip:SetOwner(self, "ANCHOR_BOTTOM")
+    ns.Tip:SetText(self.bossName, 1, 1, 1)
     if (self.bossBis or 0) > 0 then
-      GameTooltip:AddLine(("%d best-in-slot for you here"):format(self.bossBis), 1, 0.957, 0.408)
+      ns.Tip:AddLine(("%d best-in-slot for you here"):format(self.bossBis), 1, 0.957, 0.408)
     end
-    GameTooltip:Show()
+    ns.Tip:Show()
   end)
-  tile:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  tile:SetScript("OnLeave", function() ns.Tip:Hide() end)
   return tile
 end
 
@@ -619,58 +619,58 @@ local function buildRankRow(parent, i)
     local r = row.scoreInfo
     row.hl:Show()
     if not r then return end
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:AddLine("How this score was reached", 1, 1, 1)
+    ns.Tip:SetOwner(self, "ANCHOR_RIGHT")
+    ns.Tip:AddLine("How this score was reached", 1, 1, 1)
 
     if not r.factors then
       -- ⚠️ SAY WHY, RATHER THAN SHOW A BLANK. A ranking from the runner carries
       -- the badge and the gap but NOT the arithmetic behind them — everyone
       -- displays the runner's numbers by rule, and the factors were never on
       -- the wire.
-      GameTooltip:AddLine(" ")
-      GameTooltip:AddLine(
+      ns.Tip:AddLine(" ")
+      ns.Tip:AddLine(
         "The breakdown is not available: this ranking came from the loot runner, "
         .. "which sends each raider's result but not the factors behind it.",
         0.6, 0.6, 0.7, true)
-      GameTooltip:Show()
+      ns.Tip:Show()
       return
     end
 
     local f = r.factors
-    GameTooltip:AddLine(" ")
+    ns.Tip:AddLine(" ")
     -- ⚠️ THE ITEM-LEVEL FACTOR CAPS, and the cap is the whole reason a big GAIN
     -- can sit beside a small score gap. Saying so is the point of the line.
     local ilvlLine = ("%d"):format(f.ilvl_delta or 0)
     if (f.ilvl_delta or 0) >= 40 then ilvlLine = ilvlLine .. "  (max)" end
-    GameTooltip:AddDoubleLine(("Item level  (+%d)"):format(r.gain or 0), ilvlLine,
+    ns.Tip:AddDoubleLine(("Item level  (+%d)"):format(r.gain or 0), ilvlLine,
       0.6, 0.6, 0.7, 1, 1, 1)
-    GameTooltip:AddDoubleLine("Track gap", ("%d"):format(f.track_gap or 0),
+    ns.Tip:AddDoubleLine("Track gap", ("%d"):format(f.track_gap or 0),
       0.6, 0.6, 0.7, 1, 1, 1)
     -- ⚠️ ONE QUALITY AXIS. A grade or a BIS listing REPLACES stat alignment
     -- rather than adding to it, so the row is labelled by whichever actually
     -- applied — printing both would imply they were summed, which is the exact
     -- misreading the scoring rule exists to prevent.
-    GameTooltip:AddDoubleLine(
+    ns.Tip:AddDoubleLine(
       f.is_ranked_override and "Best-in-slot / grade" or "Stat alignment",
       ("%d"):format(f.stat_alignment or 0), 0.6, 0.6, 0.7, 1, 1, 1)
     if (f.tier_bonus or 0) > 0 then
-      GameTooltip:AddDoubleLine("Tier set", ("%d"):format(f.tier_bonus),
+      ns.Tip:AddDoubleLine("Tier set", ("%d"):format(f.tier_bonus),
         0.6, 0.6, 0.7, 1, 1, 1)
     end
-    GameTooltip:AddDoubleLine("Total", ("%d"):format(r.score or 0),
+    ns.Tip:AddDoubleLine("Total", ("%d"):format(r.score or 0),
       0.953, 0.773, 0.420, 0.953, 0.773, 0.420)
 
     if r.gap and r.gap > 0 then
-      GameTooltip:AddLine(" ")
-      GameTooltip:AddLine(
+      ns.Tip:AddLine(" ")
+      ns.Tip:AddLine(
         ("%d behind %s, who leads this item."):format(r.gap, r.leader or "the top row"),
         0.6, 0.6, 0.7, true)
     end
-    GameTooltip:Show()
+    ns.Tip:Show()
   end)
   row.scoreHit:SetScript("OnLeave", function()
     row.hl:Hide()
-    GameTooltip:Hide()
+    ns.Tip:Hide()
   end)
 
   row:SetScript("OnClick", function(self, button)
@@ -684,17 +684,17 @@ local function buildRankRow(parent, i)
     -- near enough to explain itself — the sentence lives here.
     if not self.itemID then
       if self.srcHelp or self.splitHelp then
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        ns.Tip:SetOwner(self, "ANCHOR_RIGHT")
         if self.srcHelp then
-          GameTooltip:AddLine(self.srcName or "", 1, 1, 1)
-          GameTooltip:AddLine(self.srcHelp, 0.6, 0.6, 0.7, true)
+          ns.Tip:AddLine(self.srcName or "", 1, 1, 1)
+          ns.Tip:AddLine(self.srcHelp, 0.6, 0.6, 0.7, true)
         end
         if self.splitHelp then
-          if self.srcHelp then GameTooltip:AddLine(" ") end
-          GameTooltip:AddLine(self.splitName or "", 0.953, 0.773, 0.420)
-          GameTooltip:AddLine(self.splitHelp, 0.6, 0.6, 0.7, true)
+          if self.srcHelp then ns.Tip:AddLine(" ") end
+          ns.Tip:AddLine(self.splitName or "", 0.953, 0.773, 0.420)
+          ns.Tip:AddLine(self.splitHelp, 0.6, 0.6, 0.7, true)
         end
-        GameTooltip:Show()
+        ns.Tip:Show()
       end
       return
     end
@@ -1026,15 +1026,15 @@ local function buildLootControls()
   frame.togAll    = toggle(1, 1, "All Loot",       pickFilter("all"))
 
   frame.togUsable:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:SetText("Usable Only", 1, 1, 1)
-    GameTooltip:AddLine("Hides items your class cannot equip.", 0.8, 0.8, 0.8, true)
-    GameTooltip:AddLine("Anything you have targeted stays visible either way — "
+    ns.Tip:SetOwner(self, "ANCHOR_RIGHT")
+    ns.Tip:SetText("Usable Only", 1, 1, 1)
+    ns.Tip:AddLine("Hides items your class cannot equip.", 0.8, 0.8, 0.8, true)
+    ns.Tip:AddLine("Anything you have targeted stays visible either way — "
       .. "hiding something you asked for is worse than showing one you cannot use.",
       0.6, 0.6, 0.7, true)
-    GameTooltip:Show()
+    ns.Tip:Show()
   end)
-  frame.togUsable:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  frame.togUsable:SetScript("OnLeave", function() ns.Tip:Hide() end)
 
   -- ── The item column ───────────────────────────────────────────────────────
   frame.col = CreateFrame("Frame", nil, frame)
@@ -1336,23 +1336,23 @@ local function buildFooter()
   end)
 
   frame.load:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_TOP")
-    GameTooltip:SetText("Import Raid Night", 1, 1, 1)
-    GameTooltip:AddLine("Paste the export from the Loot Advisor page on the website.", 0.8, 0.8, 0.8, true)
-    GameTooltip:AddLine("This is what supplies everyone's gear — the rankings need it.", 0.8, 0.8, 0.8, true)
-    GameTooltip:Show()
+    ns.Tip:SetOwner(self, "ANCHOR_TOP")
+    ns.Tip:SetText("Import Raid Night", 1, 1, 1)
+    ns.Tip:AddLine("Paste the export from the Loot Advisor page on the website.", 0.8, 0.8, 0.8, true)
+    ns.Tip:AddLine("This is what supplies everyone's gear — the rankings need it.", 0.8, 0.8, 0.8, true)
+    ns.Tip:Show()
   end)
-  frame.load:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  frame.load:SetScript("OnLeave", function() ns.Tip:Hide() end)
   frame.log:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_TOP")
-    GameTooltip:SetText("Loot Log", 1, 1, 1)
-    GameTooltip:AddLine("Every drop and every roll, recorded automatically. Review a night, "
+    ns.Tip:SetOwner(self, "ANCHOR_TOP")
+    ns.Tip:SetText("Loot Log", 1, 1, 1)
+    ns.Tip:AddLine("Every drop and every roll, recorded automatically. Review a night, "
       .. "tag a run Guild or Personal, and export for the website.", 0.8, 0.8, 0.8, true)
     local _, items = ns.Record.Counts()
-    GameTooltip:AddLine(("%d item%s recorded."):format(items, items == 1 and "" or "s"), 0.6, 0.6, 0.7)
-    GameTooltip:Show()
+    ns.Tip:AddLine(("%d item%s recorded."):format(items, items == 1 and "" or "s"), 0.6, 0.6, 0.7)
+    ns.Tip:Show()
   end)
-  frame.log:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  frame.log:SetScript("OnLeave", function() ns.Tip:Hide() end)
 
 end
 
@@ -1373,14 +1373,14 @@ local function buildTabControls()
   frame.post:SetScript("OnEnter", function(self)
     local id = Panel.CurrentItemID()
     if not id then return end
-    GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-    GameTooltip:SetText("Post to chat", 1, 1, 1)
+    ns.Tip:SetOwner(self, "ANCHOR_LEFT")
+    ns.Tip:SetText("Post to chat", 1, 1, 1)
     for _, line in ipairs(ns.Loot.ChatLines(id)) do
-      GameTooltip:AddLine(line, 0.8, 0.8, 0.8, true)
+      ns.Tip:AddLine(line, 0.8, 0.8, 0.8, true)
     end
-    GameTooltip:Show()
+    ns.Tip:Show()
   end)
-  frame.post:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  frame.post:SetScript("OnLeave", function() ns.Tip:Hide() end)
 
   frame.runToggle = ns.Style and ns.Style.Pill(frame, 150, 22, "Run Loot Tonight")
     or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
@@ -1419,16 +1419,16 @@ local function buildTabControls()
     Panel.Refresh()
   end)
   frame.autoPost:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-    GameTooltip:SetText("Auto-Post Drops To Chat", 1, 1, 1)
-    GameTooltip:AddLine("Posts each drop's shortlist to chat automatically, "
+    ns.Tip:SetOwner(self, "ANCHOR_LEFT")
+    ns.Tip:SetText("Auto-Post Drops To Chat", 1, 1, 1)
+    ns.Tip:AddLine("Posts each drop's shortlist to chat automatically, "
       .. "so the raid sees it without you pressing anything.", 0.8, 0.8, 0.8, true)
-    GameTooltip:AddLine(" ")
-    GameTooltip:AddLine("Only ever fires on a GUILD run — never in LFR or a pug — "
+    ns.Tip:AddLine(" ")
+    ns.Tip:AddLine("Only ever fires on a GUILD run — never in LFR or a pug — "
       .. "and only for whoever is running loot.", 0.6, 0.6, 0.7, true)
-    GameTooltip:Show()
+    ns.Tip:Show()
   end)
-  frame.autoPost:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  frame.autoPost:SetScript("OnLeave", function() ns.Tip:Hide() end)
 
   -- ⚠️ THE PROVISIONAL SWITCHER IS GONE. It existed only while Standings had no
   -- design; that design has arrived and has no such control, and the personal
@@ -2114,6 +2114,20 @@ local function renderPaneHeader(entry)
     if S and color then frame.hUpgrade:SetTextColor(S.rgb(color)) end
   end
 
+  -- ⚠️ NO STANDING WITHOUT A RAID NIGHT (Jason, Session 254). EPGP arrives only
+  -- in the raid-night export, so with nothing imported there is no ladder, no
+  -- priority and no rank — and an em-dash under "Your Standing" reads as a
+  -- number we failed to find rather than a question that does not apply here.
+  -- This is the case for ANYONE outside the guild who installs the addon, for
+  -- whom the whole EPGP half is meaningless; the Standings tab hides for the
+  -- same reason (layoutTabs). The scoring half still works completely — it runs
+  -- off the baked payload and their own gear.
+  local loaded = ns.Payload.Current() and true or false
+  frame.hStandLabel:SetShown(loaded)
+  frame.hStand:SetShown(loaded)
+  frame.hEpgp:SetShown(loaded)
+  if not loaded then return end
+
   frame.hStandLabel:SetText("Your Standing:")
   local me = myEntry()
   if me and me.rank then
@@ -2126,10 +2140,8 @@ local function renderPaneHeader(entry)
   if me and me.pr then
     frame.hEpgp:SetText(("Priority: %.2f\nEffort Points: %s\nGear Points: %s")
       :format(me.pr, tostring(me.ep), tostring(me.gp)))
-  elseif ns.Payload.Current() then
-    frame.hEpgp:SetText("No EPGP standing\nyet this season")
   else
-    frame.hEpgp:SetText("")
+    frame.hEpgp:SetText("No EPGP standing\nyet this season")
   end
 end
 
@@ -2879,10 +2891,25 @@ end
 --- exact failure being fixed everywhere else.
 local function layoutTabs()
   local runner = ns.Comms and ns.Comms.IsRunner and ns.Comms.IsRunner()
+  -- ⚠️ NO LADDER WITHOUT A RAID NIGHT (Jason, Session 254). Standings IS the
+  -- EPGP ladder, which arrives only in the export — so with nothing imported the
+  -- tab opens on an empty table and a rail of dashes. That is every install
+  -- outside this guild, where the whole EPGP half is meaningless while the
+  -- scoring half works in full. Same reason the standing block hides in the
+  -- header; the two must agree or one of them is lying about the other.
+  local standings = ns.Payload.Current() and true or false
   local visible = {}
   for _, name in ipairs(TABS) do
-    local show = (name ~= "Runner") or runner
+    local show = true
+    if name == "Runner" then show = runner
+    elseif name == "Standings" then show = standings end
     if show then visible[#visible + 1] = name else frame.tabs[name]:Hide() end
+  end
+
+  -- Follows the Runner tab's rule: a tab that disappears under you must SAY so
+  -- and move you somewhere real, never vanish and leave the pane blank.
+  if state.tab == "Standings" and not standings then
+    state.tab = "Loot"
   end
 
   if state.tab == "Runner" and not runner then
