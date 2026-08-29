@@ -121,7 +121,18 @@ local FOOT_Y, FOOT_H = 509, 51
 -- WIDER SINCE SESSION 251: the label now names the CONTENT as well as the
 -- difficulty ("Raid: Heroic"), which no longer fits 100px.
 local DIFF_X, DIFF_Y, DIFF_W, DIFF_H = 460, 60, 140, 24
--- Gap between the Vault checkbox and the difficulty control it sits beside.
+-- Gap between the Vault/Voidcore checkbox and the difficulty control it sits
+-- beside. The control is anchored to the dropdown's LEFT edge and sizes itself
+-- from its label, so it grows LEFTWARDS towards the tab row.
+--
+-- ⚠️ THERE IS A BUDGET AND IT IS NOT LARGE. The last tab ends at
+-- PAD + 2*TAB_PITCH + TAB_W = 340, and the control's right edge is DIFF_X minus
+-- this gap = 448, so the label has 108px before the two collide — and an overlap
+-- would not merely look wrong, it would put two mouse-enabled frames on the same
+-- pixels, where only one receives a click. Measured from the bundled font rather
+-- than guessed: "Vault/Voidcore" in Khand-Medium at Style.SIZE.head is 69.4px,
+-- plus a 14px box and a 6px gap = 89.4px, leaving ~19px clear. A longer label
+-- needs re-measuring, not eyeballing.
 local VAULT_GAP = 12
 local DIFF_CHOICES = { "AUTO", "NORMAL", "HEROIC", "MYTHIC", "MPLUS" }
 local DIFF_LABEL = {
@@ -454,8 +465,13 @@ local function buildRankRow(parent, i)
   -- the mock's absolute x values are offset by the rank column's own origin.
   local o = C_RANK
   row.rank    = at(text(row, "label", "small", "text"), C_RANK - o, 1, 12, "LEFT")
-  row.name    = at(text(row, "label", "small", "text"), C_NAME - o, 1, 100)
-  row.upgrade = at(text(row, "label", "small", "text"), C_UPGRADE - o, 1, 118)
+  -- ⚠️ REGULAR WEIGHT, NOT "label" (Jason, Session 252). The name and the verdict
+  -- are the two longest strings on a dense row, and Semibold on both made every
+  -- row read as emphasised — which is the same as none of it being emphasised.
+  -- The rank number keeps its weight: it is one or two characters doing the work
+  -- of a column header, and it is what the eye scans down.
+  row.name    = at(text(row, "body", "small", "text"), C_NAME - o, 1, 100)
+  row.upgrade = at(text(row, "body", "small", "text"), C_UPGRADE - o, 1, 118)
   row.gain    = atRight(text(row, "body", "small", "text"), C_GAIN_R - o, 1, 44)
   row.pr      = atRight(text(row, "body", "small", "text"), C_PRIORITY_R - o, 1, 48)
   -- Gear provenance, in the space between GAIN and PRIORITY. Blank is the common
@@ -531,7 +547,8 @@ local function buildStandingsRow(parent, i)
   -- Positions are relative to the row, which starts at the rank column's left.
   local o = ST_RANK_R - 24
   row.rank = atRight(text(row, "label", "small", "text"), ST_RANK_R - o, 1, 24)
-  row.name = at(text(row, "label", "small", "text"), ST_NAME - o, 1, 110)
+  -- Regular weight, matching the ranking table — see the note in buildRankRow.
+  row.name = at(text(row, "body", "small", "text"), ST_NAME - o, 1, 110)
   row.ep   = atRight(text(row, "body", "small", "text"), ST_EP_R - o, 1, 60)
   row.gp   = atRight(text(row, "body", "small", "text"), ST_GP_R - o, 1, 50)
   row.pr   = atRight(text(row, "body", "small", "text"), ST_PR_R - o, 1, 50)
@@ -662,11 +679,17 @@ local function buildLootControls()
     frame.diff:SetPillColor(ns.Style.COLOR.darkOrange)
   end
 
-  -- ── Great Vault toggle, left of the difficulty control ────────────────────
+  -- ── Vault / Voidcore toggle, left of the difficulty control ───────────────
   -- Shows the item level each piece becomes in the WEEKLY CHEST rather than the
   -- one the boss drops — a full track higher in Season 2, so a Heroic kill is
   -- worth a Myth 1/6 vault slot. That is the number that decides whether a
   -- Heroic clear is worth doing, and it lived nowhere in the addon.
+  --
+  -- ⚠️ ONE TOGGLE, TWO ROUTES TO THE SAME LEVEL. A Nebulous Voidcore bonus roll
+  -- pays out at the equivalent Great Vault level for that content, so coining a
+  -- Heroic boss returns Myth track exactly as a Heroic vault slot does. The
+  -- label says both because the number is the same one — not because the toggle
+  -- does two things. See the setting's note in Settings.lua for the source.
   --
   -- ⚠️ ONLY WITH AN EXPLICIT CONTENT CHOICE. On AUTO the panel is following
   -- whatever instance you are standing in, and "the vault level of whatever this
@@ -675,7 +698,7 @@ local function buildLootControls()
   -- ⚠️ AND ONLY IF THE PAYLOAD KNOWS THE LEVELS. An older payload carries no
   -- vault table; the control stays hidden rather than showing a computed guess,
   -- exactly as the GP price shows nothing without its constants.
-  frame.vault = ns.Style and ns.Style.Check(frame, "Vault", 14)
+  frame.vault = ns.Style and ns.Style.Check(frame, "Vault/Voidcore", 14)
   if frame.vault then
     frame.vault:SetPoint("TOPRIGHT", frame.diff, "TOPLEFT", -VAULT_GAP, -3)
     frame.vault:SetChecked(ns.VaultOn())

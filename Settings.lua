@@ -45,14 +45,22 @@ Settings.SPEC = {
         .. "Dungeons shows the season's Mythic+ loot at its fixed drop level.",
   },
   {
-    key = "vault", label = "Great Vault Levels", default = false,
+    key = "vault", label = "Vault / Voidcore Levels", default = false,
     kind = "toggle",
-    -- Paired with the Loot tab's Vault checkbox, which is the same setting. It
-    -- lives here too so it survives a reload like every other view choice, and
-    -- so the one place that lists what the addon can do lists this as well.
-    help = "Show each item at the level it would arrive at in the WEEKLY CHEST rather "
-        .. "than the level the boss drops — a full track higher, so a Heroic kill is "
-        .. "worth a Myth 1/6 vault slot. Only offered once a difficulty is chosen.",
+    -- Paired with the Loot tab's Vault/Voidcore checkbox, which is the same
+    -- setting. It lives here too so it survives a reload like every other view
+    -- choice, and so the one place that lists what the addon can do lists this.
+    --
+    -- ⚠️ TWO WAYS TO THE SAME ITEM LEVEL, which is why one toggle covers both.
+    -- A Nebulous Voidcore bonus roll is rewarded at the equivalent Great Vault
+    -- level for that content, so coining a Heroic boss returns Myth track just
+    -- as a Heroic vault slot does. Blizzard states it directly ("the power of
+    -- items acquired with Nebulous Voidcores is aligned with the equivalent
+    -- Great Vault reward for that content"), so this is one number, not two.
+    help = "Show each item at the level it would arrive at from the WEEKLY CHEST or a "
+        .. "Voidcore bonus roll rather than the level the boss drops — a full track "
+        .. "higher, so a Heroic kill is worth Myth 1/6 either way. Only offered once "
+        .. "a difficulty is chosen.",
   },
   {
     key = "hideMinimap", label = "Hide Minimap Button", default = false,
