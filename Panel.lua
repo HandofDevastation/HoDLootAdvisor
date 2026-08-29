@@ -187,6 +187,11 @@ local DIFF_LABEL = {
 local SEASON_R = 583                 -- season label, right-aligned, on the tab row
 local RAIL_X = 20                    -- the personal rail down the left
 local RAIL_BLOCK_Y = { 117, 213, 299, 395 }   -- Priority · Earned/Spent · Attendance · Last item
+-- Which of those carry the big orange figure. Earned/Spent and Last Item Won
+-- do NOT, so their text lines start straight under the heading — see
+-- buildRailBlock. Keep this in step with renderRail: a block that sets `big`
+-- must be false here, or its figure and its first line collide.
+local RAIL_BLOCK_COMPACT = { false, true, false, true }
 local ST_DIV_X, ST_DIV_Y, ST_DIV_H = 151, 114, 373
 local ST_HEAD_Y = 117
 local ST_TOP, ST_PITCH = 141, 16
@@ -694,7 +699,16 @@ end
 --- of context beneath it. Three fontstrings so each can take its own type role;
 --- the design gives the heading, the figure and the caption three different
 --- faces and sizes.
-local function buildRailBlock(parent, y)
+--- `compact` = this block has NO big figure, so its lines start directly under
+--- the heading.
+---
+--- ⚠️ EVERY BLOCK USED THE SAME OFFSETS AND TWO OF THEM HAVE NO FIGURE
+--- (Session 253). Earned/Spent and Last Item Won reserved the 34px slot where
+--- Priority's "#3" and Attendance's "3/4" sit, so their text hung a full
+--- figure's height below its own heading with nothing in between — a gap
+--- Jason marked on both blocks against the Figma frame, where the value sits
+--- immediately under its label.
+local function buildRailBlock(parent, y, compact)
   local b = {}
   b.head = at(text(parent, "titleMed", "head", "railHead"), RAIL_X, y, 130)
   if ns.Style then ns.Style.SetFont(b.head, ns.Style.FONT.titleMed, 16) end
@@ -703,9 +717,12 @@ local function buildRailBlock(parent, y)
   -- Sits on the big figure's baseline, for the "/3" in "2/3".
   b.bigSuffix = at(text(parent, "title", "title", "text"), RAIL_X, y + 26, 130)
   if ns.Style then ns.Style.SetFont(b.bigSuffix, ns.Style.FONT.title, 21) end
-  b.line1 = at(text(parent, "body", "row", "text"), RAIL_X, y + 54, 130)
-  b.line2 = at(text(parent, "body", "row", "text"), RAIL_X, y + 70, 130)
-  b.line3 = at(text(parent, "body", "row", "textMuted"), RAIL_X, y + 86, 130)
+  -- 20 clears the 16px heading with a hair of breathing room; 54 clears the
+  -- heading AND the 34px figure. Line pitch is 16 either way.
+  local lineY = compact and 20 or 54
+  b.line1 = at(text(parent, "body", "row", "text"), RAIL_X, y + lineY, 130)
+  b.line2 = at(text(parent, "body", "row", "text"), RAIL_X, y + lineY + 16, 130)
+  b.line3 = at(text(parent, "body", "row", "textMuted"), RAIL_X, y + lineY + 32, 130)
   return b
 end
 
@@ -1080,7 +1097,9 @@ local function buildStandingsTab()
   frame.season:SetWidth(220)
 
   frame.rail = {}
-  for i, y in ipairs(RAIL_BLOCK_Y) do frame.rail[i] = buildRailBlock(frame, y) end
+  for i, y in ipairs(RAIL_BLOCK_Y) do
+    frame.rail[i] = buildRailBlock(frame, y, RAIL_BLOCK_COMPACT[i])
+  end
 
   frame.stDiv = frame:CreateTexture(nil, "ARTWORK")
   frame.stDiv:SetSize(1, ST_DIV_H)
