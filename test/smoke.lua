@@ -3862,6 +3862,43 @@ header("Pixel alignment — the arithmetic behind a blurry panel")
         h - (rows * 54) - 40 - 48 >= 50,
         ("leftover band: %d"):format(h - (rows * 54) - 40 - 48))
 
+  -- ── Snapping to whole pixels ──────────────────────────────────────────────
+  -- The fix, not just the diagnosis. Every window routes through MakeWindow,
+  -- which asks PixelSnapScale for a scale that lands units on whole pixels.
+  local everyInteger, neverZero = true, true
+  for _, h in ipairs({ 1080, 1440, 1794, 2160, 2880, 4320 }) do
+    for _, ps in ipairs({ 0.4, 0.5, 0.64, 0.65, 0.71, 0.8, 1.0 }) do
+      _G.GetPhysicalScreenSize = function() return math.floor(h * 16 / 9), h end
+      local own, target = ns.PixelSnapScale(ps)
+      if not own then everyInteger = false
+      else
+        if target < 1 or target ~= math.floor(target) then neverZero = false end
+        -- The property that matters: the RESULTING scale must report aligned.
+        local out = ns.DisplayReport(ps * own)
+        if not out or not out.aligned then everyInteger = false end
+      end
+    end
+  end
+  check("snapping lands on whole pixels at every screen height and starting scale", everyInteger)
+  check("...and never collapses a window below one pixel per unit", neverZero)
+
+  -- ⚠️ SetScale is RELATIVE to the parent. Returning the DESIRED effective scale
+  -- instead of the own-scale would double-apply the parent's and shrink every
+  -- window. Pinned: at parent scale 0.65 on 4K the answer must be 2 px/unit.
+  _G.GetPhysicalScreenSize = function() return 3840, 2160 end
+  local own, target = ns.PixelSnapScale(0.65)
+  check("the returned scale is relative to the parent, not absolute",
+        target == 2 and math.abs(0.65 * own - 2 * (768 / 2160)) < 1e-9,
+        ("target=%s own=%.4f"):format(tostring(target), own or -1))
+
+  -- A client that cannot answer must leave the window alone rather than guess.
+  _G.GetPhysicalScreenSize = nil
+  check("with no screen size the window is left at whatever it inherited",
+        ns.PixelSnapScale(0.65) == nil)
+  _G.GetPhysicalScreenSize = function() return 3840, 2160 end
+  check("a nonsense parent scale is refused rather than dividing by zero",
+        ns.PixelSnapScale(0) == nil and ns.PixelSnapScale(nil) == nil)
+
   _G.GetPhysicalScreenSize = realGPSS
 end)()
 

@@ -1664,8 +1664,49 @@ function ns.ResetWindowPositions()
   if ns.db then ns.db.windows = {} end
 end
 
+--- The scale that puts this frame's units on WHOLE pixels.
+---
+--- ⚠️ THE TARGET IS A WHOLE NUMBER OF PIXELS PER UNIT, NOT ONE. Forcing 1 would
+--- halve every window on a 4K display. What matters is that the number is an
+--- integer: at 2.0 the client doubles every pixel exactly and nothing lands on a
+--- boundary, while at 1.83 — where this addon has been — every glyph edge falls
+--- between two pixels and gets resampled. That is the whole of "it looks blurry".
+---
+--- So: keep the size the user already has, and round it to the nearest whole
+--- number of pixels per unit. On a 4K screen at the default scale that is 1.83
+--- rounding to 2 — a 9% size change and nothing else.
+---
+--- @param parentScale number the effective scale this frame would inherit
+--- @return number|nil ownScale to pass to SetScale, nil if it cannot be computed
+--- @return number|nil pixelsPerUnit the whole number chosen
+function ns.PixelSnapScale(parentScale)
+  if type(GetPhysicalScreenSize) ~= "function" then return nil end
+  local _, sh = GetPhysicalScreenSize()
+  if type(sh) ~= "number" or sh <= 0 then return nil end
+  if type(parentScale) ~= "number" or parentScale <= 0 then return nil end
+
+  local factor  = 768 / sh                       -- UI units per physical pixel
+  local current = parentScale / factor           -- pixels per unit with no scaling
+  local target  = math.floor(current + 0.5)
+  if target < 1 then target = 1 end              -- never collapse a window to nothing
+
+  -- SetScale is RELATIVE to the parent, so divide out what we already inherit.
+  return (target * factor) / parentScale, target
+end
+
 function ns.MakeWindow(frame)
   if not frame then return end
+
+  -- Put the window on whole pixels BEFORE anything is measured off it. Every
+  -- window routes through here, so this is the one place that decides it — and
+  -- the internal numbers are already whole, so once one unit is a whole number
+  -- of pixels every offset inside lands on a pixel too, with no rounding pass.
+  if frame.SetScale and frame.GetParent then
+    local parent = frame:GetParent()
+    local ps = parent and parent.GetEffectiveScale and parent:GetEffectiveScale()
+    local own = ns.PixelSnapScale(ps)
+    if own then pcall(frame.SetScale, frame, own) end
+  end
 
   -- Appearance first, so every window picks up the DS 2.0 skin from ONE call
   -- site. All five windows already route through here for drag/escape handling,
