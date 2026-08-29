@@ -709,9 +709,53 @@ function Journal.ScheduleWarm(delay)
   end)
 end
 
+--- Read every boss's loot BEFORE anybody looks at one.
+---
+--- ⚠️ THE FLICKER, AT ITS SOURCE (Jason, Session 254: "why can't it just
+--- instantly draw in the right way? It's distracting and annoying"). The second
+--- line changed a beat after each boss loaded because the FIRST draw happened
+--- against a COLD Guide and fell back to our own payload, and the warm read a
+--- moment later replaced it with the Guide's answer. Making the two agree in
+--- WORDING removed half of it; this removes the cause. Once a boss has been read
+--- warm it is cached, so the panel's first draw is also its final draw.
+---
+--- ⚠️ NOT AT PANEL OPEN — that is already too late, and it is the moment being
+--- fixed. This runs on entering the world, so the reads land in the minutes
+--- before anyone presses anything.
+---
+--- STAGGERED. Nine encounters selected in one frame is a visible hitch, and
+--- there is no hurry whatsoever: nothing is waiting on this.
+function Journal.PrewarmSeason()
+  local data = ns.Data and ns.Data()
+  local bosses = data and data.bosses
+  if not bosses then return end
+
+  local ids = {}
+  for id in pairs(bosses) do ids[#ids + 1] = id end
+  table.sort(ids)
+
+  local i = 0
+  local function step()
+    i = i + 1
+    if not ids[i] then return end
+    -- No class/spec filter: the SAME cache key the Loot tab reads with. Warming
+    -- a different key would warm nothing anyone looks at.
+    pcall(Journal.CachedLoot, ids[i])
+    C_Timer.After(0.05, step)
+  end
+  C_Timer.After(2, step)
+end
+
 local warmFrame = CreateFrame("Frame")
 warmFrame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
-warmFrame:SetScript("OnEvent", function() Journal.ScheduleWarm(0.2) end)
+warmFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+warmFrame:SetScript("OnEvent", function(_, event)
+  if event == "PLAYER_ENTERING_WORLD" then
+    Journal.PrewarmSeason()
+  else
+    Journal.ScheduleWarm(0.2)
+  end
+end)
 
 --- Ask the client to load any item we could not name yet, so a later pass can.
 --- Mirrors Record.ResolveItemInfo: assume every client-side item read is

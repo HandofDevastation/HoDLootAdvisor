@@ -755,9 +755,33 @@ function ns.SlotLabel(slot)
   return SLOT_LABEL[slot] or slot
 end
 
+--- "" IS NOT A VALUE. Returns nil for anything that is not a real string.
+---
+--- ⚠️ THE THIRD TIME THIS FAMILY HAS BITTEN IN ONE SESSION (Session 254), after
+--- the blank item name and the blank fallback inside it. Here the Adventure
+--- Guide answers "" for a tier token's slot; "" is TRUTHY, so `j.slot or
+--- ourSlot` kept the empty one and a token drew its badge beside nothing — while
+--- our payload had known the answer all along (tokenSlot="HANDS").
+---
+--- Use this at every seam where a value arrives from the client. The rule this
+--- project already wrote says test for EMPTINESS, never truthiness; this is that
+--- rule as a function so it stops being remembered case by case.
+function ns.NonEmpty(s)
+  if type(s) ~= "string" or s == "" then return nil end
+  return s
+end
+
 function ns.ItemSlotLine(entry)
   if not entry then return "" end
-  local slot, armor = ns.SlotLabel(entry.slotText), entry.armorType
+  local slot, armor = ns.SlotLabel(entry.slotText), ns.NonEmpty(entry.armorType)
+  -- ⚠️ A TIER TOKEN IS NOT AN ARMOUR PIECE AND SAYING ONLY ITS SLOT HIDES WHAT
+  -- IT IS (Jason, Session 254: "it just says if it's an upgrade, but doesn't say
+  -- Tier Token"). The slot is still worth carrying — a token is FOR a slot — so
+  -- it leads, and the kind follows. ~17 characters at the 10px size, well inside
+  -- the 150px line; measure before lengthening it.
+  if entry.tokenItem then
+    return slot and slot ~= "" and (slot .. ", Tier Token") or "Tier Token"
+  end
   if armor and ARMOR_CLASS[armor] then
     return slot and slot ~= "" and (slot .. ", " .. armor) or armor
   end

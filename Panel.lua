@@ -1539,7 +1539,11 @@ local function scoreEntry(e)
   else
     e.gain = 0
   end
-  e.slotText = e.slotText or scored.slot
+  e.slotText = ns.NonEmpty(e.slotText) or scored.slot
+  -- A tier token says so on its own line: its slot alone reads as an ordinary
+  -- armour piece, which is the one thing it is not.
+  local rec = ((ns.Data() or {}).items or {})[e.itemID]
+  e.tokenItem = (rec and rec.slot == "TOKEN") and true or false
   -- Carried so the detail pane's identity line does not score the same item a
   -- SECOND time on every refresh just to learn its track and item level.
   e.candidateTrack = scored.candidateTrack
@@ -1682,7 +1686,9 @@ local function itemEntries()
             -- already names. Our payload states the per-difficulty level
             -- outright, needs no cache, and cannot disagree with the site.
             catalogue = true,
-            slotText = j.slot, armorType = j.armorType,
+            -- ⚠️ "" IS TRUTHY, so an empty answer from the Guide would BEAT our
+            -- payload's real one below and draw as nothing (Session 254).
+            slotText = ns.NonEmpty(j.slot), armorType = ns.NonEmpty(j.armorType),
             -- Blizzard's per-entry eligibility flag, carried so the verdict does
             -- not need a second read of the journal to find it again.
             unusable = j.unusable,

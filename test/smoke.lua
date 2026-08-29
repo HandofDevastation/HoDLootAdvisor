@@ -1052,6 +1052,26 @@ do
   local fromGame = ns.ItemSlotLine({ slotText = "Shoulder", armorType = "Cloth" })
   check("the two sources render IDENTICALLY, so no flicker is possible",
         fromUs == fromGame and fromUs == "Shoulder, Cloth", fromUs .. " vs " .. fromGame)
+
+  -- ⚠️ "" IS TRUTHY, FOR THE THIRD TIME IN ONE SESSION. The Adventure Guide
+  -- answers "" for a tier token's slot; kept, it beats our payload's real answer
+  -- and the row draws its badge beside nothing.
+  check("an empty string is not a value", ns.NonEmpty("") == nil)
+  check("...nor is a non-string", ns.NonEmpty(nil) == nil and ns.NonEmpty(7) == nil)
+  check("a real string survives", ns.NonEmpty("Cloth") == "Cloth")
+  check("an empty slot renders as nothing rather than as a slot",
+        ns.ItemSlotLine({ slotText = "", armorType = "" }) == "")
+
+  -- A TIER TOKEN SAYS WHAT IT IS. Its slot alone reads as an ordinary armour
+  -- piece, which is the one thing it is not.
+  check("a tier token names itself, keeping the slot it is for",
+        ns.ItemSlotLine({ slotText = "HANDS", tokenItem = true }) == "Hands, Tier Token",
+        ns.ItemSlotLine({ slotText = "HANDS", tokenItem = true }))
+  check("...and still says so with no slot resolved",
+        ns.ItemSlotLine({ tokenItem = true }) == "Tier Token",
+        ns.ItemSlotLine({ tokenItem = true }))
+  check("an ordinary item is untouched by that",
+        ns.ItemSlotLine({ slotText = "HANDS", armorType = "Plate" }) == "Hands, Plate")
 end
 
 -- ── A placeholder name asks the client, and comes back ──────────────────────
@@ -1227,6 +1247,17 @@ local J = ns.Journal
 -- old code cached that first read as final, so it only corrected itself when the
 -- user happened to navigate away and back.
 
+-- ⚠️ DRAIN, DO NOT DISCARD (Session 254). Logging in now PREWARMS the season's
+-- loot, so a warm pass is already booked by the time this runs — and the pending
+-- flag that makes repeat asks coalesce is cleared by that timer FIRING. Throwing
+-- the queue away instead left the flag latched forever, so the cold read below
+-- correctly declined to book a second pass and the check read as a failure.
+-- Running the queue is also what actually happens in game.
+stub.journal.warm = true
+for _ = 1, 20 do
+  if #stub.timers == 0 then break end
+  stub.RunTimers()
+end
 stub.journal.warm = false
 stub.timers = {}
 local coldList, warming = J.CachedLoot(2849, { classID = 3, specID = stub.player.specId })
