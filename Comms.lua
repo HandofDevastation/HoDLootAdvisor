@@ -1362,9 +1362,31 @@ end
 -- ---------------------------------------------------------------------------
 
 function Comms.PeerList()
+  local mine = ns.Version and ns.Version() or nil
   local list = {}
   for who, info in pairs(Comms.peers) do
-    list[#list + 1] = { name = who, version = info.version, at = info.at }
+    -- Two facts the Runner tab shows beside each name, both answered here so the
+    -- panel does no comparing of its own.
+    --
+    -- gearLive: are we actually RECEIVING this person's gear, as opposed to
+    -- merely having heard them announce themselves? Someone can be running the
+    -- addon and still be ranked from the site snapshot, and those are different
+    -- states with different fixes.
+    --
+    -- stale: their build is not ours. ⚠️ REPORTED AS "different", NEVER as
+    -- "out of date" — we cannot tell whether they are behind or we are, and a
+    -- dev build reports as "dev", which is not comparable to a version at all.
+    -- Nil when either side is unknown, so the panel says nothing rather than
+    -- guessing.
+    local differs = nil
+    if mine and info.version and mine ~= "dev" and info.version ~= "dev" then
+      differs = (tostring(info.version) ~= tostring(mine))
+    end
+    list[#list + 1] = {
+      name = who, version = info.version, at = info.at,
+      gearLive = Comms.gear[who] ~= nil,
+      versionDiffers = differs,
+    }
   end
   table.sort(list, function(a, b) return a.name < b.name end)
   return list
@@ -1407,6 +1429,16 @@ function Comms.RunnerReport()
     -- panel's text and its button are both keyed on this so they cannot
     -- disagree with each other.
     explicitClaim = Comms.HasExplicitClaim(),
+    -- WHEN the claim was made, for the mock's "Since 8:03 PM". Only our OWN
+    -- claim has a local timestamp — a claim heard from someone else is stored
+    -- when it ARRIVED, which is not when they started — so this is nil unless
+    -- the runner is us, and the panel omits the line rather than reporting
+    -- somebody else's start time as if we knew it.
+    claimAt      = (function()
+      local c = ns.db and ns.db.runnerClaim
+      if c and c.at and c.who == me then return c.at end
+      return nil
+    end)(),
     -- Who we got tonight's data FROM, or nil when we imported it ourselves.
     -- Distinguishes "a raider holding a received roster" from "the person who
     -- imported it and then stood down" — states that otherwise look identical
@@ -1428,6 +1460,9 @@ function Comms.RunnerReport()
     seasonName   = summary and summary.seasonName or nil,
     stamp        = summary and summary.stamp or nil,
     gearAge      = ns.Payload and ns.Payload.GearAgeText() or nil,
+    -- How long ago the EXPORT was taken off the site, phrased. Distinct from
+    -- gearAge above and deliberately reported beside it, never instead of it.
+    importedAge  = ns.Payload and ns.Payload.AgeText() or nil,
 
     -- Auto-post: the SETTING and whether it would actually fire here are two
     -- different facts, and reporting only the first is how "On" comes to mean

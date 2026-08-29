@@ -83,6 +83,10 @@ Style.COLOR = {
   -- pass has a mock for the panel only. Repointing them would restyle three
   -- windows nobody has designed yet, sight unseen and with no harness.
   ground    = hex("060714"),   -- panel + footer fill
+  -- ⚠️ THE SAME FIGMA VARIABLE AS `mutedGrey` BELOW ("Muted Grey"), which the
+  -- mock uses for BOTH the hairlines and the Runner tab's body copy. Written
+  -- once and aliased below rather than as two identical literals, so a retune
+  -- cannot move one and leave the other — this file exists to stop exactly that.
   rim       = hex("d9cee2"),   -- hairline, drawn at 0.4 alpha
   -- The bottom warmth: a vertical wash from transparent to orange over the
   -- lower 60% of the window. WoW gradients have two stops and no midpoint, so
@@ -152,6 +156,17 @@ Style.COLOR = {
   -- from `purple` (--hue-tab-stroke, the control fill) even though the two are
   -- neighbours: one is a surface, the other is type on it.
   railHead  = hex("936bff"),
+  -- "Muted Grey" in the Figma file, added Session 252 with the Runner tab mock.
+  -- ALIASED to `rim` above: one Figma variable, two roles (hairline and body
+  -- copy), and two literals would be one of them going stale.
+  --
+  -- ⚠️ THIS IS NOT A RETREAT FROM "DIM IS ALPHA, NOT A HUE" above. That rule
+  -- rejected #9090b0 — a DARK purple-grey that went muddy against a purple
+  -- panel. This one sits near white and is a NAMED token in the mock; the
+  -- rule's actual instruction is the one being followed, which is to read the
+  -- colour out of Figma rather than derive one. Use it where the mock does;
+  -- textDim remains the ramp everywhere else.
+  mutedGrey = hex("d9cee2"),
   -- The title's brand gradient (#a8442d -> #4a3580) FLATTENED TO ITS MIDPOINT.
   -- ⚠️ WoW fontstrings take a colour, never a gradient — there is no SetGradient
   -- on a FontString and no way to clip a gradient texture to glyphs. This is the

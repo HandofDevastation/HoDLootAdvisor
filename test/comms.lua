@@ -1183,6 +1183,37 @@ do
   check("...and an imported one does not",
         mine.payloadFrom == nil, tostring(mine.payloadFrom))
 
+  -- ── What the rebuilt Runner tab reads (Session 252) ───────────────────────
+  -- The mock shows "Imported 14 min ago" ABOVE "Gear synced 18 min ago", so the
+  -- two ages must both exist as separate fields. Conflating them is the failure
+  -- the gear-age rule already names; this is that rule reaching the new surface.
+  check("the export's own age is reported, beside the gear age",
+        mine.importedAge ~= nil and mine.gearAge ~= nil,
+        ("imported %s / gear %s"):format(tostring(mine.importedAge), tostring(mine.gearAge)))
+
+  -- "Since 8:03 PM" needs a start time, and only OUR OWN claim has one that
+  -- means anything: a claim heard from someone else is stamped when it ARRIVED.
+  check("our own claim carries when it started", type(mine.claimAt) == "number",
+        tostring(mine.claimAt))
+  check("...and a claim we merely heard about does not",
+        theirs.claimAt == nil, tostring(theirs.claimAt))
+
+  -- Each peer row shows a version and a gear state. Derived in Comms so the
+  -- panel does no comparing of its own.
+  local peer = mine.peers and mine.peers[1]
+  check("the runner sees the other client as a peer", peer ~= nil)
+  if peer then
+    check("...carrying its addon version", peer.version ~= nil, tostring(peer.version))
+    check("...and whether its gear is actually arriving",
+          type(peer.gearLive) == "boolean", type(peer.gearLive))
+    -- ⚠️ NIL IS A REAL ANSWER HERE. Two clients in one process report the same
+    -- version, and an unpackaged build reports "dev", which is not comparable
+    -- to a version at all — so the field is false or nil, never a guess.
+    check("...and whether its build differs, or nil when that cannot be told",
+          peer.versionDiffers == false or peer.versionDiffers == nil,
+          tostring(peer.versionDiffers))
+  end
+
   -- Left clean for anything appended after this section.
   stub.Use(A)
   nsA.Comms.ReleaseRunner()

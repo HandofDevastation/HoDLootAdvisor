@@ -44,7 +44,10 @@ stub.Install()
 -- window itself is thin glue verified in game.
 local ns = stub.LoadAddon({
   "LootData.lua", "Style.lua", "Scoring.lua", "Core.lua", "Settings.lua", "Payload.lua",
-  "Diagnostics.lua", "Comms.lua", "Journal.lua", "Targets.lua", "Tooltip.lua",
+  -- Roster is loaded so the window-file helper scan below can actually verify
+  -- ns.Roster.* calls rather than skipping them: the panel names IdentityFor,
+  -- and a module the scan cannot see is a call it cannot check.
+  "Diagnostics.lua", "Comms.lua", "Roster.lua", "Journal.lua", "Targets.lua", "Tooltip.lua",
   "Record.lua", "Loot.lua",
 })
 

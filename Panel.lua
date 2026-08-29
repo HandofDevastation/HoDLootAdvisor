@@ -134,6 +134,50 @@ local DIFF_X, DIFF_Y, DIFF_W, DIFF_H = 460, 60, 140, 24
 -- plus a 14px box and a 6px gap = 89.4px, leaving ~19px clear. A longer label
 -- needs re-measuring, not eyeballing.
 local VAULT_GAP = 12
+
+-- ── Runner tab (Session 252, from Jason's mock) ─────────────────────────────
+-- Panel-relative, read off the Figma frame rather than eyeballed: the mock's
+-- origin is (2383, 779) and every number below is a node position minus that.
+--
+-- A left RAIL of state (are you running it, what is loaded, the two controls)
+-- and a right COLUMN of detail, split by a full-height hairline — the same
+-- shape the Standings tab uses, which is what makes the two read as one design.
+local RN_RAIL_X      = 20
+local RN_RAIL_W      = 120
+local RN_STATUS_Y    = 117    -- "YOU ARE RUNNING LOOT", wraps to two lines
+local RN_SINCE_Y     = 158
+local RN_DATA_Y      = 233    -- "TONIGHT'S DATA"
+local RN_RAIDERS_Y   = 252
+local RN_RANKED_Y    = 272
+local RN_IMPORTED_Y  = 296
+local RN_SYNCED_Y    = 309
+local RN_AUTO_Y      = 428    -- the two rail controls, 119x24 in the mock
+local RN_TOGGLE_Y    = 462
+local RN_BTN_X, RN_BTN_W, RN_BTN_H = 16, 119, 24
+
+local RN_DIV_X, RN_DIV_Y, RN_DIV_H = 151, 113, 373
+
+local RN_COL_X       = 178
+local RN_COL_W       = 406    -- the mock's divider width; the column matches it
+local RN_LEAD_Y      = 115
+local RN_LEAD_SUB_Y  = 133
+local RN_LEAD_SUB_W  = 259    -- narrower on purpose: it is what makes the mock
+                              -- wrap this sentence onto two lines
+local RN_D1_Y        = 191
+local RN_PEERS_Y     = 211
+local RN_PEER_TOP    = 237
+local RN_PEER_PITCH  = 16
+local RN_PEER_ROWS   = 4
+-- Name / version / gear state, as three columns off the mock's text nodes.
+local RN_PEER_NAME_X = 0
+local RN_PEER_VER_X  = 79     -- 2640 - 2561
+local RN_PEER_GEAR_X = 186    -- 2747 - 2561
+local RN_D2_Y        = 303
+local RN_MISS_Y      = 322
+local RN_MISS_BODY_Y = 341
+local RN_D3_Y        = 377
+local RN_SPEC_Y      = 394
+local RN_SPEC_BODY_Y = 413
 local DIFF_CHOICES = { "AUTO", "NORMAL", "HEROIC", "MYTHIC", "MPLUS" }
 local DIFF_LABEL = {
   AUTO = "Auto", NORMAL = "Raid: Normal", HEROIC = "Raid: Heroic",
@@ -499,67 +543,82 @@ local function buildRankRow(parent, i)
   row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
   row.icon:Hide()
 
-  -- ── The GAIN cell's own hover target ──────────────────────────────────────
-  -- "+23" is an ARITHMETIC RESULT with both operands off screen, and the whole
-  -- column is a wall of them. This says where the number came from.
+  -- ── The UPGRADE cell's own hover target ───────────────────────────────────
+  -- ⚠️ THIS SITS ON THE SCORE, NOT ON THE GAIN, AND THAT WAS A CORRECTION.
+  -- It was built on the GAIN column first, which was the wrong column: GAIN is
+  -- a subtraction anyone can do once they know the two item levels, while the
+  -- number beside the badge is a GAP IN SCORE — a different unit entirely,
+  -- sitting one column over. That collision is what actually confuses people:
+  -- Jason read a "-12" beside a +35 and a +19 and reasonably asked why the
+  -- difference was not 16. It is not item levels at all.
   --
-  -- A separate frame rather than the row's tooltip: the row already explains the
-  -- provenance marker and the spec-split marker, and folding a third unrelated
-  -- explanation into the same popup means you get all three wherever you point.
+  -- So the breakdown belongs HERE, where the number it explains is.
+  --
+  -- A separate frame rather than the row's tooltip: the row already explains
+  -- the provenance marker and the spec-split marker, and folding a third
+  -- explanation into one popup means you get all three wherever you point.
   --
   -- ⚠️ IT MUST RE-SHOW THE ROW HIGHLIGHT. A mouse-enabled child takes the hover,
   -- so the row's OnLeave fires as the pointer crosses into this — leaving the
   -- highlight off while the pointer is still visibly on the row.
-  row.gainHit = CreateFrame("Frame", nil, row)
-  row.gainHit:SetPoint("TOPLEFT", row.gain, "TOPLEFT", 0, 3)
-  row.gainHit:SetPoint("BOTTOMRIGHT", row.gain, "BOTTOMRIGHT", 0, -3)
-  row.gainHit:EnableMouse(true)
-  row.gainHit:SetScript("OnEnter", function(self)
-    local r = row.gainInfo
+  row.scoreHit = CreateFrame("Frame", nil, row)
+  row.scoreHit:SetPoint("TOPLEFT", row.upgrade, "TOPLEFT", 0, 3)
+  row.scoreHit:SetPoint("BOTTOMRIGHT", row.upgrade, "BOTTOMRIGHT", 0, -3)
+  row.scoreHit:EnableMouse(true)
+  row.scoreHit:SetScript("OnEnter", function(self)
+    local r = row.scoreInfo
     row.hl:Show()
     if not r then return end
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:AddLine(("+%d item levels"):format(r.gain or 0), 1, 1, 1)
+    GameTooltip:AddLine("How this score was reached", 1, 1, 1)
 
-    if r.equippedIlvl then
-      local function rung(track, ilvl)
-        local rank = track and ilvl and ns.LadderRank(track, ilvl)
-        return rank and ("%s %d/6"):format(track, rank) or (track or "")
-      end
-      GameTooltip:AddLine(" ")
-      GameTooltip:AddDoubleLine("This item",
-        ("%d  %s"):format(r.candidateIlvl or 0, rung(r.candidateTrack, r.candidateIlvl)),
-        0.6, 0.6, 0.7, 1, 1, 1)
-      if r.equippedIlvl > 0 then
-        GameTooltip:AddDoubleLine("They have",
-          ("%d  %s"):format(r.equippedIlvl, rung(r.equippedTrack, r.equippedIlvl)),
-          0.6, 0.6, 0.7, 1, 1, 1)
-      else
-        -- ⚠️ AN EMPTY SLOT IS NOT A ZERO-ILVL ITEM. Left as "0" the subtraction
-        -- reads as a 318-point upgrade over something they are wearing.
-        GameTooltip:AddDoubleLine("They have", "nothing in that slot",
-          0.6, 0.6, 0.7, 1, 1, 1)
-      end
-      GameTooltip:AddDoubleLine("Gain", ("+%d"):format(r.gain or 0),
-        0.6, 0.6, 0.7, 0.953, 0.773, 0.420)
-      if r.vault then
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Item level shown is the Vault / Voidcore reward, not the drop.",
-          0.6, 0.6, 0.7, true)
-      end
-    else
+    if not r.factors then
       -- ⚠️ SAY WHY, RATHER THAN SHOW A BLANK. A ranking from the runner carries
-      -- the gain but NOT the gear behind it — everyone displays the runner's
-      -- numbers by rule, and their equipped state was never on the wire.
+      -- the badge and the gap but NOT the arithmetic behind them — everyone
+      -- displays the runner's numbers by rule, and the factors were never on
+      -- the wire.
       GameTooltip:AddLine(" ")
       GameTooltip:AddLine(
         "The breakdown is not available: this ranking came from the loot runner, "
-        .. "which sends each raider's gain but not the gear it was measured against.",
+        .. "which sends each raider's result but not the factors behind it.",
+        0.6, 0.6, 0.7, true)
+      GameTooltip:Show()
+      return
+    end
+
+    local f = r.factors
+    GameTooltip:AddLine(" ")
+    -- ⚠️ THE ITEM-LEVEL FACTOR CAPS, and the cap is the whole reason a big GAIN
+    -- can sit beside a small score gap. Saying so is the point of the line.
+    local ilvlLine = ("%d"):format(f.ilvl_delta or 0)
+    if (f.ilvl_delta or 0) >= 40 then ilvlLine = ilvlLine .. "  (max)" end
+    GameTooltip:AddDoubleLine(("Item level  (+%d)"):format(r.gain or 0), ilvlLine,
+      0.6, 0.6, 0.7, 1, 1, 1)
+    GameTooltip:AddDoubleLine("Track gap", ("%d"):format(f.track_gap or 0),
+      0.6, 0.6, 0.7, 1, 1, 1)
+    -- ⚠️ ONE QUALITY AXIS. A grade or a BIS listing REPLACES stat alignment
+    -- rather than adding to it, so the row is labelled by whichever actually
+    -- applied — printing both would imply they were summed, which is the exact
+    -- misreading the scoring rule exists to prevent.
+    GameTooltip:AddDoubleLine(
+      f.is_ranked_override and "Best-in-slot / grade" or "Stat alignment",
+      ("%d"):format(f.stat_alignment or 0), 0.6, 0.6, 0.7, 1, 1, 1)
+    if (f.tier_bonus or 0) > 0 then
+      GameTooltip:AddDoubleLine("Tier set", ("%d"):format(f.tier_bonus),
+        0.6, 0.6, 0.7, 1, 1, 1)
+    end
+    GameTooltip:AddDoubleLine("Total", ("%d"):format(r.score or 0),
+      0.953, 0.773, 0.420, 0.953, 0.773, 0.420)
+
+    if r.gap and r.gap > 0 then
+      GameTooltip:AddLine(" ")
+      GameTooltip:AddLine(
+        ("%d behind %s, who leads this item."):format(r.gap, r.leader or "the top row"),
         0.6, 0.6, 0.7, true)
     end
     GameTooltip:Show()
   end)
-  row.gainHit:SetScript("OnLeave", function()
+  row.scoreHit:SetScript("OnLeave", function()
     row.hl:Hide()
     GameTooltip:Hide()
   end)
@@ -660,7 +719,7 @@ local function resetRow(row)
   -- Rows are RECYCLED, so a stale breakdown would explain the previous
   -- occupant's number under the new one — the same trap the TEXT_KEYS sweep
   -- above exists for.
-  row.gainInfo = nil
+  row.scoreInfo = nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -932,6 +991,84 @@ local function buildLootControls()
 
 end
 
+--- The Runner tab's furniture, built once. Rendering fills it in.
+---
+--- Every fact it shows comes from Comms.RunnerReport(); this builds the widgets
+--- and nothing else. See the note on that function for why the data lives there.
+local function buildRunnerTab()
+  local R = {}
+  frame.rn = R
+
+  -- ── Left rail: state, and the two controls that change it ─────────────────
+  R.status = at(text(frame, "title", "title", "green"), RN_RAIL_X, RN_STATUS_Y, RN_RAIL_W)
+  R.status:SetWordWrap(true)
+  R.since  = at(text(frame, "body", "small", "textDim"), RN_RAIL_X, RN_SINCE_Y, RN_RAIL_W)
+
+  R.dataHead = at(text(frame, "label", "tiny", "railHead"), RN_RAIL_X, RN_DATA_Y, RN_RAIL_W)
+  R.dataHead:SetText("TONIGHT'S DATA")
+  R.raiders  = at(text(frame, "titleMed", "title", "text"), RN_RAIL_X, RN_RAIDERS_Y, RN_RAIL_W)
+  R.ranked   = at(text(frame, "titleMed", "title", "text"), RN_RAIL_X, RN_RANKED_Y, RN_RAIL_W)
+  R.imported = at(text(frame, "body", "tiny", "textMuted"), RN_RAIL_X, RN_IMPORTED_Y, RN_RAIL_W)
+  R.synced   = at(text(frame, "body", "tiny", "textMuted"), RN_RAIL_X, RN_SYNCED_Y, RN_RAIL_W)
+
+  -- ── The hairline between rail and column ──────────────────────────────────
+  R.div = frame:CreateTexture(nil, "ARTWORK")
+  R.div:SetSize(1, RN_DIV_H)
+  R.div:SetPoint("TOPLEFT", RN_DIV_X, -RN_DIV_Y)
+  if ns.Style then
+    R.div:SetColorTexture(ns.Style.COLOR.rim.r, ns.Style.COLOR.rim.g,
+      ns.Style.COLOR.rim.b, 0.25)
+  end
+
+  -- ── Right column ──────────────────────────────────────────────────────────
+  R.lead    = at(text(frame, "bodyMed", "small", "green"), RN_COL_X, RN_LEAD_Y, RN_COL_W)
+  R.leadSub = at(text(frame, "body", "small", "mutedGrey"), RN_COL_X, RN_LEAD_SUB_Y, RN_LEAD_SUB_W)
+  R.leadSub:SetWordWrap(true)
+
+  local function hairline(y)
+    local t = frame:CreateTexture(nil, "ARTWORK")
+    t:SetSize(RN_COL_W, 1)
+    t:SetPoint("TOPLEFT", RN_COL_X - 1, -y)
+    if ns.Style then
+      t:SetColorTexture(ns.Style.COLOR.rim.r, ns.Style.COLOR.rim.g,
+        ns.Style.COLOR.rim.b, 0.25)
+    end
+    return t
+  end
+  R.d1, R.d2, R.d3 = hairline(RN_D1_Y), hairline(RN_D2_Y), hairline(RN_D3_Y)
+
+  R.peersHead = at(text(frame, "body", "small", "text"), RN_COL_X, RN_PEERS_Y, RN_COL_W)
+  R.peers = {}
+  for i = 1, RN_PEER_ROWS do
+    local y = RN_PEER_TOP + (i - 1) * RN_PEER_PITCH
+    R.peers[i] = {
+      name = at(text(frame, "body", "small", "text"),
+                RN_COL_X + RN_PEER_NAME_X, y, RN_PEER_VER_X - 4),
+      ver  = at(text(frame, "body", "small", "textDim"),
+                RN_COL_X + RN_PEER_VER_X, y, RN_PEER_GEAR_X - RN_PEER_VER_X - 4),
+      gear = at(text(frame, "body", "small", "textDim"),
+                RN_COL_X + RN_PEER_GEAR_X, y, 120),
+    }
+  end
+
+  R.missHead = at(text(frame, "body", "small", "darkOrange"), RN_COL_X, RN_MISS_Y, RN_COL_W)
+  R.missBody = at(text(frame, "body", "small", "mutedGrey"), RN_COL_X, RN_MISS_BODY_Y, RN_COL_W)
+  R.missBody:SetWordWrap(true)
+
+  R.specHead = at(text(frame, "body", "small", "text"), RN_COL_X, RN_SPEC_Y, RN_COL_W)
+  R.specBody = at(text(frame, "body", "small", "mutedGrey"), RN_COL_X, RN_SPEC_BODY_Y, RN_COL_W)
+  R.specBody:SetWordWrap(true)
+
+  -- Everything above is hidden until the tab is on screen.
+  R.all = { R.status, R.since, R.dataHead, R.raiders, R.ranked, R.imported,
+            R.synced, R.lead, R.leadSub, R.peersHead, R.missHead, R.missBody,
+            R.specHead, R.specBody, R.div, R.d1, R.d2, R.d3 }
+  for _, p in ipairs(R.peers) do
+    R.all[#R.all + 1] = p.name; R.all[#R.all + 1] = p.ver; R.all[#R.all + 1] = p.gear
+  end
+  for _, w in ipairs(R.all) do w:Hide() end
+end
+
 local function buildStandingsTab()
   -- ── Standings tab ─────────────────────────────────────────────────────────
   -- The season, on the tab row's right. Only this tab shows it: the Loot design
@@ -1183,7 +1320,10 @@ local function buildTabControls()
 
   frame.runToggle = ns.Style and ns.Style.Pill(frame, 150, 22, "Run Loot Tonight")
     or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.runToggle:SetPoint("TOPRIGHT", -PAD, -(NOTE_Y - 4))
+  -- ⚠️ ON THE RAIL NOW, NOT THE PANE'S BOTTOM-RIGHT. The mock puts both runner
+  -- controls at the foot of the left rail, under the state they change.
+  frame.runToggle:SetSize(RN_BTN_W, RN_BTN_H)
+  frame.runToggle:SetPoint("TOPLEFT", RN_BTN_X, -RN_TOGGLE_Y)
   if frame.runToggle.SetPillState then frame.runToggle:SetPillState(true) end
   frame.runToggle:Hide()
   frame.runToggle:SetScript("OnClick", function()
@@ -1205,7 +1345,8 @@ local function buildTabControls()
   -- either way — Settings.SPEC is the single definition.
   frame.autoPost = ns.Style and ns.Style.Pill(frame, 150, 22, "Auto-Post: Off")
     or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.autoPost:SetPoint("RIGHT", frame.runToggle, "LEFT", -8, 0)
+  frame.autoPost:SetSize(RN_BTN_W, RN_BTN_H)
+  frame.autoPost:SetPoint("TOPLEFT", RN_BTN_X, -RN_AUTO_Y)
   if frame.autoPost.SetPillState then frame.autoPost:SetPillState(false) end
   frame.autoPost:Hide()
   frame.autoPost:SetScript("OnClick", function()
@@ -1280,6 +1421,7 @@ local function build()
   buildChrome()
   buildLootControls()
   buildStandingsTab()
+  buildRunnerTab()
   buildDetailPane()
   buildFooter()
   buildTabControls()
@@ -2111,18 +2253,16 @@ local function renderRanking(itemID)
     local gain = r.ilvlGain or 0
     row.gain:SetText(gain > 0 and ("+%d"):format(gain) or "")
 
-    -- What the GAIN cell's tooltip explains. `equipped` is present only on a
-    -- LOCALLY scored row — a ranking received from the runner carries the gain
-    -- and nothing to subtract it from — and the tooltip says so rather than
-    -- rendering an empty breakdown.
-    local selEntry = Panel._entries and Panel._entries[state.sel]
-    row.gainInfo = {
-      gain           = gain,
-      candidateIlvl  = selEntry and selEntry.candidateIlvl,
-      candidateTrack = selEntry and selEntry.candidateTrack,
-      equippedIlvl   = r.equipped and (r.equipped.ilvl or 0) or nil,
-      equippedTrack  = r.equipped and r.equipped.track or nil,
-      vault          = ns.VaultOn(),
+    -- What the UPGRADE cell's tooltip explains. The FACTORS are present only on
+    -- a LOCALLY scored row — a ranking received from the runner carries the
+    -- badge and the gap but not the arithmetic — and the tooltip says so rather
+    -- than rendering an empty breakdown.
+    row.scoreInfo = {
+      gain    = gain,
+      factors = r.result,
+      score   = r.result and r.result.raw_score or nil,
+      gap     = (idx > 1) and r.gap or nil,
+      leader  = ranked[1] and ranked[1].name or nil,
     }
 
     if r.pr then
@@ -2448,147 +2588,158 @@ end
 --- RENDERING ONLY. Every fact here comes from Comms.RunnerReport(), which lives
 --- in Comms.lua so the headless harness can test it — this function decides
 --- nothing and computes nothing.
+--- The runner's own view, built from Jason's mock: a rail of state on the left,
+--- the detail that matters on a raid night on the right.
+---
+--- RENDERING ONLY. Every fact comes from Comms.RunnerReport(), which lives in
+--- Comms.lua so the headless harness can test it — this decides nothing.
 local function renderRunner()
   setHeaders()
-  showPaneSurface(true)
+  showPaneSurface(false)
   showLootPaneParts(false)
-  frame.itemName:Show()
-  frame.itemSub:Show()
+  frame.itemName:Hide()
+  frame.itemSub:Hide()
+  hideRows(1)
 
+  local R = frame.rn
   local r = ns.Comms and ns.Comms.RunnerReport()
+  for _, w in ipairs(R.all) do w:Show() end
+
   if not r then
-    frame.itemName:SetText("Runner")
-    frame.itemSub:SetText("Comms did not load.")
-    hideRows(1)
+    R.status:SetText("COMMS DID NOT LOAD")
+    if ns.Style then R.status:SetTextColor(ns.Style.rgb(ns.Style.COLOR.darkOrange)) end
+    for _, w in ipairs(R.all) do if w ~= R.status then w:Hide() end end
     return
   end
 
-  frame.itemName:SetText("Runner")
-  frame.itemSub:SetText(r.seasonName and ("%s · %d raiders, %d ranked"):format(
-    r.seasonName, r.raiders, r.ranked) or "Nothing imported yet")
+  local S = ns.Style
 
-  local lines = {}
-  local function add(t) lines[#lines + 1] = t end
-
-  -- WHO IS RUNNING LOOT — first, because it is the one thing this tab exists to
-  -- make unambiguous. Every branch names the button AS IT IS CURRENTLY
-  -- LABELLED; both are keyed on HasExplicitClaim, so a branch saying "press Run
-  -- Loot Tonight" cannot appear beside a button reading "Stop Running Loot".
+  -- ── Rail: who is running loot ─────────────────────────────────────────────
+  -- ⚠️ THREE STATES, NOT TWO. "You", "somebody else", and "nobody has claimed
+  -- it" are genuinely different situations wanting different actions, and the
+  -- third is the one that reads as broken if it is collapsed into the second.
   if r.runnerIsMe then
-    add("|cff44ff44You are running loot tonight.|r")
-    add("The raid follows your rankings, and late joiners get the roster from you.")
+    R.status:SetText("YOU ARE RUNNING LOOT")
+    if S then R.status:SetTextColor(S.rgb(S.COLOR.green)) end
+    -- Only OUR claim has a local start time; see the note on claimAt.
+    R.since:SetText(r.claimAt and ("Since %s"):format(date("%I:%M %p", r.claimAt):gsub("^0", ""))
+      or "")
   elseif r.runner then
-    add(("|cffF3C56B%s is running loot tonight.|r"):format(r.runner))
-    add("Their rankings are the ones everyone sees. Press Run Loot Tonight to take over.")
-  elseif r.iAmRunner then
-    add("|cffF3C56BYou are answering for tonight's data|r — because you imported it,")
-    add("not because anyone claimed it. Press Run Loot Tonight to make it official.")
-  elseif r.payloadFrom then
-    add("|cff888899Nobody has claimed the runner role.|r")
-    add(("You have tonight's data from %s, who is answering for it."):format(r.payloadFrom))
-  elseif r.hasPayload then
-    add("|cffF3C56BNobody is answering for tonight's data.|r")
-    add("You imported it and then stood down. Press Run Loot Tonight to answer again.")
+    R.status:SetText(("%s IS RUNNING LOOT"):format(r.runner:upper()))
+    if S then R.status:SetTextColor(S.rgb(S.COLOR.text)) end
+    R.since:SetText("")
   else
-    add("|cff888899Nobody has claimed the runner role.|r")
-    add("Press Import Raid Night to load tonight's data.")
+    R.status:SetText("NOBODY IS RUNNING LOOT")
+    if S then R.status:SetTextColor(S.rgb(S.COLOR.darkOrange)) end
+    R.since:SetText("")
   end
 
-  add("")
-
-  -- THE STATE THAT LOOKS HEALTHY AND IS NOT: a full roster on screen with no
-  -- ability to send it anywhere.
-  if r.rawProblem then
-    add("|cffff4444" .. r.rawProblem .. "|r")
-    add("")
+  -- ── Rail: tonight's data ──────────────────────────────────────────────────
+  -- ⚠️ IMPORTED AND SYNCED ARE DIFFERENT NUMBERS and are never conflated: the
+  -- stamp is when the SITE built the export, the gear age is how old the OLDEST
+  -- audit inside it is. An export made seconds ago can be built entirely from
+  -- day-old gear, and reporting one as the other is a claim the runner has no
+  -- way to check.
+  if r.hasPayload then
+    R.raiders:SetText(("%d Raiders"):format(r.raiders or 0))
+    R.ranked:SetText(("%d Ranked"):format(r.ranked or 0))
+    R.imported:SetText(r.importedAge and ("Imported %s"):format(r.importedAge) or "")
+    R.synced:SetText(r.gearAge and ("Gear synced %s"):format(r.gearAge) or "")
+  else
+    R.raiders:SetText("No import")
+    R.ranked:SetText("")
+    R.imported:SetText("Paste a raid night to rank the roster.")
+    R.synced:SetText("")
   end
 
-  if not r.hasPayload then
-    add("Nothing imported yet — press Import Raid Night.")
+  -- ── Column: what being the runner means ───────────────────────────────────
+  if r.runnerIsMe then
+    R.lead:SetText("The raid follows your rankings.")
+    if S then R.lead:SetTextColor(S.rgb(S.COLOR.green)) end
+    R.leadSub:SetText("Late joiners get the roster from you. To hand over, another "
+      .. "officer imports a newer export.")
+  elseif r.runner then
+    R.lead:SetText(("%s is ranking tonight's loot."):format(r.runner))
+    if S then R.lead:SetTextColor(S.rgb(S.COLOR.text)) end
+    R.leadSub:SetText("Everyone shows their ranking, so the raid sees one list. Import "
+      .. "a newer export to take over.")
   else
-    add(("Gear snapshot: %s"):format(tostring(r.gearAge)))
-    if r.totalGear then
-      add(("Reporting live: %d of %d raiders · %d corrected by a win tonight")
-        :format(r.liveGear, r.totalGear, r.corrected))
+    R.lead:SetText("Nobody has claimed loot tonight.")
+    if S then R.lead:SetTextColor(S.rgb(S.COLOR.darkOrange)) end
+    R.leadSub:SetText("Whoever imported the roster is answering for now. Press Run Loot "
+      .. "Tonight to make it explicit.")
+  end
+
+  -- ⚠️ THE ONE STATE WHERE EVERY OTHER LINE LOOKS HEALTHY. A payload pasted
+  -- before comms loaded cannot be re-sent at all: full roster, correct
+  -- rankings, and nothing reaches anybody. It replaces the lead rather than
+  -- sitting under it, because it makes the lead untrue.
+  if r.rawStatus == "legacy" and r.rawProblem then
+    R.lead:SetText("This roster cannot be shared.")
+    if S then R.lead:SetTextColor(S.rgb(S.COLOR.darkOrange)) end
+    R.leadSub:SetText(r.rawProblem)
+  end
+
+  -- ── Column: who else is running the addon ─────────────────────────────────
+  local peers = r.peers or {}
+  R.peersHead:SetText(#peers > 0 and "Who is running the addon:" or "")
+  for i = 1, RN_PEER_ROWS do
+    local row, p = R.peers[i], peers[i]
+    if not p then
+      row.name:SetText(""); row.ver:SetText(""); row.gear:SetText("")
+    elseif i == RN_PEER_ROWS and #peers > RN_PEER_ROWS then
+      -- The last slot becomes the overflow line rather than silently dropping
+      -- the tail.
+      row.name:SetText(("and %d more"):format(#peers - RN_PEER_ROWS + 1))
+      if S then row.name:SetTextColor(S.rgb(S.COLOR.textDim)) end
+      row.ver:SetText(""); row.gear:SetText("")
     else
-      add(("Reporting live: %d · %d corrected by a win tonight"):format(r.liveGear, r.corrected))
-    end
-
-    if r.channel and #r.notReporting > 0 then
-      local shown = {}
-      for i = 1, math.min(6, #r.notReporting) do shown[#shown + 1] = r.notReporting[i] end
-      local t = "   Not reporting: " .. table.concat(shown, ", ")
-      if #r.notReporting > #shown then
-        t = t .. (" and %d more"):format(#r.notReporting - #shown)
-      end
-      add(t)
-      add("   |cff888899They are still ranked, from the site snapshot.|r")
+      row.name:SetText(p.name or "?")
+      -- Class colour where we know the class. Roster.IdentityFor is the seam
+      -- that already answers "who is this" from whatever source has an answer;
+      -- an unknown name stays plain white rather than being coloured on a guess.
+      local ident = ns.Roster and ns.Roster.IdentityFor and ns.Roster.IdentityFor(p.name)
+      local cc = ident and ident.class and CLASS_COLOR[ident.class]
+      if cc then row.name:SetTextColor(cc[1], cc[2], cc[3])
+      elseif S then row.name:SetTextColor(S.rgb(S.COLOR.text)) end
+      row.ver:SetText(tostring(p.version or "?"))
+      -- ⚠️ "gear live" IS NOT "they are here". Someone can be running the addon
+      -- and still be ranked from the site snapshot; those are different states
+      -- with different fixes, so they get different words.
+      row.gear:SetText(p.gearLive and "gear live"
+        or (p.versionDiffers and "different build" or "no gear yet"))
     end
   end
 
-  -- ⚠️ WHETHER IT WILL FIRE, NOT JUST WHETHER IT IS ON.
-  add("")
-  if not r.autoPost then
-    add("|cff888899Auto-post is off|r — drops are posted to chat only when you press Post.")
-  elseif not r.hasPayload then
-    add("|cffF3C56BAuto-post is on|r, but there is no raid data to rank drops against.")
-  elseif not r.iAmRunner then
-    add("|cffF3C56BAuto-post is on|r, but only whoever is running loot posts.")
-  elseif r.guildRun then
-    add(("|cff44ff44Auto-post is on|r — %d of %d here are guildmates, so drops will post to chat.")
-      :format(r.guildMates or 0, r.groupSize or 0))
-  elseif (r.groupSize or 0) == 0 then
-    add("|cffF3C56BAuto-post is on|r — nothing will post until you are in a group.")
-  else
-    add(("|cffF3C56BAuto-post is on, but this is not a guild run|r — %d of %d here are guildmates.")
-      :format(r.guildMates or 0, r.groupSize or 0))
-    add("Nothing will be posted to chat. The Post button still works.")
-  end
-
-  add("")
-  if #r.peers == 0 then
-    add(r.channel and "Running the addon: |cff888899nobody else has announced|r"
-                   or "Running the addon: |cff888899not in a group|r")
-  else
+  -- ── Column: who is NOT reporting ──────────────────────────────────────────
+  local missing = r.notReporting or {}
+  if #missing > 0 then
+    R.missHead:SetText(("Not Reporting: %d of %d"):format(#missing, r.totalGear or #missing))
     local names = {}
-    for _, p in ipairs(r.peers) do
-      names[#names + 1] = ("%s (%s)"):format(p.name, tostring(p.version))
-    end
-    add(("Running the addon: %d — %s"):format(#r.peers, table.concat(names, ", ")))
+    for i = 1, math.min(5, #missing) do names[#names + 1] = missing[i] end
+    local text2 = table.concat(names, ", ")
+    if #missing > 5 then text2 = text2 .. (" and %d more"):format(#missing - 5) end
+    R.missBody:SetText(text2 .. " — ranked from the site snapshot.")
+  else
+    R.missHead:SetText("Everyone is reporting gear.")
+    R.missBody:SetText("")
   end
 
-  -- SPEC DISAGREEMENTS. Reported for a person to act on, never acted on here.
-  if #r.specMismatches > 0 then
-    add("")
-    add(("|cffF3C56BSpec differs from the roster for %d:|r"):format(#r.specMismatches))
-    for i = 1, math.min(4, #r.specMismatches) do
-      local m = r.specMismatches[i]
-      add(("   %s — roster says %s, seen as %s"):format(m.name, tostring(m.roster),
-        tostring(m.observed)))
-    end
-    if #r.specMismatches > 4 then
-      add(("   and %d more"):format(#r.specMismatches - 4))
-    end
-    add("   |cff888899Scored as the roster says. Fix it on the site, not here.|r")
+  -- ── Column: spec disagreements ────────────────────────────────────────────
+  -- REPORTED, NEVER ACTED ON. An observed spec must not override the roster's —
+  -- that rule exists because a live observation once mis-scored a healer as DPS.
+  local mism = r.specMismatches or {}
+  if #mism > 0 then
+    R.specHead:SetText(("Spec Differs from the Roster: %d"):format(#mism))
+    local m = mism[1]
+    local line = ("%s — Roster says %s, seen as %s."):format(
+      m.name or "?", tostring(m.roster), tostring(m.observed))
+    if #mism > 1 then line = line .. (" (+%d more)"):format(#mism - 1) end
+    R.specBody:SetText(line .. " Scored as the roster says; fix it on the site.")
+  else
+    R.specHead:SetText("")
+    R.specBody:SetText("")
   end
-
-  local maxScroll = math.max(0, #lines - RANK_ROWS)
-  if state.rankScroll > maxScroll then state.rankScroll = maxScroll end
-
-  for i = 1, RANK_ROWS do
-    local row, line = frame.rows[i], lines[i + state.rankScroll]
-    if not line then row:Hide() else
-      resetRow(row)
-      row.name:SetWidth(DIV_W - 20)
-      row.name:SetText(line)
-      row.name:SetTextColor(unpack(WHITE))
-      row.hl:Hide()
-      row:Show()
-    end
-  end
-  frame.more:SetText(#lines > RANK_ROWS
-    and ("showing %d–%d of %d · scroll for more"):format(
-      state.rankScroll + 1, math.min(#lines, state.rankScroll + RANK_ROWS), #lines) or "")
 end
 
 -- ---------------------------------------------------------------------------
@@ -2747,7 +2898,10 @@ function Panel.Refresh()
     frame.vault:SetChecked(ns.VaultOn())
   end
 
-  frame.season:SetShown(onStandings)
+  -- ⚠️ SHOWN ON RUNNER AS WELL AS STANDINGS (Session 252). The Runner mock puts
+  -- the season in the same top-right slot; only the Loot design leaves it empty,
+  -- because that is where its content control sits.
+  frame.season:SetShown(onStandings or onRunner)
   frame.stDiv:SetShown(onStandings)
   frame.stList:SetShown(onStandings)
   frame.stNote:SetShown(onStandings)
@@ -2759,7 +2913,8 @@ function Panel.Refresh()
   end
   if not onStandings then
     for i = 1, ST_ROWS do frame.stRows[i]:Hide() end
-  else
+  end
+  if onStandings or onRunner then
     local raid = ns.Payload.Current()
     frame.season:SetText(raid and raid.seasonName or "")
   end
@@ -2781,7 +2936,19 @@ function Panel.Refresh()
 
   frame.runToggle:SetShown(onRunner)
   frame.autoPost:SetShown(onRunner)
+  if not onRunner then
+    for _, w in ipairs(frame.rn.all) do w:Hide() end
+  end
   if onRunner then
+    -- The mock's two fills. Auto-post is a STATE (green when it will fire), the
+    -- claim toggle is an ACTION, so they are deliberately not the same colour.
+    if ns.Style and frame.autoPost.SetPillColor then
+      local auto = ns.Settings and ns.Settings.Get("autoPost")
+      frame.autoPost:SetPillColor(auto and ns.Style.COLOR.green or ns.Style.COLOR.elevated)
+    end
+    if ns.Style and frame.runToggle.SetPillColor then
+      frame.runToggle:SetPillColor(ns.Style.COLOR.darkOrange)
+    end
     -- Labelled by what pressing it DOES, and keyed on the same fact the panel
     -- text is keyed on so the two can never contradict each other.
     local claimed = ns.Comms and ns.Comms.HasExplicitClaim()
