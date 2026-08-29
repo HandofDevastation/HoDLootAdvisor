@@ -208,17 +208,33 @@ local COL_ROWS = math.floor((FOOT_Y - COL_TOP) / ITEM_PITCH)
 
 -- Detail-pane internals, all absolute in frame space.
 local HEAD_Y      = 161     -- the three header blocks
-local FACTS_Y     = 209     -- "+17 ilvl | -16 behind | Overall BIS | Targeted"
+-- ⚠️ CENTRED BY MEASUREMENT, NOT BY EYE (Session 254; the S252 rule about
+-- measuring the string rather than eyeballing the layout, applied to a box). The
+-- hairlines are 1px, so the band between them runs 206 to 230 — 24 tall — and
+-- this line's text box measures 10.94 at the 11px size. Centred is
+-- 206 + (24 - 10.94)/2 = 212.5, taken DOWN to 212 because the box carries
+-- descender space the glyphs do not fill, so the ink sits high within it. It was
+-- 209, which put 3px above the text and 10 below and read as sloppy.
+local FACTS_Y     = 212     -- "+17 ilvl | -16 behind | Overall BIS | Targeted"
 local ITEM_Y      = 240     -- the selected item's icon + name
-local RANK_HEAD_Y = 302     -- RAIDER / UPGRADE / GAIN / PRIORITY
-local RANK_TOP    = 326
+local ITEM_ICON   = 32      -- sized to the text beside it; see DIV3_Y below
+-- ⚠️ EVERYTHING BELOW THE ITEM ROW MOVED UP 8 WITH IT, so the gaps it sits in are
+-- unchanged: div3 to this heading was 12 before and is 12 now. Shifting the line
+-- alone would have fixed the icon and opened a hole underneath it.
+local RANK_HEAD_Y = 294     -- RAIDER / UPGRADE / GAIN / PRIORITY
+local RANK_TOP    = 318
 local RANK_PITCH  = 16
 local RANK_ROWS   = 9
-local MORE_Y      = 472
-local NOTE_Y      = 489
+local MORE_Y      = 464
+local NOTE_Y      = 481
 
 local DIV_X, DIV_W = 230, 360   -- the pane's horizontal hairlines
-local DIV1_Y, DIV2_Y, DIV3_Y = 205, 230, 290
+-- ⚠️ DIV3 FOLLOWS THE ICON, WHICH FOLLOWS THE TEXT (Jason, Session 254: shrink
+-- the icon to the text rather than moving the text to the icon). The name and
+-- sub-line occupy 243 to 268.94; a 32px icon at ITEM_Y spans 240 to 272 and so
+-- centres them with 3.0 above and 3.06 below. div2 sits 10 above the block, so
+-- div3 sits 10 below it: 272 + 10 = 282, where a 40px icon had forced 290.
+local DIV1_Y, DIV2_Y, DIV3_Y = 205, 230, 282
 
 -- Column x positions inside the ranked table. GAIN and PRIORITY are RIGHT
 -- edges, because both are numbers and numbers align on their right.
@@ -1203,7 +1219,7 @@ local function buildDetailPane()
 
   -- The selected item's identity.
   frame.itemIcon = frame:CreateTexture(nil, "ARTWORK")
-  frame.itemIcon:SetSize(40, 40)
+  frame.itemIcon:SetSize(ITEM_ICON, ITEM_ICON)
   frame.itemIcon:SetPoint("TOPLEFT", 231, -ITEM_Y)
   frame.itemIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
@@ -1214,7 +1230,7 @@ local function buildDetailPane()
   -- hovering it should do what hovering an item anywhere else in the game does.
   frame.itemHover = CreateFrame("Frame", nil, frame)
   frame.itemHover:SetPoint("TOPLEFT", 231, -ITEM_Y)
-  frame.itemHover:SetSize(250, 40)
+  frame.itemHover:SetSize(250, ITEM_ICON)
   frame.itemHover:EnableMouse(true)
   frame.itemHover:SetScript("OnEnter", function(self)
     local itemID = Panel.CurrentItemID()
