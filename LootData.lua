@@ -3,7 +3,7 @@
 -- Game data only: no roster, no standings, no personal data.
 
 HoDLootAdvisorData = {
-  meta = { schema = 2, generatedAt = "2026-08-26T16:08:59.058Z", seasonId = "ad2b4991-46a1-444c-b09b-e0b4f5f72021", seasonName = "Midnight: Season 2" },
+  meta = { schema = 2, generatedAt = "2026-08-29T00:58:31.044Z", seasonId = "ad2b4991-46a1-444c-b09b-e0b4f5f72021", seasonName = "Midnight: Season 2" },
   bosses = {
     [2888] = { name = "Nek'zali the Soulcoiler", order = 1 },
     [2849] = { name = "Nymrissa Wavecaller", order = 1 },
@@ -625,6 +625,12 @@ HoDLootAdvisorData = {
       ["Champion"] = {12833,12834,12835,12836,12837,12838},
       ["Hero"] = {12841,12842,12843,12844,12845,12846},
       ["Myth"] = {12849,12850,12851,12852,12853,12854},
+    },
+    vault = {
+      n = { track="Hero", rank=1 },
+      h = { track="Myth", rank=1 },
+      m = { track="Myth", rank=6 },
+      mplus = { track="Myth", rank=1 },
     },
   },
 }

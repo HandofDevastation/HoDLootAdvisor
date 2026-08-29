@@ -123,6 +123,11 @@ Style.COLOR = {
   green     = hex("20ba56"),   -- Major
   blue      = hex("3382ff"),   -- Moderate
   orange    = hex("ff7729"),   -- Minor, Grade S
+  -- "Dark Orange" in the Figma file, read from the mock rather than derived
+  -- (Session 252). NOT a shade of the --hue-orange above: it is its own named
+  -- variable, and it is what the content control is filled with. Guessing a
+  -- darker orange from ff7729 would have landed nowhere near it.
+  darkOrange = hex("bb3f22"),
   grey      = hex("606060"),   -- Sidegrade, low grades
   red       = hex("c41e3a"),
   purple    = hex("8031ff"),
@@ -436,6 +441,18 @@ function Style.Pill(parent, width, height, label, size)
     self:SetAlpha((enabled == false) and 0.4 or 1)
     self:EnableMouse(enabled ~= false)
   end
+  --- Repaint the fill. Every pill is purple by default because that is what the
+  --- tab row and the filter toggles are; the difficulty control is ORANGE in the
+  --- design, and it is the only control on the row that selects CONTENT rather
+  --- than a view, so it should not read as one more tab.
+  ---
+  --- ⚠️ OPAQUE HERE, ALPHA VIA SetPillState — never both, for the same reason
+  --- the default fill is written that way directly above.
+  function btn:SetPillColor(c)
+    self.fill:SetColorTexture(c.r, c.g, c.b, 1)
+    self.fill:SetAlpha(self._alpha or 1)
+  end
+
   btn.fill:SetColorTexture(Style.COLOR.purple.r, Style.COLOR.purple.g, Style.COLOR.purple.b, 1)
   btn:SetPillState(false)
 
@@ -449,6 +466,63 @@ function Style.Pill(parent, width, height, label, size)
     s.fill:SetAlpha(s._alpha or OFF)
     if s._dimText ~= false then s.text:SetAlpha(s._alpha or OFF) end
   end)
+  return btn
+end
+
+--- A checkbox in the panel's own language: a small square with a coloured rim
+--- and a coloured tick, plus a white label to its right. The whole thing is one
+--- click target, because a 14px box is not a comfortable one.
+---
+--- ⚠️ NOT UICheckButtonTemplate. Settings.lua uses the Blizzard template and is
+--- right to — that window is a plain list. This one sits on the designed panel
+--- beside pills that were drawn to a mock, and the gold-riveted default is the
+--- single biggest reason a frame reads as "some addon" (see Style.Window).
+---
+--- ⚠️ THE TICK IS A TEXTURE, NOT A CHARACTER. The bundled fonts carry no ✓ —
+--- checked directly, along with ★ ◆ and the rest — and a missing glyph in a
+--- custom font renders as NOTHING rather than falling back.
+function Style.Check(parent, label, boxSize)
+  local btn = CreateFrame("Button", nil, parent)
+  btn._hodStyled = true
+  local s = boxSize or 14
+
+  btn.box = CreateFrame("Frame", nil, btn)
+  btn.box:SetSize(s, s)
+  btn.box:SetPoint("LEFT", 0, 0)
+  btn.box.bg = btn.box:CreateTexture(nil, "BACKGROUND")
+  btn.box.bg:SetAllPoints()
+  btn.box.bg:SetColorTexture(Style.rgb(Style.COLOR.bg))
+  btn.box.rim = Style.Rim(btn.box, Style.COLOR.orange, 1)
+
+  btn.tick = btn.box:CreateTexture(nil, "OVERLAY")
+  btn.tick:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+  btn.tick:SetPoint("CENTER", 0, 0)
+  btn.tick:SetSize(s + 6, s + 6)
+  btn.tick:SetVertexColor(Style.rgb(Style.COLOR.orange))
+  btn.tick:Hide()
+
+  btn.text = btn:CreateFontString(nil, "OVERLAY")
+  Style.SetFont(btn.text, Style.FONT.titleMed, Style.SIZE.head)
+  btn.text:SetTextColor(Style.rgb(Style.COLOR.white))
+  btn.text:SetJustifyH("LEFT")
+  btn.text:SetPoint("LEFT", btn.box, "RIGHT", 6, 0)
+  btn:SetFontString(btn.text)
+  btn.text:SetText(label or "")
+
+  btn:SetHeight(math.max(s, 16))
+  -- Width follows the label, so the caller can right-align the control without
+  -- knowing how long the word is.
+  btn:SetWidth(s + 6 + (btn.text:GetStringWidth() or 30))
+
+  function btn:SetChecked(on)
+    self._checked = on and true or false
+    if self._checked then self.tick:Show() else self.tick:Hide() end
+  end
+  function btn:GetChecked() return self._checked and true or false end
+  btn:SetChecked(false)
+
+  btn:HookScript("OnEnter", function(s2) s2.text:SetAlpha(0.8) end)
+  btn:HookScript("OnLeave", function(s2) s2.text:SetAlpha(1) end)
   return btn
 end
 

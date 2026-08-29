@@ -1037,14 +1037,106 @@ ns.DIFFICULTY_TRACK = { n = "Champion", h = "Hero", m = "Myth" }
 --- those paths on the same track-resolution code as a real drop instead of a
 --- shortcut that could quietly disagree with it.
 function ns.BonusIdsFor(difficultyKey, dropRank)
+  return ns.BonusIdsForTrack(ns.DIFFICULTY_TRACK[difficultyKey or ""], dropRank)
+end
+
+--- The same thing keyed on an EXPLICIT track and rank rather than on a raid
+--- difficulty. The Great Vault needs this: its reward is a track ABOVE the one
+--- the difficulty drops, so there is no difficulty whose block holds it.
+---
+--- ⚠️ AND THE BONUS ID IS NOT DECORATION HERE — IT IS LOAD-BEARING. Vault levels
+--- land on the ladder's OVERLAPS by design: 318 is Hero 5/6 and Myth 1/6 both,
+--- and the resolver assumes the LOWER track when nothing breaks the tie. Without
+--- this id a Heroic vault reward would report as Hero rather than Myth, which is
+--- the entire claim the toggle is making.
+function ns.BonusIdsForTrack(track, rank)
   local data = ns.Data()
   local blocks = ((data or {}).tracks or {}).bonus
-  local track = ns.DIFFICULTY_TRACK[difficultyKey or ""]
   local block = blocks and track and blocks[track]
   if not block then return {} end
-  local id = block[(dropRank or 1)]
+  local id = block[(rank or 1)]
   if not id then return {} end
   return { id }
+end
+
+--- The item level a track+rank pair sits at on the emitted ladder.
+function ns.LadderIlvl(track, rank)
+  local data = ns.Data()
+  for _, rung in ipairs(((data or {}).tracks or {}).ladder or {}) do
+    if rung.track == track and rung.rank == rank then return rung.ilvl end
+  end
+  return nil
+end
+
+--- What this content's loot becomes in the GREAT VAULT: { track, rank, ilvl }.
+--- `key` is "n" | "h" | "m" for raid, or "mplus" for a dungeon.
+---
+--- Season 2 rewards the vault one full track above the drop — Normal drops
+--- Champion and vaults Hero, Heroic drops Hero and vaults Myth. The mapping is
+--- GAME TUNING and is emitted with the ladder, never written down here: it moved
+--- wholesale in 12.1 and will move again.
+---
+--- ⚠️ NIL WHEN THE PAYLOAD PREDATES THIS, and the caller must show nothing
+--- rather than a computed guess — the same rule the GP price follows. An older
+--- payload carries no vault table and the toggle simply stays unavailable.
+function ns.VaultReward(key)
+  local data = ns.Data()
+  local v = (((data or {}).tracks or {}).vault or {})[key or ""]
+  if not v or not v.track or not v.rank then return nil end
+  local ilvl = ns.LadderIlvl(v.track, v.rank)
+  if not ilvl then return nil end
+  return { track = v.track, rank = v.rank, ilvl = ilvl }
+end
+
+--- Is a Great Vault level knowable for this content at all?
+function ns.HasVaultData()
+  return (((ns.Data() or {}).tracks or {}).vault) ~= nil
+end
+
+--- Move a candidate item level up to what the Great Vault would hand over.
+--- Returns ilvl, bonusIDs, reward — unchanged when there is no vault data.
+---
+--- ⚠️ ONE IMPLEMENTATION, called by BOTH scorers. Loot.ScoreItem answers "what
+--- is this worth to me" and Loot.RankRaiders answers "who is it for", and they
+--- run side by side on one screen — the item column and the detail pane. Two
+--- copies of this arithmetic is two chances for those to disagree in front of
+--- the raid, which is the failure the whole parity discipline exists to stop.
+---
+--- ⚠️ NEVER BELOW THE DROP. Mythic vaults at Myth 6/6 (334), but the penultimate
+--- and final bosses — and Very Rare mythic items — are Myth 9 (344) as a drop
+--- AND in the vault. Those are precisely the items whose own drop level already
+--- exceeds the vault rung, so taking the higher of the two reproduces Blizzard's
+--- carve-out without this needing to know which bosses are last.
+function ns.ApplyVault(rec, diffKey, ilvl, bonusIDs)
+  local reward = ns.VaultReward((rec and rec.synthetic) and "mplus" or diffKey)
+  if not reward then return ilvl, bonusIDs, nil end
+  if reward.ilvl > (ilvl or 0) then
+    return reward.ilvl, ns.BonusIdsForTrack(reward.track, reward.rank), reward
+  end
+  return ilvl, bonusIDs, reward
+end
+
+--- Should the Vault toggle be OFFERED?
+---
+--- Only once a CONTENT choice has been made. On AUTO the panel follows whichever
+--- instance you are standing in, and "the vault level of whatever this is" is a
+--- claim with no stated subject — worse, it would silently change meaning when
+--- you zoned. And only if the payload knows the levels at all.
+function ns.VaultShown()
+  local v = ns.Settings and ns.Settings.Get("difficulty") or "AUTO"
+  if v == "AUTO" then return false end
+  return ns.HasVaultData()
+end
+
+--- Is the viewer asking for vault levels right now?
+---
+--- ⚠️ GATED ON VaultShown, not on the stored setting alone. The setting persists
+--- across a reload, so someone who ticked it on Mythic and later switched to
+--- AUTO would otherwise still be reading vault levels with the checkbox nowhere
+--- on screen to say so.
+function ns.VaultOn()
+  if not ns.VaultShown() then return false end
+  return (ns.Settings and ns.Settings.Get("vault")) and true or false
 end
 
 --- An item string the GAME can render a real tooltip from, carrying the bonus
@@ -1709,6 +1801,30 @@ function ns.MplusItemLink(itemID)
   -- item : id : enchant : gem1-4 : suffix : unique : level : specID :
   -- modifiersMask : itemContext : numBonusIDs : bonusID...
   return ("item:%d::::::::::::1:%d"):format(itemID, id)
+end
+
+--- An item link that tooltips a RAID drop at the level it actually drops at on
+--- the selected difficulty.
+---
+--- ⚠️ THE DUNGEON VERSION ABOVE FIXED HALF A BUG. The Adventure Guide's link is
+--- a CATALOGUE link for raid loot too, and it is not difficulty-aware: browsing
+--- the Full Loot Table on Mythic tooltipped the same item level as on Heroic.
+--- The scorer half is fixed by opts.catalogue in Loot.ScoreItem; without this
+--- the tooltip would then contradict the item level printed beside it, which is
+--- the failure that rule exists to prevent.
+---
+--- Returns NIL rather than a bare "item:%d" when no bonus ID resolves, so the
+--- caller keeps the guide's link: for an item we never imported, the catalogue
+--- link is still the best tooltip available, and a bare item string would throw
+--- away the little it does know.
+function ns.RaidItemLink(itemID, difficultyKey)
+  if not itemID then return nil end
+  local data = ns.Data()
+  local rec = data and (data.items or {})[itemID]
+  if not rec then return nil end
+  if #ns.BonusIdsFor(difficultyKey or ns.DifficultyKey(), rec.dropRank) == 0 then return nil end
+  -- Delegated so the item-string field layout lives in exactly one place.
+  return ns.ItemLinkFor(itemID, difficultyKey)
 end
 
 --- The subset of a dungeon's loot THE GAME says this character can equip.

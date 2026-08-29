@@ -48,7 +48,15 @@ local DIFF_LABEL = { n = "Normal", h = "Heroic", m = "Mythic" }
 --- appear, named, flagged as unscored (Data Contract §0: degrade loudly). The
 --- drop list is driven by what the GAME reports, never by what our table holds.
 ---
---- opts = { itemLink, difficulty = "n"|"h"|"m" }
+--- opts = { itemLink, difficulty = "n"|"h"|"m", catalogue = true|nil,
+---          vault = true|nil }
+---
+--- `vault` scores the item at its GREAT VAULT level instead of its drop level —
+--- see the block on vault mode below.
+---
+--- `catalogue` marks itemLink as an Adventure Guide link rather than a real
+--- drop's: it names the item but describes it at its base level, so it must not
+--- decide the item level. See the block on candidate item level below.
 function Loot.ScoreItem(itemID, opts)
   opts = opts or {}
   local out = { itemID = itemID, itemLink = opts.itemLink }
@@ -136,7 +144,18 @@ function Loot.ScoreItem(itemID, opts)
   --
   -- This does NOT affect real drops: a drop carries no synthetic record, so its
   -- link is still the best answer and is still preferred over our table.
-  if opts.itemLink and not rec.synthetic then
+  --
+  -- ⚠️ AND THE SAME TRAP SAT UNDERNEATH IT FOR RAID LOOT, unfixed until Session
+  -- 252, because `rec.synthetic` is a PROXY FOR DUNGEONS rather than for "this
+  -- link came out of a catalogue". A raid item IS in our table, so it has a real
+  -- record and took this branch — reading the Adventure Guide's link, which
+  -- knows nothing about which difficulty you are browsing. Every item in the
+  -- Full Loot Table therefore showed ONE item level on Heroic and Mythic alike;
+  -- the 13-point difference between the two tracks simply never appeared, and
+  -- the difficulty control looked inert. `opts.catalogue` says the thing the
+  -- proxy was standing in for, and the caller is the only one who knows it: the
+  -- browse list is a catalogue, Current Drops is not.
+  if opts.itemLink and not rec.synthetic and not opts.catalogue then
     local parsed = ns.ParseItemLink(opts.itemLink)
     bonusIDs = parsed and parsed.bonusIDs
     candidateIlvl = ns.DetailedIlvl(opts.itemLink)
@@ -156,6 +175,16 @@ function Loot.ScoreItem(itemID, opts)
       bonusIDs = bonusIDs or ns.BonusIdsFor(diffKey, rec.dropRank)
     end
   end
+  -- ── GREAT VAULT MODE ──────────────────────────────────────────────────────
+  -- Score the piece as the WEEKLY CHEST would hand it over rather than as the
+  -- boss drops it — a full track higher in Season 2. ns.ApplyVault owns the
+  -- rule; Loot.RankRaiders calls the SAME function so the item column and the
+  -- detail pane cannot state different levels for one item.
+  if opts.vault then
+    candidateIlvl, bonusIDs, out.vaultReward =
+      ns.ApplyVault(rec, diffKey, candidateIlvl, bonusIDs)
+  end
+
   out.candidateIlvl = candidateIlvl
 
   local track, rank = ns.ResolveTrack(candidateIlvl, bonusIDs)
@@ -292,7 +321,14 @@ function Loot.RankRaiders(itemID, opts)
   if not candidateIlvl then
     local diffKey = opts.difficulty or ns.DifficultyKey()
     candidateIlvl = (rec.ilvl or {})[diffKey] or 0
-    candidateTrack = ns.ResolveTrack(candidateIlvl, ns.BonusIdsFor(diffKey, rec.dropRank))
+    local bonusIDs = ns.BonusIdsFor(diffKey, rec.dropRank)
+    -- Same seam the personal scorer uses — see ns.ApplyVault. Whoever is asking
+    -- "who is this for" must be asking about the same item level the column
+    -- beside it is showing.
+    if opts.vault then
+      candidateIlvl, bonusIDs = ns.ApplyVault(rec, diffKey, candidateIlvl, bonusIDs)
+    end
+    candidateTrack = ns.ResolveTrack(candidateIlvl, bonusIDs)
   end
 
   local rows = {}

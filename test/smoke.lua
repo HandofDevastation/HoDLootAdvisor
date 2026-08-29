@@ -2723,6 +2723,210 @@ header("Dungeons as a content mode — tiles, pooled loot, and scoring")
         "otherwise the check above is vacuous")
   ns.MPLUS_ILVL = realIlvl
 
+  -- ── THE SAME TRAP, ON RAID LOOT ───────────────────────────────────────────
+  -- Everything above proves a DUNGEON item ignores its catalogue link. A raid
+  -- item is in our loot table, so it has a real record and `rec.synthetic` is
+  -- false — it took the link branch and read the guide's base level, identically
+  -- on every difficulty. Heroic and Mythic showed the same item level in the
+  -- Full Loot Table for a whole season and the difficulty control looked inert.
+  --
+  -- ⚠️ THE FIXTURE HAS TO SUPPLY THE INPUT THAT CAUSES THE BUG. The catalogue
+  -- level is chosen to differ from ALL THREE of n/h/m: equal to any one of them
+  -- and the check passes with the fix removed, which is the S251 lesson about a
+  -- guard that will not bite.
+  -- Re-read the payload record rather than reusing the `chest` local from the
+  -- top of the file: that name is SHADOWED further down by a recorded drop, and
+  -- deriving from the fixture is what the fixture rule asks for anyway.
+  local raidRec = (ns.Data().items or {})[chestId]
+  local savedItem = stub.items[chestId]
+  local CATALOGUE_ILVL = 264
+  stub.items[chestId] = { name = raidRec.name, quality = 4, ilvl = CATALOGUE_ILVL,
+                          itemType = "Armor" }
+  local catLink = stub.link(chestId, raidRec.name, {})
+
+  check("the raid item's difficulty columns are genuinely different",
+        raidRec.ilvl.h ~= raidRec.ilvl.m and raidRec.ilvl.n ~= raidRec.ilvl.h,
+        ("n=%s h=%s m=%s"):format(tostring(raidRec.ilvl.n), tostring(raidRec.ilvl.h),
+                                  tostring(raidRec.ilvl.m)))
+  check("...and the catalogue link reports none of them",
+        ns.DetailedIlvl(catLink) == CATALOGUE_ILVL
+          and CATALOGUE_ILVL ~= raidRec.ilvl.n and CATALOGUE_ILVL ~= raidRec.ilvl.h
+          and CATALOGUE_ILVL ~= raidRec.ilvl.m,
+        tostring(ns.DetailedIlvl(catLink)))
+
+  local catH = ns.Loot.ScoreItem(chestId, { itemLink = catLink, difficulty = "h",
+                                            catalogue = true })
+  local catM = ns.Loot.ScoreItem(chestId, { itemLink = catLink, difficulty = "m",
+                                            catalogue = true })
+  check("a catalogue link never sets a raid item's heroic level",
+        catH.candidateIlvl == raidRec.ilvl.h,
+        ("got %s, want %s"):format(tostring(catH.candidateIlvl), tostring(raidRec.ilvl.h)))
+  check("...nor its mythic level",
+        catM.candidateIlvl == raidRec.ilvl.m,
+        ("got %s, want %s"):format(tostring(catM.candidateIlvl), tostring(raidRec.ilvl.m)))
+  check("...so Mythic and Heroic actually differ in the browse list",
+        catM.candidateIlvl > catH.candidateIlvl,
+        ("h=%s m=%s"):format(tostring(catH.candidateIlvl), tostring(catM.candidateIlvl)))
+
+  -- ⚠️ THE OTHER HALF OF THE RULE. A REAL DROP'S link is still the best answer
+  -- and must keep winning — it describes the item that actually dropped, upgrade
+  -- track and all. Only the caller can tell the two apart, which is why this is
+  -- a flag and not a property of the record.
+  local dropped = ns.Loot.ScoreItem(chestId, { itemLink = catLink, difficulty = "h" })
+  check("a real drop's link still outranks our table",
+        dropped.candidateIlvl == CATALOGUE_ILVL,
+        ("got %s, want %s"):format(tostring(dropped.candidateIlvl), tostring(CATALOGUE_ILVL)))
+
+  -- The tooltip has to move with the level, or the panel shows two authorities
+  -- disagreeing on one screen — the failure the dungeon fix already named.
+  local rlH = ns.RaidItemLink(chestId, "h")
+  local rlM = ns.RaidItemLink(chestId, "m")
+  check("a raid item gets a difficulty-specific tooltip link", rlH ~= nil and rlM ~= nil)
+  check("...and Heroic's differs from Mythic's", rlH ~= rlM,
+        ("%s vs %s"):format(tostring(rlH), tostring(rlM)))
+  check("...carrying the bonus id for that difficulty's track",
+        (ns.ParseItemLink(rlM) or {}).bonusIDs
+          and ns.ParseItemLink(rlM).bonusIDs[1] == ns.BonusIdsFor("m", raidRec.dropRank)[1],
+        tostring(rlM))
+  -- ⚠️ NIL, NOT A BARE ITEM STRING, for an item we never imported: the guide's
+  -- link is then the best tooltip available and the caller keeps it.
+  check("an item outside our loot table gets no raid link at all",
+        ns.RaidItemLink(880002, "m") == nil, tostring(ns.RaidItemLink(880002, "m")))
+
+  stub.items[chestId] = savedItem
+
+  -- ── THE GREAT VAULT LEVEL ─────────────────────────────────────────────────
+  -- Season 2 rewards the vault one full track above the drop. These are the
+  -- levels the site emits, read off Wowhead and Icy Veins — NOT method.gg, which
+  -- gives 311 to both Hero 3/6 and Hero 4/6 and so contradicts itself.
+  header("Great Vault levels")
+
+  local vN, vH, vM = ns.VaultReward("n"), ns.VaultReward("h"), ns.VaultReward("m")
+  local vD = ns.VaultReward("mplus")
+  check("the payload carries a vault table", ns.HasVaultData())
+  check("Normal raid vaults at Hero 1/6",
+        vN and vN.track == "Hero" and vN.rank == 1 and vN.ilvl == 305,
+        vN and ("%s %d = %d"):format(vN.track, vN.rank, vN.ilvl) or "nil")
+  check("Heroic raid vaults at Myth 1/6 (318)",
+        vH and vH.track == "Myth" and vH.rank == 1 and vH.ilvl == 318,
+        vH and ("%s %d = %d"):format(vH.track, vH.rank, vH.ilvl) or "nil")
+  check("Mythic raid vaults at Myth 6/6 (334)",
+        vM and vM.track == "Myth" and vM.rank == 6 and vM.ilvl == 334,
+        vM and ("%s %d = %d"):format(vM.track, vM.rank, vM.ilvl) or "nil")
+  check("a dungeon vaults at Myth 1/6 (318), above its 311 drop",
+        vD and vD.track == "Myth" and vD.rank == 1 and vD.ilvl == 318
+          and vD.ilvl > ns.MPLUS_ILVL,
+        vD and ("%s %d = %d"):format(vD.track, vD.rank, vD.ilvl) or "nil")
+
+  -- ⚠️ THE OVERLAP IS THE WHOLE REASON THE BONUS ID IS ATTACHED. 318 is Hero 5/6
+  -- AND Myth 1/6, and the resolver assumes the LOWER track with nothing to break
+  -- the tie — so a Heroic vault reward would report "Hero" without it, which is
+  -- the opposite of the claim the toggle makes.
+  local heroicVault = ns.Loot.ScoreItem(chestId, { difficulty = "h", vault = true })
+  local heroicDrop  = ns.Loot.ScoreItem(chestId, { difficulty = "h" })
+  check("a heroic item scored for the vault reports the vault level",
+        heroicVault.candidateIlvl == 318, tostring(heroicVault.candidateIlvl))
+  check("...on the MYTH track, not Hero 5/6 which shares that item level",
+        heroicVault.candidateTrack == "Myth", tostring(heroicVault.candidateTrack))
+  check("...and 318 really is ambiguous without a bonus id",
+        select(1, ns.ResolveTrack(318, {})) == "Hero",
+        "otherwise the check above proves nothing")
+  check("...while the same item WITHOUT the toggle keeps its drop level",
+        heroicDrop.candidateIlvl == raidRec.ilvl.h
+          and heroicDrop.candidateIlvl ~= heroicVault.candidateIlvl,
+        ("drop %s vs vault %s"):format(tostring(heroicDrop.candidateIlvl),
+                                       tostring(heroicVault.candidateIlvl)))
+
+  -- ⚠️ NEVER BELOW THE DROP. The penultimate and final bosses drop Myth 9 (344),
+  -- which is ABOVE the Myth 6/6 (334) the vault otherwise gives — and Blizzard
+  -- hands those out at Myth 9 in the vault too. An item like that must keep 344.
+  local ascended = nil
+  for id, it in pairs(ns.Data().items or {}) do
+    if it.ilvl and it.ilvl.m and it.ilvl.m > 334 and usable(it) and it.slot ~= "TOKEN" then
+      ascended = id; break
+    end
+  end
+  if ascended then
+    local asc = ns.Loot.ScoreItem(ascended, { difficulty = "m", vault = true })
+    local ascDrop = (ns.Data().items[ascended].ilvl or {}).m
+    check("an ascended mythic item keeps its own level in the vault",
+          asc.candidateIlvl == ascDrop,
+          ("vault gave %s, the boss drops %s"):format(tostring(asc.candidateIlvl),
+                                                      tostring(ascDrop)))
+    check("...which is genuinely above the Myth 6/6 vault rung",
+          ascDrop > vM.ilvl, ("%s vs %s"):format(tostring(ascDrop), tostring(vM.ilvl)))
+  else
+    check("a mythic item above Myth 6/6 exists to test the carve-out", false,
+          "no item in the payload drops above 334 — the carve-out is untested")
+  end
+
+  -- ── When the toggle is OFFERED ────────────────────────────────────────────
+  -- ⚠️ NOT ON AUTO. The panel is then following whichever instance you stand in,
+  -- so "the vault level of whatever this is" names no content — and it would
+  -- silently change meaning when you zoned.
+  local savedDiff = ns.Settings.Get("difficulty")
+  local savedVault = ns.Settings.Get("vault")
+
+  ns.Settings.Set("difficulty", "AUTO")
+  check("the Vault toggle is not offered on AUTO", ns.VaultShown() == false)
+  ns.Settings.Set("vault", "on")
+  check("...and stays off even if the setting was left on",
+        ns.VaultOn() == false,
+        "a setting that persists past the control that sets it is a silent state")
+
+  ns.Settings.Set("difficulty", "HEROIC")
+  check("the Vault toggle is offered once a difficulty is chosen", ns.VaultShown() == true)
+  check("...and reads the stored setting", ns.VaultOn() == true)
+  ns.Settings.Set("vault", "off")
+  check("...and off means off", ns.VaultOn() == false)
+
+  -- ⚠️ NO VAULT DATA, NO TOGGLE. An older payload carries no vault table, and
+  -- the control must not offer a level it would have to invent — the same rule
+  -- the GP price follows.
+  local savedTracks = ns.Data().tracks.vault
+  ns.Data().tracks.vault = nil
+  check("an older payload with no vault table hides the toggle entirely",
+        ns.HasVaultData() == false and ns.VaultShown() == false)
+  ns.Settings.Set("vault", "on")
+  check("...and cannot be forced on by the stored setting", ns.VaultOn() == false)
+  local noData = ns.Loot.ScoreItem(chestId, { difficulty = "h", vault = true })
+  check("...and scoring with vault asked for falls back to the drop level",
+        noData.candidateIlvl == raidRec.ilvl.h, tostring(noData.candidateIlvl))
+  ns.Data().tracks.vault = savedTracks
+
+  ns.Settings.Set("difficulty", savedDiff)
+  ns.Settings.Set("vault", savedVault and "on" or "off")
+
+  -- ── BOTH SCORERS AGREE ────────────────────────────────────────────────────
+  -- The item column is scored by ScoreItem and the detail pane's roster ranking
+  -- by RankRaiders. They run side by side on one screen, so a second copy of the
+  -- vault arithmetic would be two chances to disagree in front of the raid.
+  local rankVault = ns.Loot.RankRaiders(chestId, { difficulty = "h", vault = true })
+  local rankDrop  = ns.Loot.RankRaiders(chestId, { difficulty = "h" })
+  if rankVault and rankDrop and rankVault[1] and rankDrop[1] then
+    check("the roster ranking honours vault mode too",
+          (rankVault[1].ilvlGain or 0) > (rankDrop[1].ilvlGain or 0),
+          ("vault gain %s vs drop gain %s"):format(tostring(rankVault[1].ilvlGain),
+                                                   tostring(rankDrop[1].ilvlGain)))
+  else
+    check("a roster is loaded so the two scorers can be compared",
+          rankVault ~= nil and rankDrop ~= nil,
+          "without a payload this comparison proves nothing")
+  end
+
+  -- An ordinary mythic item DOES move up to the vault rung.
+  local plainMythic = nil
+  for id, it in pairs(ns.Data().items or {}) do
+    if it.ilvl and it.ilvl.m and it.ilvl.m < 334 and usable(it) and it.slot ~= "TOKEN" then
+      plainMythic = id; break
+    end
+  end
+  if plainMythic then
+    local pm = ns.Loot.ScoreItem(plainMythic, { difficulty = "m", vault = true })
+    check("an ordinary mythic item vaults up to Myth 6/6 (334)",
+          pm.candidateIlvl == 334, tostring(pm.candidateIlvl))
+  end
+
   -- ── Eligibility fails OPEN ────────────────────────────────────────────────
   -- The guide entry carries no class list, and an empty one reads as the addon
   -- being broken. An over-broad list is visibly wrong and fixable.

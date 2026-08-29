@@ -45,6 +45,16 @@ Settings.SPEC = {
         .. "Dungeons shows the season's Mythic+ loot at its fixed drop level.",
   },
   {
+    key = "vault", label = "Great Vault Levels", default = false,
+    kind = "toggle",
+    -- Paired with the Loot tab's Vault checkbox, which is the same setting. It
+    -- lives here too so it survives a reload like every other view choice, and
+    -- so the one place that lists what the addon can do lists this as well.
+    help = "Show each item at the level it would arrive at in the WEEKLY CHEST rather "
+        .. "than the level the boss drops — a full track higher, so a Heroic kill is "
+        .. "worth a Myth 1/6 vault slot. Only offered once a difficulty is chosen.",
+  },
+  {
     key = "hideMinimap", label = "Hide Minimap Button", default = false,
     kind = "toggle",
     help = "The button is the only way in that is not a typed command, so it is "

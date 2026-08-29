@@ -121,6 +121,8 @@ local FOOT_Y, FOOT_H = 509, 51
 -- WIDER SINCE SESSION 251: the label now names the CONTENT as well as the
 -- difficulty ("Raid: Heroic"), which no longer fits 100px.
 local DIFF_X, DIFF_Y, DIFF_W, DIFF_H = 460, 60, 140, 24
+-- Gap between the Vault checkbox and the difficulty control it sits beside.
+local VAULT_GAP = 12
 local DIFF_CHOICES = { "AUTO", "NORMAL", "HEROIC", "MYTHIC", "MPLUS" }
 local DIFF_LABEL = {
   AUTO = "Auto", NORMAL = "Raid: Normal", HEROIC = "Raid: Heroic",
@@ -653,6 +655,39 @@ local function buildLootControls()
     or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
   frame.diff:SetPoint("TOPLEFT", DIFF_X, -DIFF_Y)
   if frame.diff.SetPillState then frame.diff:SetPillState(true) end
+  -- ORANGE, per the mock. It was built purple like every other pill on the row,
+  -- but the tabs and filter toggles are VIEWS and this one selects CONTENT —
+  -- which is the distinction the colour is drawing.
+  if frame.diff.SetPillColor and ns.Style then
+    frame.diff:SetPillColor(ns.Style.COLOR.darkOrange)
+  end
+
+  -- ── Great Vault toggle, left of the difficulty control ────────────────────
+  -- Shows the item level each piece becomes in the WEEKLY CHEST rather than the
+  -- one the boss drops — a full track higher in Season 2, so a Heroic kill is
+  -- worth a Myth 1/6 vault slot. That is the number that decides whether a
+  -- Heroic clear is worth doing, and it lived nowhere in the addon.
+  --
+  -- ⚠️ ONLY WITH AN EXPLICIT CONTENT CHOICE. On AUTO the panel is following
+  -- whatever instance you are standing in, and "the vault level of whatever this
+  -- is" is a claim with no stated subject. Pick a difficulty and it appears.
+  --
+  -- ⚠️ AND ONLY IF THE PAYLOAD KNOWS THE LEVELS. An older payload carries no
+  -- vault table; the control stays hidden rather than showing a computed guess,
+  -- exactly as the GP price shows nothing without its constants.
+  frame.vault = ns.Style and ns.Style.Check(frame, "Vault", 14)
+  if frame.vault then
+    frame.vault:SetPoint("TOPRIGHT", frame.diff, "TOPLEFT", -VAULT_GAP, -3)
+    frame.vault:SetChecked(ns.VaultOn())
+    frame.vault:SetScript("OnClick", function(self)
+      self:SetChecked(not self:GetChecked())
+      if ns.Settings then
+        ns.Settings.Set("vault", self:GetChecked() and "on" or "off")
+      end
+      state.sel, state.colScroll, state.rankScroll = 1, 0, 0
+      Panel.Refresh()
+    end)
+  end
 
   -- The caret. A dropdown that looks like a button gets clicked once and
   -- abandoned; the design draws the affordance, so it is drawn.
@@ -1183,7 +1218,9 @@ local function scoreEntry(e)
         itemID = e.itemID, unusable = e.unusable },
       state.usableSet)
   end
-  local scored = ns.Loot.ScoreItem(e.itemID, { itemLink = e.link, record = record })
+  local scored = ns.Loot.ScoreItem(e.itemID, {
+    itemLink = e.link, record = record, catalogue = e.catalogue,
+    vault = ns.VaultOn() })
   e.quality = scored.quality
   e.ineligible = scored.ineligible or false
   e.reason = scored.reason
@@ -1292,10 +1329,27 @@ local function itemEntries()
           -- tooltips the item at its BASE level, which contradicted the item
           -- level printed right beneath it. ns.MplusItemLink carries the Hero
           -- 3/6 bonus id so the client renders the version that really drops.
+          -- ⚠️ RAID LOOT NEEDS THE SAME TREATMENT, and did not get it until
+          -- Session 252. The guide's link is not difficulty-aware, so it
+          -- tooltipped one item level whether Heroic or Mythic was selected.
+          -- ns.RaidItemLink attaches the SELECTED difficulty's bonus id and
+          -- returns nil for an item we never imported, where the guide's link
+          -- remains the best answer we have.
           local link = j.link
-          if ns.ContentMode() == "mplus" then link = ns.MplusItemLink(j.itemID) end
+          if ns.ContentMode() == "mplus" then
+            link = ns.MplusItemLink(j.itemID)
+          else
+            link = ns.RaidItemLink(j.itemID, ns.DifficultyKey()) or link
+          end
           out[#out + 1] = {
             itemID = j.itemID, name = j.name, link = link,
+            -- ⚠️ THE LINK IS FOR THE TOOLTIP; IT NEVER DECIDES THE ITEM LEVEL
+            -- on this list. Even the upgraded link above is only as good as the
+            -- client's item cache, and an UNCACHED link answers with the base
+            -- level — data-shaped and wrong, the trap the inspection rule
+            -- already names. Our payload states the per-difficulty level
+            -- outright, needs no cache, and cannot disagree with the site.
+            catalogue = true,
             slotText = j.slot, armorType = j.armorType,
             -- Blizzard's per-entry eligibility flag, carried so the verdict does
             -- not need a second read of the journal to find it again.
@@ -1796,7 +1850,14 @@ end
 local function renderRanking(itemID)
   -- RankingFor, not RankRaiders: when the runner has broadcast a ranking for
   -- this item, theirs is the one everyone shows.
-  local ranked, _all, meta, fromRunner = ns.Loot.RankingFor(itemID)
+  --
+  -- ⚠️ VAULT MODE REACHES ONLY THE LOCAL CALCULATION, and that is the right
+  -- place for it. A broadcast ranking belongs to a LIVE DROP, where the question
+  -- is who gets the item that just fell — not what it would have been worth in
+  -- next week's chest — and the runner's numbers stay authoritative there by
+  -- rule. Vault mode is a planning view over the full loot table.
+  local ranked, _all, meta, fromRunner =
+    ns.Loot.RankingFor(itemID, { vault = ns.VaultOn() })
   setHeaders("RAIDER", "UPGRADE", "GAIN", "PRIORITY")
 
   if not ranked then
@@ -2522,6 +2583,15 @@ function Panel.Refresh()
           and ns.Style.COLOR.orange or ns.Style.COLOR.text))
       end
     end
+  end
+
+  -- The Vault toggle rides with the difficulty control, but only once a content
+  -- choice has actually been made and only if the payload knows the levels.
+  if frame.vault then
+    frame.vault:SetShown(onLoot and ns.VaultShown())
+    -- Re-read rather than trust the widget: the setting is also reachable from
+    -- the Settings window, and the two must never disagree on screen.
+    frame.vault:SetChecked(ns.VaultOn())
   end
 
   frame.season:SetShown(onStandings)
