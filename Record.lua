@@ -641,10 +641,15 @@ local function upsertDrop(encounterID, info)
       rolls       = {},
       timestamp   = time(),
       boss        = bossNameFor(encounterID) or "Unknown",
-      -- The EXPORT's encounter id is the journal id from ENCOUNTER_END, which is
-      -- what pairs with the boss NAME. The loot-history id is only a fallback,
-      -- for the case where a drop is seen without an ENCOUNTER_END (a /reload
-      -- after the kill, or an addon loaded mid-raid).
+      -- ⚠️ THIS IS THE DungeonEncounter ID, NOT THE JOURNAL ID. The previous
+      -- comment here called it "the journal id from ENCOUNTER_END" and that is
+      -- simply wrong: ENCOUNTER_END reports the DungeonEncounter id (Entombed
+      -- Sentinels = 3445), while the Encounter Journal and our boss strip use
+      -- the journal id (2874). Believing the comment is what left Current Drops
+      -- filtering one space against the other and showing nothing, ever.
+      -- The payload now carries both; see ns.EncounterIdsFor.
+      -- The loot-history id is only a fallback, for a drop seen without an
+      -- ENCOUNTER_END (a /reload after the kill, or an addon loaded mid-raid).
       encounterID = currentEncounterID or encounterID or 0,
     }
     s.items[#s.items + 1] = e

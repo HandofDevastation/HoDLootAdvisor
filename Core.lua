@@ -1980,7 +1980,22 @@ end
 --- drop filter directly.
 function ns.EncounterIdsFor(tileId)
   if not tileId then return nil end
-  if ns.ContentMode() ~= "mplus" then return tileId end
+  if ns.ContentMode() ~= "mplus" then
+    -- ⚠️ A RAID BOSS HAS TWO IDS AND THE DROP CARRIES THE OTHER ONE
+    -- (Session 253). The tile is keyed by JOURNAL encounter id, because that is
+    -- what the Encounter Journal answers with. A recorded drop carries the id
+    -- from ENCOUNTER_END, which is the DungeonEncounter id — Entombed Sentinels
+    -- is 2874 in the journal and 3445 on the kill. Returning the tile id alone
+    -- compared 3445 against 2874 and matched nothing, so Current Drops read
+    -- "NO DROPS CURRENTLY" on every raid boss forever; a full LFR recorded
+    -- eighteen drops and displayed none of them.
+    -- The payload now ships `enc` alongside, so accept EITHER.
+    local set = { [tileId] = true }
+    local data = ns.Data()
+    local boss = data and (data.bosses or {})[tileId]
+    if boss and boss.enc then set[boss.enc] = true end
+    return set
+  end
   local set = {}
   for _, enc in ipairs(ns.Journal and ns.Journal.CachedEncounters(tileId) or {}) do
     if enc.id then set[enc.id] = true end

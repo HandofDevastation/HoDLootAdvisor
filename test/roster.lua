@@ -602,6 +602,37 @@ do
   local first = ns.Payload.Current().roster[1]
   local key = ns.Comms.Normalize(first.n)
 
+  -- ⚠️ A SECOND EXPORT RAIDER HAS TO BE STANDING HERE (Session 253). Since the
+  -- ranking dropped absent roster members, only people the group scan has seen
+  -- are ranked — and this fixture had seeded exactly ONE, the diverged raider.
+  -- The "no divergence, no marker" checks below then had no subject at all and
+  -- failed for want of a raider rather than for anything they test. A real raid
+  -- has several of the team present; the fixture now does too, which is also
+  -- what makes the absent-member filter genuinely exercised rather than
+  -- vacuously true.
+  local second = ns.Payload.Current().roster[2]
+  if second then
+    Roster.seen[ns.Comms.Normalize(second.n)] = {
+      name = second.n, unit = "raid10", class = second.c, spec = second.s,
+    }
+  end
+
+  -- ⚠️ THE ABSENT HALF OF THE TEAM MUST NOT BE RANKED (Jason, Session 253).
+  -- An LFR ranked twenty-two strangers alongside sixteen guild raiders sitting
+  -- at home and reported "31 of 38 raiders gain from it". On a guild night the
+  -- same fault is quieter and worse: someone who did not turn up outranks
+  -- someone who did.
+  do
+    local absent = ns.Payload.Current().roster[3]
+    local present = {}
+    for _, r in ipairs(ns.Payload.EffectiveRoster()) do present[r.n] = true end
+    check("an export raider standing in the group is ranked",
+          present[first.n] == true and present[second.n] == true)
+    check("...and one who did not turn up is not",
+          absent ~= nil and present[absent.n] == nil,
+          absent and absent.n or "no third raider in the fixture")
+  end
+
   --- Find a Hunter trinket whose tag DIFFERS between the two specs, and one
   --- where it does not. Chosen from the real tables rather than hardcoded: a
   --- literal id here would rot the first time a tier's grades are refreshed,

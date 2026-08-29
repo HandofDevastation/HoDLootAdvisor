@@ -329,8 +329,41 @@ function Payload.EffectiveRoster()
   if not data then return {} end
   if not ns.Roster then return data.roster end
 
+  -- ⚠️ IN A GROUP, RANK ONLY THE PEOPLE IN IT (Jason, Session 253). The roster
+  -- is the raid TEAM, not the people standing here — so an LFR showed twenty-two
+  -- strangers alongside sixteen guild raiders who were at home, and "31 of 38
+  -- raiders gain from it" counted absentees. On a guild night it is the same
+  -- fault, quieter: anyone who did not turn up still ranks above people who did.
+  --
+  -- OUT OF A GROUP THE WHOLE ROSTER STAYS, deliberately. Browsing the loot table
+  -- solo is planning, and an empty list there would be a worse bug than a long
+  -- one — the same fail-open reasoning as guildMemberUserIds on the site.
+  local inGroup = IsInGroup and IsInGroup() or false
+
+  -- Roster.RealmFor answers nil only when the group scan has never seen them,
+  -- which is exactly "not here". Someone present but not yet INSPECTED still has
+  -- a roster entry, so nobody is dropped for being slow to resolve.
+  local function seen(name)
+    return ns.Roster.RealmFor and ns.Roster.RealmFor(name) ~= nil
+  end
+
+  -- ⚠️ IF THE SCAN HAS SEEN NONE OF THEM, DO NOT FILTER. Zero matches means we
+  -- have no evidence about who is here — a cold scan, a payload for a different
+  -- team — not that the whole team is absent. Filtering on that empties the
+  -- list, and an empty ranking reads as "nobody wants this" rather than as a
+  -- broken lookup. Same fail-open reasoning as guildMemberUserIds on the site:
+  -- listing one absentee too many is recoverable, listing nobody is not.
+  local anyPresent = false
+  if inGroup then
+    for _, r in ipairs(data.roster) do
+      if seen(r.n) then anyPresent = true break end
+    end
+  end
+
   local out = {}
-  for _, r in ipairs(data.roster) do out[#out + 1] = r end
+  for _, r in ipairs(data.roster) do
+    if not (inGroup and anyPresent) or seen(r.n) then out[#out + 1] = r end
+  end
 
   for _, entry in ipairs(ns.Roster.AdHoc()) do
     local ident = ns.Roster.IdentityFor(entry.name)

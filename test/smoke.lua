@@ -3224,8 +3224,29 @@ header("Dungeons as a content mode — tiles, pooled loot, and scoring")
 
   -- ── Back in raid mode, nothing about the tile changes shape ──────────────
   ns.Settings.Set("difficulty", "HEROIC")
-  check("a raid tile is still a single boss id, not a set",
-        ns.EncounterIdsFor(2849) == 2849, tostring(ns.EncounterIdsFor(2849)))
+  -- ⚠️ THIS CHECK USED TO ASSERT THE BUG. It read "a raid tile is still a
+  -- single boss id, not a set" and passed for months while Current Drops showed
+  -- nothing on every raid boss: a drop carries the DungeonEncounter id from
+  -- ENCOUNTER_END (Entombed Sentinels = 3445) and the tile is the JOURNAL id
+  -- (2874), so filtering one against the other matched nothing. A full LFR
+  -- recorded eighteen drops and displayed none. The harness agreed with the
+  -- belief that was also written into the code — exactly the S244 trap.
+  do
+    local boss = ns.Data() and (ns.Data().bosses or {})[2849]
+    local hadEnc = boss and boss.enc
+    if boss then boss.enc = 3379 end   -- Nymrissa: 2849 in the journal, 3379 on the kill
+
+    local ids = ns.EncounterIdsFor(2849)
+    check("a raid tile resolves to BOTH id spaces, so a recorded drop can match it",
+          type(ids) == "table" and ids[2849] == true and ids[3379] == true,
+          type(ids) == "table" and "journal=" .. tostring(ids[2849]) .. " kill=" .. tostring(ids[3379])
+            or tostring(ids))
+
+    if boss then boss.enc = hadEnc end
+    local bare = ns.EncounterIdsFor(2849)
+    check("...and a boss with no kill id still matches on the journal id alone",
+          type(bare) == "table" and bare[2849] == true and bare[3379] == nil)
+  end
   check("...and raid mode is raid mode", ns.ContentMode() == "raid", ns.ContentMode())
 
   ns.Settings.Set("difficulty", prevMode or "AUTO")
