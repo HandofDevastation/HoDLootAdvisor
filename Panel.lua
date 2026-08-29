@@ -2053,16 +2053,26 @@ local function renderItemColumn(entries)
   if ns.Diagnostics and total > 0 and frame.itemRows[1] then
     local r = frame.itemRows[1]
     local function describe(fs)
-      local ok, path, size, flags = pcall(fs.GetFont, fs)
+      local ok, path, size = pcall(fs.GetFont, fs)
+      -- ⚠️ TEXT COLOUR ALPHA IS NOT OBJECT ALPHA. GetAlpha() already said 1 while
+      -- the line drew nothing; SetTextColor carries its OWN fourth value, and a
+      -- zero there paints a perfectly healthy string in nothing.
+      local cok, r, g, b, a = pcall(fs.GetTextColor, fs)
+      -- ⚠️ AND A REGION WITH AN UNRESOLVED ANCHOR CHAIN HAS NO RECT AND DOES NOT
+      -- DRAW, while still reporting IsVisible() true and a real string width.
+      -- nil here would be the whole answer.
+      local left, bottom, w, h = fs:GetRect()
       return {
         text = tostring(fs:GetText()),
+        color = cok and ("%.2f %.2f %.2f alpha=%.2f"):format(r or -1, g or -1, b or -1, a or -1)
+                or "GetTextColor errored",
+        rect = ("left=%s bottom=%s w=%s h=%s")
+                 :format(tostring(left), tostring(bottom), tostring(w), tostring(h)),
+        top = tostring(fs:GetTop()),
         visible = fs:IsVisible() and true or false,
         stringWidth = fs:GetStringWidth(),
-        width = fs:GetWidth(), height = fs:GetHeight(),
-        alpha = fs:GetAlpha(),
         font = ok and tostring(path) or "GetFont errored",
         fontSize = ok and tostring(size) or "-",
-        flags = ok and tostring(flags) or "-",
       }
     end
     ns.Diagnostics.Note("itemRowFont", {
