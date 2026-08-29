@@ -442,11 +442,42 @@ do
   local data = ns.Payload.Decode(encoded)
   ns.Payload.Store(data, encoded)
 
+  -- ⚠️ THE TEAM HAS TO BE STANDING HERE (Session 253). The ranking now counts
+  -- only export raiders the group scan has SEEN, so a fixture that never puts
+  -- any of them in the instance ranks an empty list and every check below it
+  -- fails for want of a raider rather than for anything it tests. This is a
+  -- guild night with strangers mixed in, which is the situation the whole file
+  -- is about; the absent-member filter is exercised deliberately further down,
+  -- where roster[3] is left out of the group on purpose.
+  -- TWO of them, not all twenty-four: this file's premise is a raid of
+  -- STRANGERS, and seeding the whole export would also put every one of them in
+  -- the unresolved list, which is a different thing entirely.
+  for i = 1, 2 do
+    local r = data.roster[i]
+    if r then
+      Roster.seen[ns.Comms.Normalize(r.n)] = { name = r.n, unit = "raid20", class = r.c, spec = r.s }
+    end
+  end
+
   local base = #data.roster
   local effective = ns.Payload.EffectiveRoster()
   check("the export's own roster is all there", base == 24, base)
-  check("...plus the strangers we managed to resolve",
-        #effective > base, ("%d vs %d"):format(#effective, base))
+
+  -- ⚠️ THIS CHECK USED TO READ "plus the strangers we managed to resolve" and
+  -- assert #effective > base — i.e. the whole export PLUS everyone here. That is
+  -- the behaviour Jason rejected (Session 253): the export is the raid TEAM, and
+  -- in an LFR it put sixteen people who were at home into the ranking beside the
+  -- strangers, reporting "31 of 38 raiders gain from it". The ranking is now the
+  -- people PRESENT — the two export raiders standing here plus the strangers we
+  -- resolved — so it is SMALLER than the export, not larger.
+  local fromExport, strangers = 0, 0
+  for _, r in ipairs(effective) do
+    if r.adhoc then strangers = strangers + 1 else fromExport = fromExport + 1 end
+  end
+  check("only export raiders actually in the instance are ranked",
+        fromExport == 2, ("%d of %d on the export"):format(fromExport, base))
+  check("...alongside the strangers we managed to resolve",
+        strangers > 0, ("%d strangers"):format(strangers))
 
   -- Only the resolved ones. A stranger we cannot describe stays out of the
   -- ranking and stays IN the unresolved list.
@@ -464,8 +495,14 @@ do
   table.sort(unresolvedNames)
   -- Basegear is here because every reading it produced was impossible for this
   -- season, so nothing survived — which is the correct outcome, and visible.
+  -- Dåmir1 and Vörnix0 are the two export raiders now standing here (see the
+  -- fixture note above). They belong on this list: nobody has inspected them, so
+  -- there is no LIVE reading — the report flags them inPayload, which is exactly
+  -- the distinction it exists to draw between "we cannot see them" and "we do
+  -- not need to".
   check("and the rest are named as unresolved rather than dropped",
-        table.concat(unresolvedNames, ",") == "Basegear,Coldcache,Faraway,Loggedoff,Neveranswers",
+        table.concat(unresolvedNames, ",")
+          == "Basegear,Coldcache,Dåmir1,Faraway,Loggedoff,Neveranswers,Vörnix0",
         table.concat(unresolvedNames, ","))
 
   -- The end of the whole chain: a stranger, resolved in game, ranked for a real
@@ -623,7 +660,10 @@ do
   -- same fault is quieter and worse: someone who did not turn up outranks
   -- someone who did.
   do
+    -- Take roster[3] back OUT of the instance: the fixture above puts the whole
+    -- team in, so somebody has to actually be missing for this to mean anything.
     local absent = ns.Payload.Current().roster[3]
+    if absent then Roster.seen[ns.Comms.Normalize(absent.n)] = nil end
     local present = {}
     for _, r in ipairs(ns.Payload.EffectiveRoster()) do present[r.n] = true end
     check("an export raider standing in the group is ranked",

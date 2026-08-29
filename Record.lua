@@ -653,6 +653,15 @@ local function upsertDrop(encounterID, info)
       encounterID = currentEncounterID or encounterID or 0,
     }
     s.items[#s.items + 1] = e
+
+    -- ⚠️ THIS IS THE OPENER FOR MODERN GROUP LOOT (Session 253). The panel's
+    -- only trigger was START_LOOT_ROLL, the legacy roll event, which retail
+    -- group loot does not fire — so a live LFR recorded eighteen drops with
+    -- "Open Panel On A Drop" enabled and the window never appeared. Fires on a
+    -- BRAND NEW drop only: this function re-enumerates the whole encounter for
+    -- four minutes after a kill, and reopening on every pass would fight anyone
+    -- who closed it.
+    if ns.Loot and ns.Loot.AutoOpen then ns.Loot.AutoOpen("lootHistoryDrop") end
   end
 
   -- Refresh anything that was not resolvable on an earlier pass.

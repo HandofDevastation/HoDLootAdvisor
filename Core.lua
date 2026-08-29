@@ -1335,6 +1335,44 @@ function ns.DifficultyKey()
   return key or "h", id
 end
 
+--- Walking into an instance returns the Content control to AUTO.
+---
+--- ⚠️ A STICKY MANUAL CHOICE BECOMES A LIE THE NEXT TIME YOU ZONE IN (Jason,
+--- Session 253). The control read "Raid: Heroic" through an entire LFR, so the
+--- Full Loot Table scored every item at Heroic item levels in a wing that
+--- cannot drop them — a wrong number under a confident label, which is what
+--- Core §7.7 forbids. Nothing was broken; the control simply remembered a
+--- choice made somewhere else.
+---
+--- A MANUAL PICK STILL WINS AND STILL STICKS. This resets only on the boundary
+--- where the old choice is knowably stale — the moment you enter somewhere new.
+--- Inside the instance, choose whatever you like and it holds.
+---
+--- Announced rather than silent: a control that changes itself without saying so
+--- is worse than one that is wrong, because the next person to read it has no
+--- reason to doubt it.
+local contentWatcher = CreateFrame and CreateFrame("Frame")
+if contentWatcher then
+  contentWatcher:RegisterEvent("PLAYER_ENTERING_WORLD")
+  contentWatcher:SetScript("OnEvent", function()
+    if not (ns.Settings and GetInstanceInfo) then return end
+    local ok, _, instanceType = pcall(GetInstanceInfo)
+    if not ok then return end
+    -- Only somewhere the control means something. Zoning into a city must not
+    -- discard a choice made for the raid you are about to walk back into.
+    if instanceType ~= "raid" and instanceType ~= "party" and instanceType ~= "scenario" then
+      return
+    end
+    local was = ns.Settings.Get("difficulty")
+    if was == nil or was == "AUTO" then return end
+    ns.Settings.Set("difficulty", "AUTO")
+    if ns.Print then
+      ns.Print(("Content set back to Auto on entering the instance (was %s)."):format(tostring(was)))
+    end
+    if ns.Panel and ns.Panel.Refresh then pcall(ns.Panel.Refresh) end
+  end)
+end
+
 -- ---------------------------------------------------------------------------
 -- Window placement
 -- ---------------------------------------------------------------------------

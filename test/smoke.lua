@@ -521,6 +521,13 @@ local noGap = ns.Loot.ChatLines(chestId, { difficulty = "h" })
 check("the gap can be turned off", noGap[2]:find("%-%d") == nil, noGap[2])
 ns.Settings.Set("showGap", "on")
 
+-- ⚠️ THE TEAM IS IN THE RAID (Session 253). Ranking counts only export raiders
+-- the group scan has seen, so with stub.inRaid set and nobody from the payload
+-- standing here the chat post would have nobody to name.
+for _, r in ipairs((ns.Payload.Current() or {}).roster or {}) do
+  ns.Roster.seen[ns.Comms.Normalize(r.n)] = { name = r.n, unit = "raid20", realm = "Stormrage" }
+end
+
 -- Nothing may reach the raid without a deliberate trigger.
 stub.sent = {}
 stub.inRaid = true

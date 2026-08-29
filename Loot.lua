@@ -733,6 +733,37 @@ function Loot.ClearRecent()
   if ns.Panel then ns.Panel.Refresh() end
 end
 
+--- Open the panel for a drop, when the runner has asked for that.
+---
+--- ⚠️ TWO PATHS PRODUCE A DROP AND ONLY ONE USED TO REACH HERE (Session 253).
+--- This lived inline in HandleRoll, which is driven by START_LOOT_ROLL — the
+--- LEGACY roll system. Modern group loot arrives through C_LootHistory instead,
+--- so in a live LFR eighteen drops were recorded across two bosses and the
+--- panel never opened once, with "Open Panel On A Drop" switched ON. Nothing
+--- errored: the opener simply was not on that path.
+---
+--- ⚠️ AND I CALLED IT "NOT A BUG" FIRST, from the setting's default being false
+--- without checking whether Jason had turned it on. He had.
+---
+--- The decision is recorded on EVERY branch, including the "setting is off" one
+--- — a log that goes quiet in exactly the case it was added to explain is the
+--- S249 trap, and this is a feature whose whole failure mode is silence.
+function Loot.AutoOpen(why)
+  local on = ns.Settings and ns.Settings.Get("autoOpen") and true or false
+  if ns.Diagnostics then
+    ns.Diagnostics.Note("autoOpen", { why = why, enabled = on, havePanel = ns.Panel ~= nil })
+  end
+  if not (on and ns.Panel) then return false end
+
+  -- pcall'd on its own so a fault in the panel can never break the scoring and
+  -- recording path, which is the half that matters when loot is on the line.
+  local shown, err = pcall(ns.Panel.Show)
+  if not shown and ns.Diagnostics then
+    ns.Diagnostics.Note("panelShowError", { why = why, err = tostring(err) })
+  end
+  return shown and true or false
+end
+
 function Loot.HandleRoll(roll)
   if not roll or not roll.itemID then
     ns.Warn("loot roll with no resolvable item — nothing to score.")
@@ -753,12 +784,7 @@ function Loot.HandleRoll(roll)
   -- pcall'd on its own so the reverse is also true — a fault in the panel can
   -- never break the scoring and recording path, which is the half that matters
   -- when loot is actually on the line.
-  if ns.Panel and ns.Settings and ns.Settings.Get("autoOpen") then
-    local shown, err = pcall(ns.Panel.Show)
-    if not shown and ns.Diagnostics then
-      ns.Diagnostics.Note("panelShowError", tostring(err))
-    end
-  end
+  Loot.AutoOpen("startLootRoll")
 
   local out = Loot.ScoreItem(roll.itemID, {
     itemLink   = roll.itemLink,

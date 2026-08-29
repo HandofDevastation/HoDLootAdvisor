@@ -347,22 +347,20 @@ function Payload.EffectiveRoster()
     return ns.Roster.RealmFor and ns.Roster.RealmFor(name) ~= nil
   end
 
-  -- ⚠️ IF THE SCAN HAS SEEN NONE OF THEM, DO NOT FILTER. Zero matches means we
-  -- have no evidence about who is here — a cold scan, a payload for a different
-  -- team — not that the whole team is absent. Filtering on that empties the
-  -- list, and an empty ranking reads as "nobody wants this" rather than as a
-  -- broken lookup. Same fail-open reasoning as guildMemberUserIds on the site:
-  -- listing one absentee too many is recoverable, listing nobody is not.
-  local anyPresent = false
-  if inGroup then
-    for _, r in ipairs(data.roster) do
-      if seen(r.n) then anyPresent = true break end
-    end
-  end
-
+  -- ⚠️ NO FAIL-OPEN HERE, AND THAT IS DELIBERATE (Jason, Session 253, correcting
+  -- my first version). I built an exception for "the scan has seen nobody yet",
+  -- reasoning that an empty list reads as broken. Jason's answer is that an
+  -- empty list is CORRECT and expected: joining an LFR should show nobody and
+  -- backfill as the inspect passes complete. Showing the last-imported raid
+  -- team instead is not a safe default, it is the clutter being complained
+  -- about — sixteen people who are demonstrably somewhere else.
+  --
+  -- The fail-open lives one level up instead, and it is the honest one: OUT of a
+  -- group we show the whole imported roster, because browsing solo is planning
+  -- and there is no "here" to filter against.
   local out = {}
   for _, r in ipairs(data.roster) do
-    if not (inGroup and anyPresent) or seen(r.n) then out[#out + 1] = r end
+    if not inGroup or seen(r.n) then out[#out + 1] = r end
   end
 
   for _, entry in ipairs(ns.Roster.AdHoc()) do
