@@ -3477,10 +3477,20 @@ header("Dungeons as a content mode — tiles, pooled loot, and scoring")
           type(ids) == "table" and "journal=" .. tostring(ids[2849]) .. " kill=" .. tostring(ids[3379])
             or tostring(ids))
 
-    if boss then boss.enc = hadEnc end
+    -- ⚠️ THE FALLBACK MUST BE STAGED, NOT INHERITED (Session 254). This restored
+    -- the boss's ORIGINAL value and then asserted there was no kill id — which
+    -- held only while the emitted payload carried none. The moment the emitter
+    -- started shipping `enc`, the restore put a real id back and the check for
+    -- the no-id path failed, having never actually tested that path on its own
+    -- terms. The S251 rule exactly: a fixture that differs from production in a
+    -- field the code branches on is testing a system that does not exist — and
+    -- here it was the fixture QUIETLY AGREEING with production instead.
+    if boss then boss.enc = nil end
     local bare = ns.EncounterIdsFor(2849)
     check("...and a boss with no kill id still matches on the journal id alone",
           type(bare) == "table" and bare[2849] == true and bare[3379] == nil)
+
+    if boss then boss.enc = hadEnc end
   end
   check("...and raid mode is raid mode", ns.ContentMode() == "raid", ns.ContentMode())
 
