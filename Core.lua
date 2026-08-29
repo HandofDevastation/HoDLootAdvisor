@@ -447,6 +447,40 @@ function ns.GearReportingSummary()
   return { reporting = reporting, total = #raid.roster, missing = missing }
 end
 
+--- Guarantee every entry carries a VISIBLE name, filling from our own catalogue
+--- and falling back to the id. Returns how many it had to fill.
+---
+--- ⚠️ AN EMPTY STRING IS A TRUTHY NAME IN LUA, AND THAT IS THE WHOLE BUG
+--- (Session 253). Same family as the recorded "ZERO IS TRUTHY IN LUA" rule:
+--- `e.name or fallback` returns "" unchanged, and `if not e.name` never fires
+--- for "". The panel's old guard lived inside its journal branch, promised in
+--- its own comment never to leave "a blank row, which reads as a bug", and
+--- could not keep that promise for the one value that produces exactly that.
+--- The recorded-drops branch had no guard at all.
+---
+--- THE SYMPTOM: an item's second line rendered fine — proving the entry existed
+--- and had scored — while the name was simply absent, until switching boss
+--- forced a re-read from a warmer source. That "it appears if I change view"
+--- shape is what this exists to end.
+---
+--- Lives HERE rather than in Panel.lua because the harness does not load window
+--- files, and a rule this project already wrote says logic must be testable.
+function ns.FillItemNames(entries, catalogue)
+  catalogue = catalogue or ((ns.Data() or {}).items or {})
+  local filled = 0
+  for _, e in ipairs(entries or {}) do
+    if e and (e.name == nil or e.name == "") then
+      local rec = catalogue[e.itemID]
+      local fromUs = rec and rec.name
+      if fromUs == "" then fromUs = nil end
+      -- A visible "item:270160" is a bad name; a blank row is an invisible one.
+      e.name = fromUs or ("item:" .. tostring(e.itemID))
+      filled = filled + 1
+    end
+  end
+  return filled
+end
+
 --- Make sure every name on screen is a real one, and come back when it is not.
 ---
 --- ⚠️ THE RECURRING ADDON BUG, FIXED AT THE SOURCE RATHER THAN PER VIEW (Jason,

@@ -982,6 +982,43 @@ check("a run can be re-tagged by hand", #R.Sessions("guild") == 3)
 R.SetKind(personalRuns[1].index, "personal")
 check("and tagged back", #R.Sessions("personal") == 1)
 
+-- ── A blank name is not a name ──────────────────────────────────────────────
+--
+-- ⚠️ THE BUG JASON ACTUALLY HIT, and the one my first fix missed. An item's
+-- SECOND line rendered fine — so the entry existed and had scored — while the
+-- name was simply absent until switching boss. `row.name:SetText(e.name or "?")`
+-- draws blank for exactly one value: the empty string, because "" is TRUTHY in
+-- Lua, so `or` never reaches the fallback and `if not e.name` never fires.
+-- Same family as the recorded ZERO-IS-TRUTHY rule.
+do
+  header("An empty item name falls back rather than drawing blank")
+
+  local catalogue = { [111] = { name = "Catalogued Item" }, [222] = { name = "" } }
+  local entries = {
+    { itemID = 111, name = "" },        -- the killer: truthy, and invisible
+    { itemID = 222, name = nil },       -- absent, and our catalogue is ALSO ""
+    { itemID = 333 },                   -- nothing anywhere
+    { itemID = 444, name = "Real Name" },
+  }
+  local filled = ns.FillItemNames(entries, catalogue)
+
+  check("an empty name is treated as missing, not as a name",
+        entries[1].name == "Catalogued Item", tostring(entries[1].name))
+  check("...and an empty name in OUR catalogue is not swapped in either",
+        entries[2].name == "item:222", tostring(entries[2].name))
+  check("...with the id as the last resort", entries[3].name == "item:333",
+        tostring(entries[3].name))
+  check("a real name is left alone", entries[4].name == "Real Name")
+  check("...and the count reflects only what had to be filled", filled == 3, filled)
+
+  -- The property that matters, stated as itself: nothing leaves here blank.
+  local blank = 0
+  for _, e in ipairs(entries) do
+    if e.name == nil or e.name == "" then blank = blank + 1 end
+  end
+  check("NO entry can leave without a visible name", blank == 0, blank)
+end
+
 -- ── A placeholder name asks the client, and comes back ──────────────────────
 --
 -- ⚠️ THE BUG THAT KEPT RETURNING IN DIFFERENT COSTUMES (Jason, Session 253:

@@ -1576,8 +1576,15 @@ local function itemEntries()
     for _, d in ipairs(ns.Record and ns.Record.RecentDrops(40, wanted) or {}) do
       if d.itemID and not seen[d.itemID] then
         seen[d.itemID] = true
+        -- `or` is not enough here either: a recorded drop can carry an EMPTY
+        -- itemName, which would win over d.name and then survive every guard
+        -- below it. Normalised to nil so the universal pass can do its job.
+        local recorded = d.itemName
+        if recorded == "" then recorded = nil end
+        local fallback = d.name
+        if fallback == "" then fallback = nil end
         out[#out + 1] = {
-          itemID = d.itemID, name = d.itemName or d.name, link = d.itemLink,
+          itemID = d.itemID, name = recorded or fallback, link = d.itemLink,
           winner = d.winner,
         }
       end
@@ -1673,23 +1680,30 @@ local function itemEntries()
       end
     end
 
-    -- A journal entry read from a cold cache has no name yet. Fall back to ours,
-    -- then to the id — never to a blank row, which reads as a bug.
-    for _, e in ipairs(out) do
-      if not e.name then
-        local rec = (data or {}).items and data.items[e.itemID]
-        e.name = (rec and rec.name) or ("item:" .. tostring(e.itemID))
-      end
-    end
   end
 
-  -- ⚠️ EVERY SOURCE PASSES THROUGH HERE, WHICH IS THE POINT (Session 253). Both
-  -- branches above build `out` — recorded drops and the journal's loot table —
-  -- and only the journal one ever asked the client to load a missing name or
-  -- booked a redraw. So a drop whose item had not resolved rendered as
-  -- "item:270160" and stayed that way until something unrelated forced a
-  -- redraw: the "it only shows up if I switch boss" bug, in its latest costume.
-  -- One call, at the one place both lists meet, rather than a fix per view.
+  -- ⚠️ AN EMPTY STRING IS A TRUTHY NAME, AND THAT IS WHY ROWS DREW BLANK
+  -- (Session 253). This is the SAME FAMILY as the recorded "ZERO IS TRUTHY IN
+  -- LUA" rule: `e.name or fallback` returns "" unchanged, and `if not e.name`
+  -- does not fire for "". The old guard sat inside the journal branch, promised
+  -- in its own comment to never leave "a blank row, which reads as a bug", and
+  -- could not keep that promise for the one value that produces exactly that —
+  -- while the recorded-drops branch had no guard at all.
+  --
+  -- The symptom Jason reported: the item's SECOND line rendered fine, proving
+  -- the entry existed and had scored, while the name was simply absent until a
+  -- boss switch forced a re-read from a warmer source.
+  --
+  -- NOW UNIVERSAL AND EMPTINESS-AWARE, after BOTH branches, so no source can
+  -- emit a nameless row: our payload's name, then the id placeholder. A visible
+  -- "item:270160" is a bad name; a blank row is an invisible one.
+  ns.FillItemNames(out)
+
+  -- EVERY SOURCE PASSES THROUGH HERE, WHICH IS THE POINT. Both branches build
+  -- `out` — recorded drops and the journal's loot table — and only the journal
+  -- one ever asked the client to load a missing name or booked a redraw. So a
+  -- drop whose item had not resolved rendered as "item:270160" and stayed that
+  -- way until something unrelated forced a redraw.
   ns.WarmItemNames(out)
 
   for _, e in ipairs(out) do scoreEntry(e) end
