@@ -96,6 +96,31 @@ check("emitted data carries a tier TOKEN with a resolved slot", tokenId ~= nil,
 check("emitted data carries an omni-token with NO slot", omniId ~= nil,
       "an omni-token must stay unscored — it exchanges for any tier slot")
 
+-- ── The boss strip's running order ──────────────────────────────────────────
+-- ⚠️ THE ORDER MUST BE UNIQUE ACROSS THE WHOLE SEASON. The site stores
+-- display_order PER INSTANCE, so with two instances live the first boss of each
+-- carried order = 1 — and this addon draws ONE FLAT STRIP with no instance
+-- grouping, so it broke the tie alphabetically and drew the season's second raid
+-- ahead of its first. The emitter now assigns a global sequence.
+--
+-- Asserted as a STRUCTURAL property rather than against a list of names: names
+-- change every tier, and a hardcoded one would quietly stop testing anything.
+do
+  local seen, count, maxOrder = {}, 0, 0
+  local dupe
+  for _, b in pairs((data or {}).bosses or {}) do
+    count = count + 1
+    local o = b.order or 0
+    if seen[o] then dupe = ("%s and %s share order %d"):format(seen[o], b.name, o) end
+    seen[o] = b.name
+    if o > maxOrder then maxOrder = o end
+  end
+  check("more than one boss is emitted", count > 1, tostring(count))
+  check("no two bosses share a strip position", dupe == nil, dupe or "")
+  check("...and the positions are dense, 1..N with no gaps",
+        maxOrder == count, ("highest order %d over %d bosses"):format(maxOrder, count))
+end
+
 -- ── Equip the character ─────────────────────────────────────────────────────
 -- Deliberately in LAST SEASON'S gear: everything this tier drops should read as
 -- an upgrade, which is the flat-wall case the whole design worries about.

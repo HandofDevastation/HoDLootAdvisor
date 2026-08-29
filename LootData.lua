@@ -3,17 +3,17 @@
 -- Game data only: no roster, no standings, no personal data.
 
 HoDLootAdvisorData = {
-  meta = { schema = 2, generatedAt = "2026-08-29T00:58:31.044Z", seasonId = "ad2b4991-46a1-444c-b09b-e0b4f5f72021", seasonName = "Midnight: Season 2" },
+  meta = { schema = 2, generatedAt = "2026-08-29T01:20:36.522Z", seasonId = "ad2b4991-46a1-444c-b09b-e0b4f5f72021", seasonName = "Midnight: Season 2" },
   bosses = {
-    [2888] = { name = "Nek'zali the Soulcoiler", order = 1 },
     [2849] = { name = "Nymrissa Wavecaller", order = 1 },
-    [2874] = { name = "Entombed Sentinels", order = 2 },
-    [2894] = { name = "The Lost Explorers", order = 3 },
+    [2888] = { name = "Nek'zali the Soulcoiler", order = 2 },
+    [2874] = { name = "Entombed Sentinels", order = 3 },
     [2882] = { name = "Vashnik the Malignant", order = 4 },
-    [2871] = { name = "Sszorak", order = 5 },
-    [2887] = { name = "The Twin Fangs", order = 6 },
-    [2883] = { name = "The Coiled Altar", order = 7 },
-    [2895] = { name = "Ula'tek", order = 8 },
+    [2894] = { name = "The Lost Explorers", order = 5 },
+    [2871] = { name = "Sszorak", order = 6 },
+    [2887] = { name = "The Twin Fangs", order = 7 },
+    [2883] = { name = "The Coiled Altar", order = 8 },
+    [2895] = { name = "Ula'tek", order = 9 },
   },
   items = {
     [268196] = { name="Venom-Slashed Scuteward", slot="OFF_HAND", armor="Shield", dropRank=2, ilvl={n=295,h=308,m=321}, stats={["Haste"]=36,["Critical Strike"]=18}, primary={["Strength"]=32,["Intellect"]=99}, classes={["Death Knight"]=true,["Evoker"]=true,["Monk"]=true,["Paladin"]=true,["Shaman"]=true,["Warrior"]=true}, boss=2894 },
