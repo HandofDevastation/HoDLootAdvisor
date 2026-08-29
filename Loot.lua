@@ -60,6 +60,25 @@ function Loot.ScoreItem(itemID, opts)
   end
 
   local rec = (data.items or {})[itemID]
+
+  -- AN ITEM OUTSIDE OUR LOOT TABLE CAN STILL BE SCORED, when the caller can
+  -- describe it. Dungeon loot is the case this exists for: we have never
+  -- imported dungeon loot tables, but the Adventure Guide names the item and its
+  -- slot, and a Mythic+ drop's item level is fixed (ns.MPLUS_ILVL). What the
+  -- synthetic record cannot supply is a stat block — see ns.JournalRecord — so
+  -- such an item scores its item-level gain and track gap in full, and its stat
+  -- alignment as zero UNLESS it carries a BIS listing or a grade, which replace
+  -- stat alignment outright. The picks that matter therefore score completely.
+  --
+  -- ⚠️ THE CALLER SUPPLIES IT; THIS NEVER INVENTS ONE. Falling back to a
+  -- self-made record here would score every unrecognised drop against empty
+  -- stats and a guessed slot, which is exactly the confident-wrong-answer the
+  -- "unscored" path exists to avoid.
+  if not rec and opts.record then
+    rec = opts.record
+    out.synthetic = true
+  end
+
   out.rec = rec
   if not rec then
     out.reason = "not in this season's loot table"
@@ -103,7 +122,21 @@ function Loot.ScoreItem(itemID, opts)
 
   local bonusIDs
   local candidateIlvl
-  if opts.itemLink then
+
+  -- ⚠️ A CATALOGUE LINK IS NOT A DROP LINK, and reading it as one is why dungeon
+  -- items showed ilvl 292 / Veteran instead of 311 / Hero. The Adventure Guide's
+  -- link describes the item at its BASE level — it has no idea what key level
+  -- you would run — so DetailedIlvl answers the base and the track resolves from
+  -- that. The rule the file already states about uncached links applies here for
+  -- the same reason: an item level that looks like data and is not.
+  --
+  -- A SYNTHETIC RECORD DECLARES ITS OWN LEVEL and that declaration wins. The
+  -- record exists precisely because the caller knows something the link does not
+  -- — for Mythic+ that a +10 and a +20 both drop Hero 3/6 (ns.MPLUS_ILVL).
+  --
+  -- This does NOT affect real drops: a drop carries no synthetic record, so its
+  -- link is still the best answer and is still preferred over our table.
+  if opts.itemLink and not rec.synthetic then
     local parsed = ns.ParseItemLink(opts.itemLink)
     bonusIDs = parsed and parsed.bonusIDs
     candidateIlvl = ns.DetailedIlvl(opts.itemLink)
@@ -112,7 +145,16 @@ function Loot.ScoreItem(itemID, opts)
     candidateIlvl = (rec.ilvl or {})[diffKey] or 0
     -- No link: synthesise the bonus ID this item would carry at this difficulty
     -- and drop rank, so the track resolves the same way it would from a link.
-    bonusIDs = bonusIDs or ns.BonusIdsFor(diffKey, rec.dropRank)
+    --
+    -- ⚠️ NOT FOR A DUNGEON ITEM. The bonus-ID blocks are RAID difficulty blocks
+    -- (Normal->Champion, Heroic->Hero, Mythic->Myth), so attaching one to a
+    -- Mythic+ drop would state a raid provenance it does not have — and the
+    -- selected raid difficulty would then move a dungeon item's track, which is
+    -- fixed. The ladder alone resolves it, unambiguously: 311 is Hero 3/6 and
+    -- nothing else on the current ladder.
+    if not rec.synthetic then
+      bonusIDs = bonusIDs or ns.BonusIdsFor(diffKey, rec.dropRank)
+    end
   end
   out.candidateIlvl = candidateIlvl
 

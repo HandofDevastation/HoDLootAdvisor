@@ -339,6 +339,11 @@ function stub.Install()
   --
   -- The stub reproduces both, so code that gets the order wrong FAILS here
   -- rather than in a raid.
+  -- Base item levels the CATALOGUE reports for dungeon items. Far below any
+  -- current rung, exactly as a real base level is.
+  stub.items = stub.items or {}
+  stub.items[880002] = { ilvl = 200 }
+
   stub.journal = {
     tier = 13,
     selectedTier = 13, selectedInstance = nil, selectedEncounter = nil,
@@ -347,12 +352,22 @@ function stub.Install()
       { id = 1317, name = "The Tidebound Grotto", isRaid = true },
       { id = 1312, name = "Midnight",             isRaid = true },
       { id = 1304, name = "Murder Row",           isRaid = false },
+      { id = 1322, name = "Altar of Fangs",       isRaid = false },
+      { id = 1319, name = "Keystone Dungeons",    isRaid = false },
     },
+    -- Instances that enumerate but hold no loot.
+    noLoot = { [1319] = true },
     encounters = {
       [1317] = { { id = 2849, name = "Nymrissa Wavecaller" },
                  { id = 2894, name = "The Lost Explorers" } },
       [1312] = { { id = 2900, name = "Lu'ashal" } },
       [1304] = { { id = 2910, name = "Gebbo" } },
+      -- TWO encounters, deliberately, with an item they SHARE. A Mythic+ run has
+      -- one chest at the end, so the dungeon is the unit of loot and the pooled
+      -- list must contain that item ONCE.
+      [1322] = { { id = 2920, name = "Fangcaller Vex" },
+                 { id = 2921, name = "The Brood Matron" } },
+      [1319] = {},
     },
     -- classID 3 is the Hunter in this fixture; anything else sees fewer items.
     loot = {
@@ -370,6 +385,40 @@ function stub.Install()
         -- Deliberately unnamed: a COLD item cache, which is what the real API
         -- returns before the client has loaded the item.
         { itemID = 270999, icon = 9, itemQuality = 4 },
+      },
+      -- Dungeon loot, warm. Slot wording is the ADVENTURE GUIDE'S, not ours —
+      -- "Two-Hand" and "Held In Off-hand" are what the real API answers, and
+      -- mapping them is the thing that silently breaks if anyone "simplifies"
+      -- ns.JournalSlot into a string transform.
+      [2920] = {
+        -- classID 3 is the fixture's Hunter. The MAIL hood is theirs; the LEATHER
+        -- shoulder below belongs to someone else and is what Blizzard's filter
+        -- removes. This mirrors the live bug exactly: a leather shoulder listed
+        -- under Usable Only for a Warlock.
+        { itemID = 880001, name = "Fangcaller's Hood", icon = 11, slot = "Head",
+          armorType = "Mail", itemQuality = 4, classID = 3 },
+        { itemID = 880006, name = "Snakeskin Spaulders", icon = 16, slot = "Shoulder",
+          armorType = "Leather", itemQuality = 4, classID = 1 },
+        -- ⚠️ CARRIES A CATALOGUE LINK, like every real Adventure Guide entry.
+        -- The guide describes an item at its BASE level and knows nothing about
+        -- key levels, so this link answers 200 — deliberately NOT the Mythic+
+        -- drop level. Without a link here the fixture could not reproduce the
+        -- bug at all: dungeon items showed ilvl 292 / Veteran in game while the
+        -- tests passed, because the tests never handed the scorer a link.
+        { itemID = 880002, name = "Broodfang Cleaver", icon = 12, slot = "Two-Hand",
+          armorType = "Axe", itemQuality = 4, link = "|Hitem:880002|h[Broodfang Cleaver]|h" },
+        { itemID = 880004, name = "Venomtouched Grimoire", icon = 14,
+          slot = "Held In Off-hand", itemQuality = 4 },
+        -- No slot at all: the guide does not always answer, and an item we
+        -- cannot place must be LISTED but never scored or priced.
+        { itemID = 880005, name = "Curious Fang", icon = 15, itemQuality = 4 },
+      },
+      [2921] = {
+        { itemID = 880003, name = "Matron's Chitin Band", icon = 13, slot = "Finger",
+          itemQuality = 4 },
+        -- SHARED with the other boss. Pooling must not double it.
+        { itemID = 880002, name = "Broodfang Cleaver", icon = 12, slot = "Two-Hand",
+          armorType = "Axe", itemQuality = 4 },
       },
     },
   }
@@ -464,7 +513,11 @@ function stub.Install()
         encounterID = J.selectedEncounter,
       }
     end,
-    InstanceHasLoot = function() return true end,
+    -- A CONTAINER THAT HOLDS NOTHING. The real season list carries one —
+    -- "Keystone Dungeons", 1319 — which enumerates like a dungeon and lists no
+    -- loot. Modelled here so the strip's filter is tested against the case it
+    -- exists for rather than against a list where everything has loot.
+    InstanceHasLoot = function(id) return stub.journal.noLoot[id] ~= true end,
   }
 
   -- Items the addon asked the client to load. Item data is eventually

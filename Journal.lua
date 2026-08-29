@@ -507,6 +507,26 @@ function Journal.CachedInstances()
   return cache.instances
 end
 
+--- Does this instance list any loot at all?
+---
+--- ⚠️ FAILS OPEN. A nil answer means the client did not tell us, and an instance
+--- wrongly SHOWN is visibly odd and one click to leave, while one wrongly HIDDEN
+--- is loot that silently does not exist. Only an explicit false hides anything.
+---
+--- This exists because the season's dungeon list carries a CONTAINER — 1319
+--- "Keystone Dungeons" in Midnight S2 — that enumerates as an instance and holds
+--- nothing. It was identified by /la journal reporting loot=false against it,
+--- which is the same call this makes.
+function Journal.HasLoot(instanceID)
+  if not instanceID then return true end
+  local fn = api("InstanceHasLoot")
+  if not fn then return true end
+  local ok, ret = call(fn, instanceID)
+  if not ok then return true end
+  if ret[1] == false then return false end
+  return true
+end
+
 function Journal.CachedEncounters(instanceID)
   if not instanceID then return {} end
   if not cache.encounters[instanceID] then

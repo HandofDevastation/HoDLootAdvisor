@@ -51,32 +51,130 @@ local function minQuality()
   return tonumber(v) or 4
 end
 
--- Enum.EncounterLootDropRollState -> the export's roll-type string.
+-- The export's roll-type string, resolved from the GAME'S OWN NAMED ENUM.
 --
--- MIRRORED VERBATIM from HoDLootTracker, deliberately, and NOT re-derived: the
--- two addons export the same night into the same table, and a mapping that
--- disagreed would put the same roll in two different cohorts depending on which
--- export happened to be imported first.
+-- ⚠️ THIS REPLACES A HARDCODED NUMBER MAP THAT WAS PROVABLY WRONG. The old one
+-- was mirrored from HoDLootTracker and had never been checked against a client.
+-- 1,538 recorded rolls from Jason's own log say it is inverted: 531 rolls it
+-- labelled "need" carried NO roll value and won nothing, while 274 it labelled
+-- "did not roll" ALL carried a real value and won 63 times. Cross-referenced
+-- against the game's own roll window on one item, the person the game showed
+-- needing Off-Spec and rolling 6 to win was recorded as a PASS, and the winner
+-- of the next drop, at 34, was recorded as not having rolled.
 --
--- It is also safe against getting the enum wrong, which matters because these
--- numbers cannot be verified outside a live raid. The site classifies a roll by
--- rollType AND rollValue TOGETHER (rules/HoD_Rules_Loot-Gear.txt, "LOOT ROLL
--- COHORT DEFINITIONS"): anything with rollValue > 0 that is not greed/transmog/
--- pass is the Need cohort, so 'need' and 'noroll' land in the SAME bucket. The
--- distinctions that actually carry weight are 'pass' (counted even at value 0)
--- and greed/transmog — and those three are unambiguous.
+-- ⚠️ THE FIX IS NOT A NEW GUESS AT THE NUMBERS. Guessing is how the old map got
+-- here. Enum.EncounterLootDropRollState carries the states' own NAMES, so this
+-- matches on those and the numbers stop mattering — including across a patch
+-- that renumbers them. Nothing here asserts what any particular number means.
 --
--- The raw numeric state is kept on each roll in SavedVariables (never exported)
--- so the first real raid night answers empirically what these states are, the
--- same instrument-what-you-cannot-verify approach as Diagnostics.lua.
-local ROLL_STATE = {
+-- ⚠️ THE TWO ADDONS MUST NOT DISAGREE. HoDLootTracker exports the same night
+-- into the same table and the site dedupes, so whichever import lands first
+-- wins. The identical resolver is mirrored there for exactly that reason — if
+-- you change this, change that too, or one night classifies two ways.
+
+-- Enum member name (lowercased, non-letters stripped) -> our export string.
+-- Deliberately generous about SPELLING: the same state is called Transmog in
+-- some builds and Transmogrification in others, and being wrong costs a mislabel.
+--
+-- ⚠️ DELIBERATELY NOT GENEROUS ABOUT WHICH STATES EXIST. Disenchant was added
+-- here and then removed: GetLootRollItemInfo still returns canDisenchant /
+-- reasonDisenchant / deSkillRequired, but the OPTION is not offered in retail —
+-- canDisenchant is false in all 43 roll windows recorded in a real log, while
+-- canNeed, canGreed and canTransmog all vary. The API surface outliving the
+-- feature is not evidence the feature is there.
+--
+-- ⚠️ AND LEAVING IT OUT IS BETTER THAN GUESSING IT IN. An enum member we do not
+-- map is REPORTED by name in the diagnostics, so if a state we have never seen
+-- ever does appear, we learn its real name instead of quietly giving it a label
+-- we invented.
+local ROLL_NAME_MAP = {
+  noroll               = "noroll",
+  pass                 = "pass",
+  greed                = "greed",
+  transmog             = "transmog",
+  transmogrification   = "transmog",
+  need                 = "need",
+  needmainspec         = "need",
+  mainspec             = "need",
+  -- ⚠️ OFF-SPEC IS ITS OWN VALUE NOW (Jason, Session 251). The game labels it
+  -- outright in the roll window ("Merrytime (Off-Spec)") and we were collapsing
+  -- it into a plain need. app/lib/loot-export.ts knows this string.
+  needoffspec          = "need_offspec",
+  offspec              = "need_offspec",
+}
+
+-- The map the OLD code used. Kept ONLY as the answer when the game has no enum
+-- to read, because in that case we know nothing new and changing behaviour on
+-- no evidence is the original mistake. It is never mixed with enum answers.
+local INHERITED_ROLL_STATE = {
   [0] = "noroll",
   [1] = "pass",
   [2] = "greed",
   [3] = "transmog",
-  [4] = "need",   -- NeedOffSpec
-  [5] = "need",   -- NeedMainSpec
+  [4] = "need",
+  [5] = "need",
 }
+
+--- Build the state -> export-string map from the client's own enum.
+---
+--- Takes the enum as an ARGUMENT rather than reading the global, so both paths
+--- are reachable from the headless harness. A function that could only be
+--- exercised the way it happens to be called at load is a function whose
+--- fallback ships untested — and the fallback is the branch that matters.
+---
+--- @param enum table|nil the client's Enum.EncounterLootDropRollState
+--- @return table map, string source, table unresolved  -- source is "enum" or "inherited"
+function ns.BuildRollStates(enum)
+  if type(enum) ~= "table" then
+    return INHERITED_ROLL_STATE, "inherited", {}
+  end
+
+  local map, unresolved, matched = {}, {}, 0
+  for name, value in pairs(enum) do
+    if type(name) == "string" and type(value) == "number" then
+      local key = name:lower():gsub("[^%a]", "")
+      local mapped = ROLL_NAME_MAP[key]
+      if mapped then
+        map[value] = mapped
+        matched = matched + 1
+      else
+        -- RECORDED, never silently dropped: an unrecognised member name is the
+        -- one thing that would make this go quietly wrong again.
+        unresolved[#unresolved + 1] = ("%s=%d"):format(name, value)
+      end
+    end
+  end
+
+  -- An enum that names nothing we recognise is no better than no enum at all.
+  if matched == 0 then
+    return INHERITED_ROLL_STATE, "inherited", unresolved
+  end
+  return map, "enum", unresolved
+end
+
+-- Resolved ONCE at load. The enum is a static client table, so re-reading it
+-- per roll would buy nothing and cost a table walk inside the loot path.
+local ROLL_STATE, ROLL_STATE_SOURCE, ROLL_STATE_UNRESOLVED =
+  ns.BuildRollStates(_G.Enum and _G.Enum.EncounterLootDropRollState)
+
+--- Which map is in force, and what the enum could not be matched to.
+--- ⚠️ SURFACED, not merely stored. A wrong roll label looks exactly as
+--- plausible as a right one, so the only way anyone learns the fallback is in
+--- use is if something says so. The Loot Log window prints this.
+function ns.RollStateSource()
+  return ROLL_STATE_SOURCE, ROLL_STATE_UNRESOLVED
+end
+
+--- The label for a raw state, or "unknown" when the map does not cover it.
+---
+--- ⚠️ "unknown" RATHER THAN A DEFAULT. The old code answered "noroll" for any
+--- unmapped state, which is how 531 passes came to be filed as needs with
+--- nobody able to tell. An honest gap is recoverable; a confident wrong answer
+--- is not, and the raw number is stored beside it either way.
+function ns.RollTypeFor(state)
+  if type(state) ~= "number" then return "unknown" end
+  return ROLL_STATE[state] or "unknown"
+end
 
 -- ---------------------------------------------------------------------------
 -- Reading values that might bite
@@ -538,7 +636,7 @@ local function upsertDrop(encounterID, info)
       if name and name ~= "" then
         local state = asNumber(safeIndex(r, "state"))
         e.rolls[name] = {
-          rollType  = ROLL_STATE[state or -1] or "noroll",
+          rollType  = ns.RollTypeFor(state),
           rollValue = asNumber(safeIndex(r, "roll")) or 0,
           isWinner  = asBool(safeIndex(r, "isWinner")),
           -- Kept, never exported: the empirical answer to what these states
@@ -573,7 +671,10 @@ local function upsertDrop(encounterID, info)
     -- the roll cohort from roll_data, so an unknown win type costs a label, not
     -- the record.
     if not e.winRollType then
-      e.winRollType  = "noroll"
+      -- "unknown", not "noroll": we do not know how they won, and saying they
+      -- did not roll is a claim rather than an absence. Same reasoning as
+      -- ns.RollTypeFor.
+      e.winRollType  = "unknown"
       e.winRollValue = 0
     end
 
@@ -1139,14 +1240,27 @@ end
 --- nothing and the panel looked stuck on the last kill. A boss you have not
 --- killed must come back EMPTY — that is a fact about tonight, and showing
 --- another boss's loot under its portrait is worse than showing none.
+--- @param bossID number|table|nil a Blizzard encounter id, or a SET of them
+---   ({ [id] = true }), or nil for everything tonight.
+---
+--- ⚠️ THE SET FORM EXISTS FOR DUNGEONS. A Mythic+ tile is a DUNGEON, and a
+--- dungeon has several encounters, so filtering on one id would show nothing.
+--- Passing the instance id instead would be worse than nothing: instance ids and
+--- encounter ids are different number spaces, so a match would be a coincidence
+--- filing one boss's drops under an unrelated dungeon.
 function Record.RecentDrops(limit, bossID)
   local db = lootDB()
   local today = date("%Y-%m-%d")
+  local wanted = (type(bossID) == "table") and bossID or nil
   local out = {}
   for _, s in ipairs((db or {}).sessions or {}) do
     if s.date == today then
       for _, e in ipairs(s.items or {}) do
-        if not bossID or e.encounterID == bossID then out[#out + 1] = e end
+        local keep
+        if wanted then keep = wanted[e.encounterID] == true
+        elseif bossID then keep = (e.encounterID == bossID)
+        else keep = true end
+        if keep then out[#out + 1] = e end
       end
     end
   end

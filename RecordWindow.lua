@@ -785,7 +785,29 @@ function RecordWindow.Refresh()
 
   local _, gi = ns.Record.Counts(ns.Record.GUILD)
   local _, pi = ns.Record.Counts(ns.Record.PERSONAL)
-  frame.summary:SetText(("%d guild · %d personal items recorded"):format(gi, pi))
+  local counts = ("%d guild · %d personal items recorded"):format(gi, pi)
+
+  -- ⚠️ SAY WHICH ROLL-STATE MAP IS IN FORCE. When the client names its own roll
+  -- states we read those; when it does not we fall back to the inherited number
+  -- map, which is KNOWN WRONG (Session 251 — see Record.lua). A wrong roll label
+  -- looks exactly as plausible as a right one, so the fallback being in use has
+  -- to be visible somewhere a person actually looks, not only in a log.
+  local source, unresolved = nil, nil
+  if ns.RollStateSource then source, unresolved = ns.RollStateSource() end
+  if source == "inherited" then
+    frame.summary:SetText(counts .. "  ·  roll labels UNVERIFIED (no state names from the client)")
+  elseif unresolved and #unresolved > 0 then
+    -- The COUNT here and the NAMES in the diagnostics. A state the client names
+    -- but we do not recognise is the next version of the roll-label bug, and the
+    -- person reading this window is the one who would notice a roll labelled
+    -- oddly — so the window has to say "there is something to look at" even
+    -- though it has no room to say what.
+    frame.summary:SetText(counts ..
+      ("  ·  %d roll state%s the client names that we do not"):format(
+        #unresolved, #unresolved == 1 and "" or "s"))
+  else
+    frame.summary:SetText(counts)
+  end
 
   refreshSessions()
   refreshItems()

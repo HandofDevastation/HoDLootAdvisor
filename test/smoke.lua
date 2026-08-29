@@ -1059,11 +1059,23 @@ stub.journal.warm = true
 J.Invalidate()
 
 local instances = J.CachedInstances()
--- THREE instances exist in the fixture; the WORLD BOSS container is excluded, so
--- the browse catalogue offers two. Nobody puts a world boss drop on a watch list
--- (Jason, Session 244).
-check("raids AND dungeons both enumerate", #instances == 2,
-      ("%d instances"):format(#instances))
+-- The WORLD BOSS container is excluded from the browse catalogue — nobody puts a
+-- world boss drop on a watch list (Jason, Session 244), and as of Session 251
+-- world bosses are out of the Loot tab entirely (Champion track).
+--
+-- DERIVED FROM THE FIXTURE, not written as a literal, so adding an instance to
+-- the stub cannot fail a check about world bosses.
+local expectedInstances = 0
+for _, inst in ipairs(stub.journal.instances) do
+  if not ns.Journal.WORLD_BOSS_INSTANCES[inst.id] then
+    expectedInstances = expectedInstances + 1
+  end
+end
+check("raids AND dungeons both enumerate", #instances == expectedInstances,
+      ("%d instances, fixture offers %d"):format(#instances, expectedInstances))
+check("...and the fixture contains a world-boss container to exclude",
+      expectedInstances < #stub.journal.instances,
+      "otherwise the exclusion below is vacuous")
 
 local function hasWorldBossList(list)
   for _, inst in ipairs(list) do
@@ -1302,10 +1314,24 @@ check("the probe runs against a present API", okProbe,
 check("...and reports what it found rather than a fixed list",
       okProbe and #probeResult.present > 0 and #probeResult.absent > 0,
       okProbe and ("%d present / %d absent"):format(#probeResult.present, #probeResult.absent))
+-- COUNTS DERIVED FROM THE FIXTURE, never written as literals. These were 2 and
+-- 1; adding one dungeon to the stub broke an assertion that had nothing to do
+-- with the change. The standing rule for these fixtures is to derive, so that a
+-- fixture edit cannot fail a test it does not concern — or worse, quietly stop
+-- testing anything after one.
+local wantRaids, wantDungeons = 0, 0
+for _, inst in ipairs(stub.journal.instances) do
+  -- The world-boss container is a RAID entry the browse list excludes, so it
+  -- counts here exactly as the probe counts it: as a raid.
+  if inst.isRaid then wantRaids = wantRaids + 1 else wantDungeons = wantDungeons + 1 end
+end
 check("...enumerating DUNGEONS separately from raids — the whole question",
-      okProbe and probeResult.Raids.count == 2 and probeResult.Dungeons.count == 1,
-      okProbe and ("%d raids / %d dungeons"):format(
-        probeResult.Raids.count, probeResult.Dungeons.count))
+      okProbe and probeResult.Raids.count == wantRaids
+        and probeResult.Dungeons.count == wantDungeons,
+      okProbe and ("%d raids / %d dungeons, fixture has %d / %d"):format(
+        probeResult.Raids.count, probeResult.Dungeons.count, wantRaids, wantDungeons))
+check("...and the fixture actually contains both kinds",
+      wantRaids > 0 and wantDungeons > 0, "otherwise the check above is vacuous")
 -- The first live probe recorded 5 of 9 dungeons and could not answer "which
 -- ones". A list short enough to walk is short enough to keep whole.
 check("...recording EVERY instance, not a sample of them",
@@ -1957,9 +1983,14 @@ end)()
     return ("%02x%02x%02x"):format(
       math.floor(c.r * 255 + 0.5), math.floor(c.g * 255 + 0.5), math.floor(c.b * 255 + 0.5))
   end
+  -- ⚠️ THE TEXT TOKENS ARE NOT ON THIS LIST ANY MORE, and their being on it was
+  -- the bug rather than the guard. They were pinned to app/globals.css, so this
+  -- check actively HELD the panel's body text at the site's #e8e8f0 while the
+  -- mock said pure white — a test enforcing the wrong source of truth. Surfaces
+  -- and semantic hues still come from the site; TEXT comes from the mock and is
+  -- checked separately below.
   local EXPECTED = {
     bg = "0d0d14", bgAlt = "13131f", elevated = "1a1a2e", border = "2a2a45",
-    text = "e8e8f0", textDim = "9090b0", textMuted = "606080",
     gold = "f3c56b", green = "20ba56", blue = "3382ff", orange = "ff7729",
     grey = "606060", red = "c41e3a", purple = "8031ff", hotPink = "ff0080",
   }
@@ -1971,6 +2002,24 @@ end)()
   check("every colour token still matches the site's DS 2.0 value",
         #drift == 0, table.concat(drift, ", "))
 
+  -- ── Text, read out of the Figma mock (Session 251) ───────────────────────
+  -- Verified against the file directly: the item name, its slot line and the
+  -- column headers are all #ffffff, and the footnote is rgba(255,255,255,0.5).
+  -- Dim is WHITE AT ALPHA, never a darker hue — a purple grey on a purple panel
+  -- is what made the secondary lines read as muddy.
+  check("body text is pure white, as the mock draws it",
+        hexOf(S.COLOR.text) == "ffffff", hexOf(S.COLOR.text))
+  check("dim text is white, not a hue",
+        hexOf(S.COLOR.textDim) == "ffffff", hexOf(S.COLOR.textDim))
+  check("...dimmed by alpha instead", S.COLOR.textDim.a == 0.5, tostring(S.COLOR.textDim.a))
+  check("the third step stays on the same ramp",
+        hexOf(S.COLOR.textMuted) == "ffffff" and (S.COLOR.textMuted.a or 1) < 0.5,
+        tostring(S.COLOR.textMuted.a))
+  -- Not vacuous: if dim ever equals body text the hierarchy is gone entirely.
+  check("...and the three steps are actually distinct",
+        (S.COLOR.text.a or 1) > S.COLOR.textDim.a
+          and S.COLOR.textDim.a > (S.COLOR.textMuted.a or 1))
+
   check("BIS uses the hot-pink token, not the unreadable gold",
         hexOf(S.COLOR.hotPink) == "ff0080" and S.COLOR.hotPink ~= S.COLOR.gold)
 
@@ -1981,11 +2030,31 @@ end)()
   check("...including a channel that rounds up", S.code(S.COLOR.gold) == "|cfff3c56b",
         S.code(S.COLOR.gold))
 
+  -- ⚠️ THE ESCAPE CODE HAS NO ALPHA, so a half-alpha white must be FLATTENED or
+  -- it comes out pure white and the dim is silently lost — which is what would
+  -- have happened to the gap column's "tie" and "-16" the moment the ramp moved
+  -- to alpha. Composited over the panel ground.
+  local dimCode = S.code(S.COLOR.textDim)
+  check("a dimmed colour does not come out as pure white in an inline escape",
+        dimCode ~= "|cffffffff", dimCode)
+  check("...it lands between the ground and white", dimCode:match("^|cff(%x%x)") ~= nil
+        and tonumber(dimCode:match("^|cff(%x%x)"), 16) > 0x20
+        and tonumber(dimCode:match("^|cff(%x%x)"), 16) < 0xf0, dimCode)
+  check("...while a fully opaque colour is untouched by the flattening",
+        S.code(S.COLOR.white) == "|cffffffff", S.code(S.COLOR.white))
+
   local r, g, b = S.rgb(S.COLOR.green)
   check("rgb() unpacks to three channels in 0-1",
         math.abs(r - 0x20 / 255) < 1e-6 and math.abs(g - 0xba / 255) < 1e-6
         and math.abs(b - 0x56 / 255) < 1e-6)
-  check("rgb() with no colour falls back rather than erroring", select("#", S.rgb(nil)) == 3)
+  -- FOUR channels now: the mock dims by alpha, so alpha is part of a colour and
+  -- rides through every SetTextColor call that already unpacked rgb().
+  check("rgb() with no colour falls back rather than erroring", select("#", S.rgb(nil)) == 4)
+  check("...and an alpha-less colour still reports fully opaque",
+        select(4, S.rgb(S.COLOR.gold)) == 1, tostring(select(4, S.rgb(S.COLOR.gold))))
+  check("...while a dimmed one carries its alpha through",
+        select(4, S.rgb(S.COLOR.textDim)) == 0.5,
+        tostring(select(4, S.rgb(S.COLOR.textDim))))
 
   -- Fonts are referenced by PATH, and a path typo is silent — SetFont returns
   -- false and the helper falls back to the game font, so the addon just looks
@@ -2490,6 +2559,483 @@ end)()
 -- kill, which is exactly what a raid reported and what no amount of reasoning
 -- about difficulty was going to explain.
 
+header("Dungeons as a content mode — tiles, pooled loot, and scoring")
+
+;(function()
+  stub.journal.warm = true
+  ns.Journal.Invalidate()
+
+  -- The control selects CONTENT, not just difficulty. Everything below runs in
+  -- dungeon mode; the setting is restored at the end so later sections are not
+  -- silently changed by this one.
+  local prevMode = ns.Settings.Get("difficulty")
+  ns.Settings.Set("difficulty", "MPLUS")
+  check("selecting Dungeons switches the content mode", ns.ContentMode() == "mplus",
+        ns.ContentMode())
+
+  -- ── Tiles are DUNGEONS ────────────────────────────────────────────────────
+  local dungeons = ns.DungeonList()
+  local raidCount, dungeonCount, emptyCount = 0, 0, 0
+  for _, inst in ipairs(stub.journal.instances) do
+    if not ns.Journal.WORLD_BOSS_INSTANCES[inst.id] then
+      if inst.isRaid then
+        raidCount = raidCount + 1
+      elseif stub.journal.noLoot[inst.id] then
+        -- The season list carries a CONTAINER that holds no loot ("Keystone
+        -- Dungeons"). A tile for it opens onto an empty list and reads as a bug.
+        emptyCount = emptyCount + 1
+      else
+        dungeonCount = dungeonCount + 1
+      end
+    end
+  end
+  check("the strip's tiles are the season's dungeons", #dungeons == dungeonCount,
+        ("%d tiles, fixture has %d dungeons"):format(#dungeons, dungeonCount))
+  check("...and the fixture has raids too, so this is a real filter",
+        raidCount > 0, "otherwise the tile list could be everything and still pass")
+  check("a dungeon that lists no loot gets no tile", emptyCount > 0,
+        "the fixture must contain one or the exclusion is untested")
+  local sawEmpty = false
+  for _, d in ipairs(dungeons) do
+    if stub.journal.noLoot[d.id] then sawEmpty = true end
+  end
+  check("...and it really is absent from the strip", not sawEmpty)
+
+  local anyRaid = false
+  for _, d in ipairs(dungeons) do
+    for _, inst in ipairs(stub.journal.instances) do
+      if inst.id == d.id and inst.isRaid then anyRaid = true end
+    end
+  end
+  check("...and no raid leaks into the dungeon tiles", not anyRaid)
+
+  -- ⚠️ NOT BOSSES. In a Mythic+ run there is one chest at the end, so listing
+  -- individual bosses would show a choice the game never offers (Jason).
+  local multiBoss
+  for _, d in ipairs(dungeons) do
+    if #ns.Journal.CachedEncounters(d.id) > 1 then multiBoss = d end
+  end
+  check("the fixture has a dungeon with more than one boss", multiBoss ~= nil,
+        "needed for the pooling check below to mean anything")
+
+  -- ── Loot is POOLED across the dungeon, deduplicated ───────────────────────
+  local pooled = ns.DungeonLoot(multiBoss.id)
+  local perBoss, sharedID = 0, nil
+  local seenAcross = {}
+  for _, enc in ipairs(ns.Journal.CachedEncounters(multiBoss.id)) do
+    for _, j in ipairs(ns.Journal.CachedLoot(enc.id) or {}) do
+      perBoss = perBoss + 1
+      if seenAcross[j.itemID] then sharedID = j.itemID end
+      seenAcross[j.itemID] = true
+    end
+  end
+  check("an item two bosses share appears ONCE in the dungeon's list",
+        sharedID ~= nil and perBoss > #pooled,
+        ("%d entries across bosses, %d pooled, shared id %s")
+          :format(perBoss, #pooled, tostring(sharedID)))
+  local occurrences = 0
+  for _, e in ipairs(pooled) do if e.itemID == sharedID then occurrences = occurrences + 1 end end
+  check("...exactly once", occurrences == 1, occurrences)
+
+  -- ── The Adventure Guide's slot wording maps to ours ───────────────────────
+  -- These are the GAME'S spellings. A string transform would turn "Two-Hand"
+  -- into "TWOHAND" and every two-hander would score and price as unknown.
+  local function slotOf(id)
+    for _, e in ipairs(pooled) do if e.itemID == id then return ns.JournalSlot(e) end end
+  end
+  check("\"Two-Hand\" maps to the payload's slot name", slotOf(880002) == "TWO_HAND", tostring(slotOf(880002)))
+  check("\"Held In Off-hand\" maps to OFF_HAND", slotOf(880004) == "OFF_HAND", tostring(slotOf(880004)))
+  check("\"Head\" maps to HEAD", slotOf(880001) == "HEAD", tostring(slotOf(880001)))
+  check("\"Finger\" maps to FINGER", slotOf(880003) == "FINGER", tostring(slotOf(880003)))
+  -- ⚠️ nil IS THE HONEST ANSWER for an item the guide does not place. Guessing
+  -- would give it a real badge and a price against the wrong slot weight.
+  check("an item with no slot resolves to nothing, not a guess", slotOf(880005) == nil,
+        tostring(slotOf(880005)))
+
+  -- ── Scoring an item that is NOT in our loot table ─────────────────────────
+  local twoHand
+  for _, e in ipairs(pooled) do if e.itemID == 880002 then twoHand = e end end
+  check("the dungeon item is genuinely absent from our loot table",
+        (ns.Data().items or {})[880002] == nil,
+        "if this ever fails the test below proves nothing")
+
+  local bare = ns.Loot.ScoreItem(880002)
+  check("...so scoring it with no record is refused, with a reason",
+        bare.result == nil and bare.reason ~= nil, tostring(bare.reason))
+
+  local rec = ns.JournalRecord(twoHand)
+  check("a record can be synthesised from the guide entry", rec ~= nil)
+  check("...pinned at the Mythic+ drop level, not a raid difficulty",
+        rec.ilvl.n == ns.MPLUS_ILVL and rec.ilvl.h == ns.MPLUS_ILVL
+          and rec.ilvl.m == ns.MPLUS_ILVL, ns.MPLUS_ILVL)
+
+  -- ⚠️ SCORED WITH THE CATALOGUE LINK, exactly as the panel does. The earlier
+  -- version of this passed no link and therefore proved nothing: in game the
+  -- Adventure Guide hands every entry a link describing the item at its BASE
+  -- level, that link won over the record's declared level, and dungeon items
+  -- showed ilvl 292 / Veteran while these tests were green.
+  check("the fixture's catalogue link really does report a different level",
+        ns.DetailedIlvl(twoHand.link) ~= ns.MPLUS_ILVL
+          and ns.DetailedIlvl(twoHand.link) ~= nil,
+        tostring(ns.DetailedIlvl(twoHand.link)))
+
+  local scored = ns.Loot.ScoreItem(880002, { record = rec, itemLink = twoHand.link })
+  check("a dungeon item scores once described", scored.result ~= nil, tostring(scored.reason))
+  check("...at the fixed Mythic+ item level, NOT the catalogue link's",
+        scored.candidateIlvl == ns.MPLUS_ILVL,
+        ("got %s, want %s"):format(tostring(scored.candidateIlvl), tostring(ns.MPLUS_ILVL)))
+  -- 311 is Hero 3/6 and nothing else on the ladder, so the track resolves with
+  -- no bonus IDs at all — which is the point: a raid bonus block would state a
+  -- provenance a dungeon drop does not have.
+  check("...on the Hero track, resolved from the ladder alone",
+        scored.candidateTrack == ns.MPLUS_TRACK, tostring(scored.candidateTrack))
+
+  -- ⚠️ THE SELECTED RAID DIFFICULTY MUST NOT MOVE A DUNGEON ITEM. Its drop level
+  -- is fixed; a +20 drops what a +10 drops.
+  local asNormal = ns.Loot.ScoreItem(880002, { record = rec, difficulty = "n", itemLink = twoHand.link })
+  local asMythic = ns.Loot.ScoreItem(880002, { record = rec, difficulty = "m", itemLink = twoHand.link })
+  check("raid difficulty does not change a dungeon item's level or track",
+        asNormal.candidateIlvl == asMythic.candidateIlvl
+          and asNormal.candidateTrack == asMythic.candidateTrack,
+        ("%s/%s vs %s/%s"):format(tostring(asNormal.candidateIlvl), tostring(asNormal.candidateTrack),
+                                  tostring(asMythic.candidateIlvl), tostring(asMythic.candidateTrack)))
+
+  -- ⚠️ AND AT AN OVERLAPPING ITEM LEVEL, WHICH IS THE ONLY PLACE IT BITES.
+  -- The check above passes even with the guard removed, because 311 is Hero 3/6
+  -- and NOTHING ELSE on the current ladder — no tie, so a bonus ID cannot move
+  -- it. Several rungs DO overlap (318 is both Hero 5/6 and Myth 1/6), and there
+  -- the bonus ID is exactly what breaks the tie. Season tuning moves this number
+  -- every rollover, so the guard has to be tested at a value where it matters
+  -- rather than at the one that happens to be safe today.
+  local realIlvl = ns.MPLUS_ILVL
+  local OVERLAP = 318
+  local overlapRec = ns.JournalRecord(twoHand)
+  overlapRec.ilvl = { n = OVERLAP, h = OVERLAP, m = OVERLAP }
+  local ovN = ns.Loot.ScoreItem(880002, { record = overlapRec, difficulty = "n" })
+  local ovM = ns.Loot.ScoreItem(880002, { record = overlapRec, difficulty = "m" })
+  check("at an OVERLAPPING level, raid difficulty still cannot move the track",
+        ovN.candidateTrack == ovM.candidateTrack,
+        ("normal says %s, mythic says %s — a raid bonus block is deciding a dungeon drop")
+          :format(tostring(ovN.candidateTrack), tostring(ovM.candidateTrack)))
+  check("...and the fixture level really is ambiguous on the ladder",
+        select(1, ns.ResolveTrack(OVERLAP, { ns.BonusIdsFor("m", 1)[1] }))
+          ~= select(1, ns.ResolveTrack(OVERLAP, {})),
+        "otherwise the check above is vacuous")
+  ns.MPLUS_ILVL = realIlvl
+
+  -- ── Eligibility fails OPEN ────────────────────────────────────────────────
+  -- The guide entry carries no class list, and an empty one reads as the addon
+  -- being broken. An over-broad list is visibly wrong and fixable.
+  check("an item with no class list is not declared unusable",
+        not scored.ineligible, tostring(scored.reason))
+
+  -- ── An unplaceable item is listed but never scored ────────────────────────
+  local noSlot
+  for _, e in ipairs(pooled) do if e.itemID == 880005 then noSlot = e end end
+  check("an item the guide cannot place yields no record", ns.JournalRecord(noSlot) == nil)
+
+  -- ── Tonight's drops, filtered by the DUNGEON rather than one boss ────────
+  -- A Mythic+ tile is an instance and drops are recorded against an encounter.
+  -- Passing the tile id straight through filters on the wrong number space.
+  local ids = ns.EncounterIdsFor(multiBoss.id)
+  check("a dungeon tile resolves to a SET of encounter ids", type(ids) == "table",
+        type(ids))
+  local n = 0
+  for _ in pairs(ids) do n = n + 1 end
+  check("...one per boss in the dungeon", n == #ns.Journal.CachedEncounters(multiBoss.id), n)
+  check("...and never the instance id itself, which is a different id space",
+        ids[multiBoss.id] ~= true,
+        "an instance id matching an encounter id would be a coincidence, not a match")
+
+  -- The recorder must accept that set. A number still works for raid tiles.
+  local okSet = pcall(ns.Record.RecentDrops, 40, ids)
+  local okNum = pcall(ns.Record.RecentDrops, 40, 2849)
+  check("the recorder filters on a set as well as a single boss", okSet and okNum)
+
+  -- ── And it can be priced, which is the other half of the answer ───────────
+  local live = ns.Payload.Current()
+  if live and live.gp then
+    check("a dungeon item is priced from its slot and level",
+          ns.Payload.Price(880002, ns.MPLUS_ILVL, "TWO_HAND") ~= nil)
+  end
+
+  -- ── USABLE ONLY MUST ACTUALLY FILTER ────────────────────────────────────
+  -- ⚠️ THE LIVE BUG (Jason, Session 251): a LEATHER shoulder listed under Usable
+  -- Only for a Warlock. A dungeon item has no `classes` set — we have never
+  -- imported dungeon loot tables — so it fell straight through the class gate,
+  -- which fails OPEN by design, and every dungeon item read as usable.
+  --
+  -- The answer is the GAME'S, not a re-derivation: Blizzard's own journal filter
+  -- judges each item for this character. Nothing in Lua knows what a Warlock can
+  -- wear, which is the whole point.
+  local usable = ns.DungeonUsable(multiBoss.id)
+  check("the game answers which items this character can use", type(usable) == "table",
+        type(usable))
+
+  local mine, theirs   -- an item of our armour type, and one of somebody else's
+  for _, e in ipairs(pooled) do
+    if e.itemID == 880001 then mine = e elseif e.itemID == 880006 then theirs = e end
+  end
+  check("the fixture carries an item of another class's armour type", theirs ~= nil,
+        "this is the leather-shoulder case; without it the check below is vacuous")
+
+  check("...and the game excludes it", usable and usable[theirs.itemID] ~= true,
+        "Blizzard's filter should not list it for this class")
+  check("...while keeping our own", usable and usable[mine.itemID] == true)
+
+  local mineRec   = ns.JournalRecord(mine, usable)
+  local theirsRec = ns.JournalRecord(theirs, usable)
+  check("an item another class wears is marked unusable on the record",
+        theirsRec.usable == false, tostring(theirsRec.usable))
+  check("...and ours is not", mineRec.usable == true, tostring(mineRec.usable))
+
+  local theirsScored = ns.Loot.ScoreItem(theirs.itemID, { record = theirsRec })
+  check("...so it scores as INELIGIBLE, which is what Usable Only filters on",
+        theirsScored.ineligible == true, tostring(theirsScored.reason))
+  local mineScored = ns.Loot.ScoreItem(mine.itemID, { record = mineRec })
+  check("...and ours still scores", mineScored.ineligible ~= true, tostring(mineScored.reason))
+
+  -- ⚠️ NOT KNOWING IS NOT THE SAME AS USABLE, and it must not become a silent
+  -- "yes". With no answer from the game the item is left UNJUDGED — it falls
+  -- through to the existing fail-open, which is the documented behaviour for
+  -- anything we cannot ask about.
+  local unjudged = ns.JournalRecord(theirs, nil)
+  check("with no answer from the game, the item is left unjudged rather than allowed",
+        unjudged.usable == nil, tostring(unjudged.usable))
+
+  -- ── Tile art: one file per DUNGEON, keyed by instance id ─────────────────
+  -- ⚠️ TWO ID SPACES. Raid art is keyed by ENCOUNTER id and dungeon art by
+  -- INSTANCE id, and the ranges overlap — so they live in separate folders. One
+  -- folder would eventually draw a raid boss's face on a dungeon, silently.
+  --
+  -- A NEW SEASON NEEDS NEW ART or these fall back to initials, exactly as the
+  -- raid tiles do. It belongs on the rollover checklist.
+  local missing = {}
+  for _, d in ipairs(dungeons) do
+    local f = io.open(("Media/dungeons/%d.png"):format(d.id), "rb")
+    if f then f:close() else missing[#missing + 1] = ("%s (%d)"):format(d.name, d.id) end
+  end
+  -- The stub's dungeons are invented, so this cannot assert every tile has art.
+  -- What it CAN assert is that the folder exists and is keyed the way the panel
+  -- reads it — against the REAL season's ids, which are the ones that ship.
+  local realSeasonDungeons = { 1304, 1311, 1309, 1313, 1322, 1041, 1030, 1202 }
+  local haveReal = 0
+  for _, id in ipairs(realSeasonDungeons) do
+    local f = io.open(("Media/dungeons/%d.png"):format(id), "rb")
+    if f then f:close(); haveReal = haveReal + 1 end
+  end
+  check("every dungeon of the shipping season has bundled art",
+        haveReal == #realSeasonDungeons,
+        ("%d of %d — a missing file falls back to an initial")
+          :format(haveReal, #realSeasonDungeons))
+  check("...in their own folder, not mixed with the boss art",
+        io.open("Media/bosses/2849.png", "rb") ~= nil,
+        "raid art keys on ENCOUNTER ids and dungeon art on INSTANCE ids")
+
+  -- ── Back in raid mode, nothing about the tile changes shape ──────────────
+  ns.Settings.Set("difficulty", "HEROIC")
+  check("a raid tile is still a single boss id, not a set",
+        ns.EncounterIdsFor(2849) == 2849, tostring(ns.EncounterIdsFor(2849)))
+  check("...and raid mode is raid mode", ns.ContentMode() == "raid", ns.ContentMode())
+
+  ns.Settings.Set("difficulty", prevMode or "AUTO")
+end)()
+
+header("Roll states — read from the client's names, never from numbers")
+
+-- ⚠️ WHY THIS EXISTS. The old map was six hardcoded numbers copied from
+-- HoDLootTracker and never checked against a client. 1,538 rolls out of a real
+-- log say it is inverted, and the game's own roll window confirmed two of them
+-- directly: an Off-Spec need that rolled 6 and WON was recorded as a pass.
+--
+-- ⚠️ WHAT THIS CAN AND CANNOT PROVE. It proves the resolver keys on NAMES and
+-- reports what it could not match. It CANNOT prove the client's real member
+-- names are among the ones we recognise — the stub's enum is a fixture, not an
+-- observation, and asserting otherwise would be exactly the mistake that put
+-- the wrong numbers here in the first place. That is why an unmatched name is
+-- carried out of the function and printed both in the diagnostics and on the
+-- Loot Log window: in game, being wrong about the names is VISIBLE.
+;(function()
+  -- Names deliberately spelled several ways, because the one thing we control
+  -- is being generous about spelling. The numbers are arbitrary AND SHUFFLED —
+  -- if any of them leaked into an assertion, this test would be asserting the
+  -- very thing the change removes.
+  local fixture = {
+    NoRoll             = 7,
+    Pass               = 3,
+    Greed              = 11,
+    Transmogrification = 2,
+    Disenchant         = 5,  -- NOT a real retail option; here only to prove it is REPORTED, not mapped
+    NeedMainSpec       = 9,
+    NeedOffSpec        = 4,
+    SomethingNewIn122  = 42,
+  }
+
+  local map, source, unresolved = ns.BuildRollStates(fixture)
+  check("the client's names are used when it has them", source == "enum", source)
+  check("a need resolves by name, whatever its number", map[9] == "need", tostring(map[9]))
+  check("an OFF-SPEC need is its own value now", map[4] == "need_offspec", tostring(map[4]))
+  check("transmog resolves under its long spelling", map[2] == "transmog", tostring(map[2]))
+  check("greed resolves", map[11] == "greed", tostring(map[11]))
+  check("pass resolves", map[3] == "pass", tostring(map[3]))
+  -- ⚠️ DISENCHANT IS NOT MAPPED, ON PURPOSE. The API still returns
+  -- canDisenchant, but the option is not offered in retail: false in all 43 roll
+  -- windows of a real log, while need/greed/transmog all vary. It was mapped for
+  -- a few minutes on the strength of the API field alone, which is the "the
+  -- surface outlived the feature" trap. Unmapped means REPORTED, so if it ever
+  -- comes back we find out from the client rather than from a guess.
+  check("disenchant is NOT given an invented label", map[5] == nil, tostring(map[5]))
+  check("...it is reported as unmatched instead",
+        table.concat(unresolved, ","):find("Disenchant=5", 1, true) ~= nil,
+        table.concat(unresolved, ","))
+
+  -- The whole point: the OLD numbers must carry no weight at all. Under the old
+  -- map 2 was greed and 3 was transmog; here they are transmog and pass.
+  check("the inherited numbers no longer mean anything",
+        map[2] ~= "greed" and map[3] ~= "transmog",
+        "if this fails the resolver is still keying on numbers")
+
+  -- An unrecognised member is NAMED, not swallowed. This is the mechanism that
+  -- makes a future rename visible instead of silent.
+  local reported = table.concat(unresolved, ",")
+  check("an unrecognised state name is reported, with its number",
+        reported:find("SomethingNewIn122=42", 1, true) ~= nil, reported)
+  check("...and it is not given a label", map[42] == nil, tostring(map[42]))
+
+  -- ── The branch that actually matters ─────────────────────────────────────
+  -- If the client names nothing, we know nothing new, so behaviour must not
+  -- change on no evidence — and the fallback must ANNOUNCE itself.
+  local fbMap, fbSource = ns.BuildRollStates(nil)
+  check("with no enum at all, the inherited map is used", fbSource == "inherited", fbSource)
+  check("...and it is the old map, unchanged", fbMap[2] == "greed" and fbMap[5] == "need")
+
+  -- An enum full of names we do not recognise is no better than no enum.
+  local _, alienSource, alienUnresolved = ns.BuildRollStates({ Wibble = 1, Wobble = 2 })
+  check("an enum naming nothing we know falls back rather than emptying the map",
+        alienSource == "inherited", alienSource)
+  check("...and says which names it could not match", #alienUnresolved == 2, #alienUnresolved)
+
+  -- An unmapped state is "unknown", never a default. Defaulting to "noroll" is
+  -- how 531 passes came to be filed as needs with nobody able to tell.
+  check("an unmapped state is unknown, not defaulted", ns.RollTypeFor(9999) == "unknown")
+  check("a non-numeric state is unknown too", ns.RollTypeFor(nil) == "unknown")
+
+  -- The source is reachable for the surfaces that report it.
+  local liveSource = ns.RollStateSource()
+  check("the map's source is queryable for the UI to report",
+        liveSource == "enum" or liveSource == "inherited", tostring(liveSource))
+end)()
+
+header("GP cost — the price the panel puts beside an item")
+
+-- ⚠️ THE EXPECTED VALUES ARE THE WEBSITE'S OWN, not the formula written out a
+-- second time here. test/fixtures.lua carries a `prices` block generated by the
+-- REAL computeGpCharge() (app/lib/epgp.ts) over the same constants the raid
+-- export ships, so this is a parity check that happens to live in the smoke
+-- harness rather than an assertion that the code agrees with itself.
+--
+-- It lives HERE and not in test/parity.lua because pricing needs the namespace
+-- — Payload.lua and the static item table — and the parity harness deliberately
+-- loads nothing but Scoring.lua.
+;(function()
+  local ok, fx = pcall(dofile, "test/fixtures.lua")
+  local cases = ok and type(fx) == "table" and fx.prices or nil
+  if not cases or type(cases.pricing) ~= "table" then
+    -- ⚠️ A LOUD SKIP, NOT A FAILURE, AND NOT SILENCE.
+    --
+    -- test/fixtures.lua is GITIGNORED — it is generated from the running site,
+    -- so it does not exist in CI, and CI runs this harness on every weekly data
+    -- refresh. Failing here would break every release for a file that is not
+    -- meant to be in the repo. Passing quietly would be worse: it would report
+    -- 450 green checks while the one that proves the addon's prices match the
+    -- website never ran.
+    --
+    -- Same shape as the Lua 5.1 compile check below, and for the same reason.
+    io.write("\n  SKIP price parity — test/fixtures.lua is absent.\n")
+    io.write("       This check does NOT run in CI (the fixture is generated, not committed).\n")
+    io.write("       Locally:  curl -s localhost:3000/api/loot-advisor/parity-fixtures -o test/fixtures.lua\n\n")
+    return
+  end
+
+  -- The constants arrive the way they do in game: inside the stored payload.
+  local live = ns.Payload.Current()
+  local restore = live and live.gp
+  if live then live.gp = cases.pricing end
+
+  -- Synthetic item records, so the matrix is not tied to whichever items happen
+  -- to be in this season's payload. Ids are far outside the real range.
+  local data = ns.Data()
+  local synthetic = {}
+  local nextID = 990001
+
+  local mismatch, compared, priced = nil, 0, 0
+  for _, c in ipairs(cases) do
+    local id = nextID
+    nextID = nextID + 1
+    synthetic[#synthetic + 1] = id
+    data.items[id] = { name = c.name, slot = c.slot, tokenSlot = c.tokenSlot }
+
+    local got = ns.Payload.Price(id, c.ilvl)
+    compared = compared + 1
+    if c.gp == nil then
+      if got ~= nil then
+        mismatch = mismatch or ("%s @ %d: expected no price, got %s")
+          :format(c.slot, c.ilvl, tostring(got))
+      end
+    else
+      priced = priced + 1
+      if got == nil then
+        mismatch = mismatch or ("%s @ %d: expected %.4f, got nothing"):format(c.slot, c.ilvl, c.gp)
+      elseif math.abs(got - c.gp) > 1e-6 then
+        mismatch = mismatch or ("%s @ %d: expected %.4f, got %.4f"):format(c.slot, c.ilvl, c.gp, got)
+      end
+    end
+  end
+
+  check(("every GP price matches the website (%d cases)"):format(compared),
+        mismatch == nil, mismatch)
+  -- Not vacuous: an empty fixture, or one whose every case expects nil, would
+  -- otherwise pass while proving nothing.
+  check("...and the matrix actually priced things", priced > 0, priced)
+
+  -- ilvl 0 is "the client has not resolved this item yet". A price of zero
+  -- would be a lie dressed as data; nothing is the honest answer.
+  check("an unresolved item has no price", ns.Payload.Price(synthetic[1], 0) == nil)
+
+  -- A slot with no weight cannot be priced. Omitting it is the point — see
+  -- buildPricing(), which drops a slot rather than defaulting it to 1.0.
+  data.items[999900] = { name = "Test Tabard", slot = "TABARD" }
+  check("a slot the config does not price returns nothing",
+        ns.Payload.Price(999900, 305) == nil)
+
+  -- A dungeon or world-boss drop has no record of ours at all. It can still be
+  -- priced when the caller supplies the slot, which is what makes the price
+  -- work outside the raid loot table.
+  check("an item we have never imported is priced from a supplied slot",
+        ns.Payload.Price(999999, 305, "HEAD") ~= nil)
+  check("...and without a slot it is not priced at all",
+        ns.Payload.Price(999999, 305) == nil)
+
+  -- The formatted form, which is what the panel actually shows.
+  check("the price renders as whole GP",
+        ns.Payload.PriceText(synthetic[1], 305) ~= nil
+          and ns.Payload.PriceText(synthetic[1], 305):match("^%d+ GP$") ~= nil,
+        tostring(ns.Payload.PriceText(synthetic[1], 305)))
+
+  -- WITH NO PRICING BLOCK THERE IS NO PRICE. An export made before this shipped
+  -- carries no `gp` key, and the panel must show nothing rather than fall back
+  -- to a constant of its own.
+  if live then
+    live.gp = nil
+    check("an export with no pricing block yields no price",
+          ns.Payload.Price(synthetic[1], 305) == nil)
+    live.gp = restore
+  end
+
+  for _, id in ipairs(synthetic) do data.items[id] = nil end
+  data.items[999900] = nil
+end)()
+
 header("Patterns and housing decor are not loot — but unknown GEAR still is")
 
 ;(function()
@@ -2606,7 +3152,7 @@ header("Every file compiles under Lua 5.1 — the version the game runs")
     "Targets.lua", "Tooltip.lua", "Record.lua", "Loot.lua",
     -- THE WINDOW FILES ESPECIALLY. Nothing else in this harness loads them, so
     -- without this they reach the game entirely unparsed.
-    "LoadWindow.lua", "RecordWindow.lua", "Panel.lua",
+    "LoadWindow.lua", "RecordWindow.lua", "Panel.lua", "MinimapButton.lua",
   }
 
   for _, path in ipairs(FILES) do
@@ -2641,7 +3187,7 @@ header("Window files reference only helpers that exist")
   -- namespace while this runs.
   local DEFERRED = { Panel = true, LoadWindow = true, RecordWindow = true }
 
-  local WINDOWS = { "Panel.lua", "LoadWindow.lua", "RecordWindow.lua" }
+  local WINDOWS = { "Panel.lua", "LoadWindow.lua", "RecordWindow.lua", "MinimapButton.lua" }
 
   for _, path in ipairs(WINDOWS) do
     local fh = io.open(path, "r")

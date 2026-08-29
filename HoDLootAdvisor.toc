@@ -39,3 +39,6 @@ Loot.lua
 LoadWindow.lua
 RecordWindow.lua
 Panel.lua
+# Last: it only reaches into the namespace when clicked, so nothing here has to
+# precede it — and it is the entry point everything else is reached through.
+MinimapButton.lua

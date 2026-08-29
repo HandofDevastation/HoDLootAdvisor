@@ -92,10 +92,29 @@ Style.COLOR = {
   glowAlpha = 0.12,
   glowFrom  = 0.40,            -- fraction of the window height the wash starts at
 
-  -- Text (--text-primary / --text-secondary / --text-muted)
-  text      = hex("e8e8f0"),
-  textDim   = hex("9090b0"),
-  textMuted = hex("606080"),
+  -- ── Text (Session 251 — READ OUT OF THE FIGMA MOCK, not the website) ──────
+  --
+  -- ⚠️ THESE WERE THE SITE'S CSS VARIABLES AND THAT WAS THE BUG. The comment at
+  -- the top of this file says these are hex "so they read the same as the values
+  -- in globals.css" — which is right for the website and wrong for this panel.
+  -- --text-primary is #e8e8f0, a cool off-white; the mock is PURE WHITE. Nine
+  -- percent darker with a lilac cast reads as "not quite white" on screen, which
+  -- is exactly what Jason saw.
+  --
+  -- Verified against the mock directly, three text nodes plus the footnote:
+  --   item name, slot line, column header  -> #ffffff
+  --   the "*not on tonight's roster" note  -> rgba(255,255,255,0.5)
+  --
+  -- ⚠️ DIM IS WHITE AT HALF ALPHA, NOT A DARKER HUE. The old #9090b0 is a
+  -- PURPLE, and a purple grey against a purple panel is why the secondary lines
+  -- read as muddy rather than quiet. Alpha keeps the hue neutral over whatever
+  -- it sits on, which is the property a hue cannot have.
+  text      = hex("ffffff"),
+  textDim   = { r = 1, g = 1, b = 1, a = 0.5 },
+  -- The third step down, for the rail's least important line. No mock value
+  -- exists for it, so it stays on the SAME ramp rather than inventing a hue —
+  -- a guessed colour is how the first two got here.
+  textMuted = { r = 1, g = 1, b = 1, a = 0.3 },
 
   -- Accent (--gold) — the site's brand accent, used for the title and targets.
   gold      = hex("f3c56b"),
@@ -156,16 +175,39 @@ function Style.Badge(key)
 end
 
 --- r, g, b for a colour, so call sites stay short at the WoW API boundary.
+--- ⚠️ RETURNS FOUR VALUES NOW, NOT THREE. The design dims text by dropping
+--- WHITE to 50% alpha rather than by switching to a darker hue, so alpha is part
+--- of a colour here. Every SetTextColor call already passes this straight
+--- through, so they all gained alpha without a single call site changing —
+--- and `a` defaults to 1, so a colour that never had one behaves identically.
 function Style.rgb(c)
   c = c or Style.COLOR.text
-  return c.r, c.g, c.b
+  return c.r, c.g, c.b, c.a or 1
 end
 
 --- "|cffRRGGBB" for inline colouring in a chat line or a tooltip.
+---
+--- ⚠️ FLATTENS ALPHA, because the escape code HAS none. Since the text ramp
+--- became white-at-alpha (Session 251), three inline uses of textDim — the gap
+--- column's "tie" and "-16", and the chat post's separator — would have come out
+--- PURE WHITE and lost their whole reason for existing, silently and only in the
+--- places that build a string rather than colour a fontstring.
+---
+--- Composited over the panel's own ground, which is what sits behind every
+--- inline use of this. A chat frame is not that colour, but a dimmed grey there
+--- is still far closer than undimmed white.
 function Style.code(c)
   c = c or Style.COLOR.text
+  local a = c.a or 1
+  local r, g, b = c.r, c.g, c.b
+  if a < 1 then
+    local bgc = Style.COLOR.ground or { r = 0, g = 0, b = 0 }
+    r = r * a + bgc.r * (1 - a)
+    g = g * a + bgc.g * (1 - a)
+    b = b * a + bgc.b * (1 - a)
+  end
   return ("|cff%02x%02x%02x"):format(
-    math.floor(c.r * 255 + 0.5), math.floor(c.g * 255 + 0.5), math.floor(c.b * 255 + 0.5))
+    math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5), math.floor(b * 255 + 0.5))
 end
 
 -- ── Primitives ─────────────────────────────────────────────────────────────

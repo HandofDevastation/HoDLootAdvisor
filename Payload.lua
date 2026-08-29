@@ -409,3 +409,61 @@ function Payload.GearAgeText()
   if not (data and data.audit) then return "age unknown" end
   return ageText(data.audit)
 end
+
+-- ---------------------------------------------------------------------------
+-- What an item costs
+-- ---------------------------------------------------------------------------
+
+--- GP = base x 2^(ilvl / div) x slot weight, x1.25 for a tier token.
+---
+--- ⚠️ EVERY CONSTANT COMES FROM THE PAYLOAD. The addon holds no copy of the
+--- base constant, the divisor, the token surcharge or any slot weight, because
+--- a copy is the thing that goes stale: the scale is re-tuned every season
+--- (item cost climbs ~2.9x per 40 item levels) and a stale constant would put a
+--- confident wrong price on screen. No pricing block, no price shown.
+---
+--- ⚠️ THE ITEM LEVEL IS THE CALLER'S, not the one our table predicts. A drop
+--- carries its real level in its link, which is better data than the emitted
+--- ilvl table — the same reasoning as ns.ItemLinkFor.
+---
+--- There is NO off-spec price. Per rules/HoD_Rules_EPGP.txt a bid is a bid, and
+--- the multiplier is deliberately not even sent.
+---
+--- @param itemID number
+--- @param ilvl number the level this copy actually is
+--- @param slotOverride string|nil a loot slot, for an item with no record of
+---   our own — a dungeon or world-boss drop read from the Encounter Journal.
+--- @return number|nil GP, or nil when it cannot be priced honestly
+function Payload.Price(itemID, ilvl, slotOverride)
+  local data = Payload.Current()
+  local gp = data and data.gp
+  if type(gp) ~= "table" then return nil end
+  if type(gp.base) ~= "number" or type(gp.div) ~= "number" or gp.div == 0 then return nil end
+  if type(gp.w) ~= "table" then return nil end
+  if type(ilvl) ~= "number" or ilvl <= 0 then return nil end
+
+  local static = ns.Data and ns.Data() or nil
+  local rec = static and (static.items or {})[itemID] or nil
+  local isToken = rec ~= nil and rec.slot == "TOKEN"
+
+  -- An omni-token buys ANY tier slot, so ns.ItemSlot answers nil for it. The
+  -- site prices it as a chest — the most expensive of the tier slots and the
+  -- common case — and this must make the SAME choice or the two disagree in
+  -- front of the raid. See gpSlotWeight() in app/lib/epgp.ts.
+  local slot = slotOverride or (rec and ns.ItemSlot(rec)) or (isToken and "CHEST") or nil
+  if not slot then return nil end
+
+  local weight = gp.w[slot]
+  if type(weight) ~= "number" then return nil end
+  if isToken then weight = weight * (gp.token or 1) end
+
+  return gp.base * (2 ^ (ilvl / gp.div)) * weight
+end
+
+--- The price as the panel shows it: whole GP, or nil.
+--- Rounded, never floored — 99.6 is 100, which is what the site's preview says.
+function Payload.PriceText(itemID, ilvl, slotOverride)
+  local gp = Payload.Price(itemID, ilvl, slotOverride)
+  if not gp then return nil end
+  return ("%d GP"):format(math.floor(gp + 0.5))
+end

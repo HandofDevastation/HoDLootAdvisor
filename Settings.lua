@@ -36,9 +36,19 @@ Settings.SPEC = {
     help = "Adds the -4 / -7 margin after each badge.",
   },
   {
-    key = "difficulty", label = "Difficulty", default = "AUTO",
-    kind = "choice", choices = { "AUTO", "NORMAL", "HEROIC", "MYTHIC" },
-    help = "Which difficulty's item levels to score against. AUTO follows the raid you are in.",
+    key = "difficulty", label = "Content", default = "AUTO",
+    -- MPLUS selects CONTENT, not a difficulty: it swaps the Loot tab to the
+    -- season's dungeons. Kept on this one setting because it is one control in
+    -- the panel — the design has a single dropdown reading "Raid: Heroic".
+    kind = "choice", choices = { "AUTO", "NORMAL", "HEROIC", "MYTHIC", "MPLUS" },
+    help = "Which loot to show, and at what item level. AUTO follows the raid you are in; "
+        .. "Dungeons shows the season's Mythic+ loot at its fixed drop level.",
+  },
+  {
+    key = "hideMinimap", label = "Hide Minimap Button", default = false,
+    kind = "toggle",
+    help = "The button is the only way in that is not a typed command, so it is "
+        .. "shown by default.",
   },
   {
     key = "autoOpen", label = "Open Panel On A Drop", default = false,

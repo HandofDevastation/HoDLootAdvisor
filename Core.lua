@@ -983,6 +983,24 @@ end
 function ns.CanUse(rec, className, specName)
   if not rec then return true end
 
+  -- ⚠️ AN EXPLICIT ANSWER FROM THE GAME WINS, AND IS CHECKED FIRST. A dungeon
+  -- item has no `classes` set — we have never imported dungeon loot tables — so
+  -- it fell straight through the gate below and EVERY dungeon item was reported
+  -- usable. Live: a leather shoulder listed under Usable Only for a Warlock.
+  --
+  -- The answer is NOT re-derived here. Blizzard's own Encounter Journal filter
+  -- judges the item for this character (ns.DungeonUsable), and that answer is
+  -- attached to the record. Porting armour types and weapon subtypes into Lua is
+  -- exactly what the rule above forbids, and it is why this is a lookup.
+  --
+  -- nil means WE DO NOT KNOW and falls through to the existing behaviour, which
+  -- for a record with no `classes` is fail-open — unchanged for anything that
+  -- cannot ask the game.
+  if rec.usable == false then
+    return false, ("your class cannot use this%s"):format(
+      rec.armor and (" (" .. rec.armor .. ")") or "")
+  end
+
   -- Fail OPEN on a payload that predates the field. An over-broad list is
   -- visibly wrong and fixable; an empty one reads as the addon being broken.
   if type(rec.classes) == "table" then
@@ -1151,7 +1169,21 @@ ns.DIFFICULTY_KEY = {
 --- instance at all, and silently scoring everything as Heroic with no way to say
 --- otherwise is wrong for a Mythic team. Every consumer funnels through here, so
 --- the setting reaches the panel, the chat lines and the slash commands alike.
+-- ⚠️ "MPLUS" IS DELIBERATELY ABSENT FROM THIS MAP. The control selects CONTENT
+-- as well as difficulty now, and Mythic+ is not a raid difficulty — it has no
+-- n/h/m key and its item level is fixed. Leaving it out means every existing
+-- caller of ns.DifficultyKey() falls through to auto-detection exactly as it did
+-- before, rather than being handed a fourth value it has never seen.
 local SETTING_KEY = { NORMAL = "n", HEROIC = "h", MYTHIC = "m" }
+
+--- "raid" or "mplus" — WHICH CONTENT the Loot tab is showing.
+---
+--- Separate from ns.DifficultyKey() on purpose: one answers "which loot table",
+--- the other "at what item level", and only raids have the second question.
+function ns.ContentMode()
+  local v = ns.Settings and ns.Settings.Get("difficulty")
+  return (v == "MPLUS") and "mplus" or "raid"
+end
 
 function ns.DifficultyKey()
   local id = select(3, GetInstanceInfo())
@@ -1347,7 +1379,12 @@ loader:SetScript("OnEvent", function(_, event, name)
   -- panel is not.
   if ns.Tooltip then ns.Tooltip.Start() end
 
-  ns.Print(("v%s loaded. |cff888888/la|r opens the panel, |cff888888/la help|r lists commands."):format(ns.Version()))
+  -- The minimap button. Built here rather than at file scope because it reads
+  -- the saved position and the hide setting, neither of which exists until the
+  -- SavedVariables are loaded.
+  if ns.MinimapButton then ns.MinimapButton.Init() end
+
+  ns.Print(("v%s loaded. Click the minimap button to open it, or |cff888888/la help|r for commands."):format(ns.Version()))
   loader:UnregisterEvent("ADDON_LOADED")
 end)
 
@@ -1386,6 +1423,24 @@ local function cmdStatus()
 
   local key, diffId = ns.DifficultyKey()
   ns.Line(("Difficulty: %s (id %s)"):format(key, tostring(diffId)))
+
+  -- WHERE THE ROLL LABELS COME FROM. The inherited number map is known wrong
+  -- (Record.lua, Session 251), so which map answered is a fact worth stating
+  -- rather than something to infer from the labels themselves.
+  if ns.RollStateSource then
+    local source, unresolved = ns.RollStateSource()
+    if source == "enum" then
+      ns.Line("Roll labels: read from the client's own state names")
+      if unresolved and #unresolved > 0 then
+        -- NAMED, not counted. An unrecognised member name is the next version
+        -- of this bug, and it is only actionable if we can see what it is.
+        ns.Line("     |cffF3C56Bunmatched state names:|r " .. table.concat(unresolved, ", "))
+      end
+    else
+      ns.Line("Roll labels: |cffff4444inherited number map — UNVERIFIED and known wrong|r")
+      ns.Line("     The client named no roll states, so rolls may be mislabelled.")
+    end
+  end
 
   local raid = ns.Payload and ns.Payload.Summary()
   if raid then
@@ -1522,4 +1577,247 @@ SlashCmdList["HODLOOTADVISOR"] = function(msg)
     ns.Warn("unknown command: " .. cmd)
     cmdHelp()
   end
+end
+
+-- ---------------------------------------------------------------------------
+-- Mythic+ dungeons as a content mode
+-- ---------------------------------------------------------------------------
+--
+-- WHY THIS EXISTS. The Loot tab's boss strip is filled from our EMITTED payload,
+-- which is season-scoped RAID bosses only, so a dungeon item could not be
+-- browsed, targeted or scored at all. The difficulty control becomes a CONTENT
+-- control: Raid (Normal/Heroic/Mythic) or Dungeons.
+--
+-- ⚠️ TILES ARE DUNGEONS, NOT DUNGEON BOSSES (Jason). In a Mythic+ run you do not
+-- loot individual bosses — there is one chest at the end — so listing bosses you
+-- cannot loot separately would be showing a distinction the game does not make.
+-- One tile per dungeon, its loot pooled across every encounter inside it.
+--
+-- ⚠️ WORLD BOSSES ARE DELIBERATELY EXCLUDED (Jason): Champion track, which is
+-- below anything this guild cares about. Journal.Instances already drops the
+-- world-boss container, so nothing extra is needed here — but do not "fix" that
+-- exclusion thinking it is an oversight.
+
+--- What a Mythic+ dungeon actually DROPS. Not what it unlocks.
+---
+--- ⚠️ THE VAULT IS A DIFFERENT QUESTION and the two are easy to conflate.
+--- MPLUS_VAULT_TRACK on the site says +10 and above reward MYTH — that is the
+--- weekly vault, and a bonus roll. The DROP off the end-of-run chest is Hero 3/6
+--- at every key level from +10 up; a +20 drops exactly what a +10 drops.
+--- Jason, Session 251, and 311 is Hero 3/6 on our own ladder.
+---
+--- Below +10 is deliberately not modelled: nobody at this guild's level cares
+--- about it after the first week of a season.
+ns.MPLUS_ILVL  = 311
+ns.MPLUS_TRACK = "Hero"
+ns.MPLUS_RANK  = 3
+
+--- The season's dungeons, as the strip's tiles.
+---
+--- Read from the ADVENTURE GUIDE, not from our payload: the guide is the game's
+--- own catalogue of the current season and needs no emit, no site work and no
+--- season rollover on our side. Journal.Instances already excludes the
+--- world-boss container.
+function ns.DungeonList()
+  local out = {}
+  for _, inst in ipairs(ns.Journal and ns.Journal.CachedInstances() or {}) do
+    -- ⚠️ THE SEASON'S DUNGEON LIST CARRIES A CONTAINER THAT HOLDS NOTHING —
+    -- "Keystone Dungeons" (1319 in Midnight S2) enumerates like any other
+    -- instance and lists no loot. Left in, it draws a tile that opens onto an
+    -- empty list, which reads as the addon being broken. Journal.HasLoot fails
+    -- open, so a client that will not answer shows the tile rather than hiding
+    -- a real dungeon.
+    if inst.isRaid == false and ns.Journal.HasLoot(inst.id) then
+      out[#out + 1] = { id = inst.id, name = inst.name, order = #out + 1, bis = 0 }
+    end
+  end
+  return out
+end
+
+--- Everything one dungeon can drop, pooled across its bosses and deduplicated.
+---
+--- ⚠️ POOLED BECAUSE THE GAME POOLS IT. One chest at the end of a key means the
+--- dungeon is the unit of loot, so splitting by boss would invent a choice the
+--- player never makes. An item that several bosses share appears ONCE.
+---
+--- Second return says whether any read is still warming — the item cache is
+--- cold on a first look and the caller must expect to draw again.
+function ns.DungeonLoot(instanceID)
+  local out, seen, warming = {}, {}, false
+  if not (ns.Journal and instanceID) then return out, false end
+  for _, enc in ipairs(ns.Journal.CachedEncounters(instanceID)) do
+    local list, warm = ns.Journal.CachedLoot(enc.id)
+    if warm then warming = true end
+    for _, j in ipairs(list or {}) do
+      if j.itemID and not seen[j.itemID] then
+        seen[j.itemID] = true
+        out[#out + 1] = j
+      end
+    end
+  end
+  return out, warming
+end
+
+-- The Adventure Guide's own slot wording -> the loot slot vocabulary the scorer,
+-- the payload and the GP weights all speak.
+--
+-- ⚠️ THE GUIDE SAYS "Two-Hand" AND THE PAYLOAD SAYS "TWO_HAND". Both halves are
+-- real vocabularies; neither is negotiable, so the mapping is explicit rather
+-- than a string transform. A transform would silently produce "TWOHAND" and
+-- every two-hander would price and score as an unknown slot.
+local JOURNAL_SLOT = {
+  ["head"] = "HEAD", ["neck"] = "NECK", ["shoulder"] = "SHOULDER",
+  ["shoulders"] = "SHOULDER", ["back"] = "BACK", ["cloak"] = "BACK",
+  ["chest"] = "CHEST", ["robe"] = "CHEST", ["wrist"] = "WRIST",
+  ["wrists"] = "WRIST", ["hands"] = "HANDS", ["waist"] = "WAIST",
+  ["legs"] = "LEGS", ["feet"] = "FEET", ["finger"] = "FINGER",
+  ["trinket"] = "TRINKET", ["main hand"] = "MAIN_HAND",
+  ["off hand"] = "OFF_HAND", ["held in off-hand"] = "OFF_HAND",
+  ["one-hand"] = "ONE_HAND", ["two-hand"] = "TWO_HAND",
+  ["ranged"] = "RANGED",
+}
+
+--- The loot slot for an Adventure Guide entry, or nil when we cannot tell.
+---
+--- ⚠️ nil IS AN HONEST ANSWER HERE. An unmapped slot means the item is listed
+--- but not scored or priced, which is visibly incomplete. Guessing a slot would
+--- give it a real badge and a real price computed against the wrong weight,
+--- which is not.
+function ns.JournalSlot(entry)
+  if type(entry) ~= "table" then return nil end
+  local slot = entry.slot
+  if type(slot) ~= "string" or slot == "" then return nil end
+  return JOURNAL_SLOT[slot:lower()]
+end
+
+--- An item link that tooltips a dungeon drop at the level it ACTUALLY drops at.
+---
+--- ⚠️ THE ADVENTURE GUIDE'S OWN LINK IS A CATALOGUE LINK and tooltips the item
+--- at its BASE level — 292 for a piece that drops at 311. Left alone, the
+--- tooltip contradicted the line printed directly beneath it, which is worse
+--- than either number alone: two authorities disagreeing on one screen.
+---
+--- Attaches the Hero block's rank-3 bonus id and lets the CLIENT compute the
+--- level and stats, the same reasoning as ns.ItemLinkFor — we never re-derive
+--- numbers we would then have to keep in step with Blizzard's.
+function ns.MplusItemLink(itemID)
+  if not itemID then return nil end
+  local data = ns.Data()
+  local block = (((data or {}).tracks or {}).bonus or {})[ns.MPLUS_TRACK]
+  local id = block and block[ns.MPLUS_RANK]
+  if not id then return ("item:%d"):format(itemID) end
+  -- item : id : enchant : gem1-4 : suffix : unique : level : specID :
+  -- modifiersMask : itemContext : numBonusIDs : bonusID...
+  return ("item:%d::::::::::::1:%d"):format(itemID, id)
+end
+
+--- The subset of a dungeon's loot THE GAME says this character can equip.
+---
+--- ⚠️ THIS IS THE GAME'S ANSWER, NOT OURS. EJ_SetLootFilter(classID, specID) is
+--- Blizzard's own eligibility filter — measured taking a 17-item encounter to 5
+--- for a Marksmanship Hunter — so asking it costs one extra read and nothing has
+--- to know that a Warlock cannot wear leather. Re-deriving that in Lua is the
+--- five-things-to-drift trap the eligibility rule exists to prevent.
+---
+--- ⚠️ IT DOES NOT FILTER THE LIST, only the VERDICT. The item column still shows
+--- everything the dungeon drops, because the pane ranks the whole ROSTER per
+--- item and filtering at the source would hide somebody else's upgrade. This
+--- decides one flag per item; the Usable Only toggle acts on that flag.
+---
+--- @return table|nil set of usable itemIDs, or nil when we cannot answer — and
+---   nil MUST mean "do not claim", so an unanswerable client shows everything
+---   rather than an empty list.
+function ns.DungeonUsable(instanceID)
+  if not (ns.Journal and instanceID) then return nil end
+
+  local char = ns.ResolveCharacter()
+  local classID = select(3, UnitClass("player"))
+  -- A LIST FILTERED WITHOUT A SPEC IS A DIFFERENT LIST. Answering nil here is
+  -- honest; answering a half-filtered set would mark items unusable that are
+  -- not, which is worse than the bug being fixed.
+  if not (classID and char and char.specId) then return nil end
+
+  local set, answered = {}, false
+  for _, enc in ipairs(ns.Journal.CachedEncounters(instanceID)) do
+    local list, warming = ns.Journal.CachedLoot(enc.id, {
+      classID = classID, specID = char.specId,
+    })
+    -- ⚠️ A WARMING READ IS WRONG IN A WAY THAT MATTERS HERE: Blizzard's filter
+    -- cannot judge an item the client has not loaded, so a cold read comes back
+    -- UNFILTERED and would mark nothing unusable. Refuse the whole answer rather
+    -- than build a set from a mix of judged and unjudged encounters.
+    if warming then return nil end
+    for _, j in ipairs(list or {}) do
+      if j.itemID then
+        set[j.itemID] = true
+        answered = true
+      end
+    end
+  end
+
+  if not answered then return nil end
+  return set
+end
+
+--- A scoreable record for an item that is NOT in our emitted loot table.
+---
+--- WHAT IT CAN AND CANNOT CARRY:
+---   name, slot, ilvl  — from the Adventure Guide and the fixed M+ drop level.
+---   stats             — EMPTY, and that is not a stand-in for unknown. We have
+---                       never imported dungeon stat blocks, so F3 stat
+---                       alignment scores 0. An item with a BIS listing or a
+---                       letter GRADE is unaffected, because quality REPLACES
+---                       stat alignment rather than adding to it — so the picks
+---                       that matter score in full.
+---   classes           — ABSENT, which the eligibility check treats as FAIL
+---                       OPEN (rules/HoD_Rules_Loot-Gear.txt). An over-broad
+---                       list is visibly wrong and fixable; an empty one reads
+---                       as the addon being broken.
+---
+--- ⚠️ NOT WRITTEN INTO ns.Data(). This record is handed to the scorer for one
+--- call and thrown away. Injecting it into the static table would make an item
+--- we have not imported indistinguishable from one we have, everywhere.
+--- @param usableSet table|nil the answer from ns.DungeonUsable, or nil for
+---   "not known" — which leaves the item unjudged rather than marking it usable.
+function ns.JournalRecord(entry, usableSet)
+  local slot = ns.JournalSlot(entry)
+  if not slot then return nil end
+
+  -- Blizzard's own verdict, or nil. NEVER a default of true: defaulting is what
+  -- put a leather shoulder on a Warlock's usable list.
+  local usable
+  if type(usableSet) == "table" then
+    usable = usableSet[entry.itemID] == true
+  elseif entry.unusable == true then
+    -- The per-entry flags (handError / weaponTypeError) as a second source. They
+    -- can only say NO, never yes, so they narrow and never widen.
+    usable = false
+  end
+
+  return {
+    name     = entry.name,
+    slot     = slot,
+    armor    = entry.armorType,
+    stats    = {},
+    primary  = {},
+    ilvl     = { n = ns.MPLUS_ILVL, h = ns.MPLUS_ILVL, m = ns.MPLUS_ILVL },
+    usable   = usable,
+    synthetic = true,
+  }
+end
+
+--- The Blizzard encounter ids a strip tile covers.
+---
+--- A RAID tile is one boss, so the answer is itself. A DUNGEON tile is an
+--- instance covering several encounters, and drops are recorded against the
+--- ENCOUNTER — different id spaces, so the instance id must never be used as a
+--- drop filter directly.
+function ns.EncounterIdsFor(tileId)
+  if not tileId then return nil end
+  if ns.ContentMode() ~= "mplus" then return tileId end
+  local set = {}
+  for _, enc in ipairs(ns.Journal and ns.Journal.CachedEncounters(tileId) or {}) do
+    if enc.id then set[enc.id] = true end
+  end
+  return set
 end

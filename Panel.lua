@@ -87,6 +87,10 @@ local TAB_Y, TAB_W, TAB_H, TAB_PITCH = 60, 100, 24, 110
 -- Boss strip: 32px portraits, right-aligned to the window's right margin.
 local BOSS_Y, BOSS_SIZE, BOSS_PITCH = 102, 32, 42
 local BOSS_SLOTS = 9
+-- The selection underline, drawn BELOW the tile. Named because two things have
+-- to agree about it: the bar's own height and the gap left for it before the
+-- overflow line, and they drifted apart the moment one was a literal.
+local SEL_H = 4
 
 local CTX_Y = 100          -- boss name + "For You:" block, left of the strip
 
@@ -114,9 +118,14 @@ local FOOT_Y, FOOT_H = 509, 51
 -- old panel ended up needing resetRow discipline in the first place.
 -- Difficulty dropdown, on the tab row's right (Loot tab only — the Standings
 -- design puts the season name in that space instead).
-local DIFF_X, DIFF_Y, DIFF_W, DIFF_H = 500, 60, 100, 24
-local DIFF_CHOICES = { "AUTO", "NORMAL", "HEROIC", "MYTHIC" }
-local DIFF_LABEL = { AUTO = "Auto", NORMAL = "Normal", HEROIC = "Heroic", MYTHIC = "Mythic" }
+-- WIDER SINCE SESSION 251: the label now names the CONTENT as well as the
+-- difficulty ("Raid: Heroic"), which no longer fits 100px.
+local DIFF_X, DIFF_Y, DIFF_W, DIFF_H = 460, 60, 140, 24
+local DIFF_CHOICES = { "AUTO", "NORMAL", "HEROIC", "MYTHIC", "MPLUS" }
+local DIFF_LABEL = {
+  AUTO = "Auto", NORMAL = "Raid: Normal", HEROIC = "Raid: Heroic",
+  MYTHIC = "Raid: Mythic", MPLUS = "Dungeons",
+}
 
 local SEASON_R = 583                 -- season label, right-aligned, on the tab row
 local RAIL_X = 20                    -- the personal rail down the left
@@ -335,33 +344,30 @@ local function buildItemRow(parent, i)
       Panel.Refresh()
     end
   end)
-  -- A REAL game tooltip, so item level, stats and effects come from the client
-  -- rather than from anything we compute. The dropped item's own link is used
-  -- when we have one — it is the version that actually dropped.
+  -- ⚠️ NO TOOLTIP ON THESE ROWS (Jason, Session 251). The column is a SELECTOR,
+  -- and it is scrolled and clicked through — a full item tooltip firing on every
+  -- row the pointer crosses covered the detail pane the column exists to drive,
+  -- so reading the thing you just selected meant moving the mouse away first.
+  -- The item tooltip now lives on the detail pane's icon and name, which is the
+  -- one place you are actually looking at an item rather than choosing between
+  -- them. Hovering still highlights the row.
   row:SetScript("OnEnter", function(self)
     if S then self.bg:SetColorTexture(S.COLOR.purple.r, S.COLOR.purple.g, S.COLOR.purple.b, 0.28) end
-    local link = self.link or (self.itemID and ns.ItemLinkFor(self.itemID))
-    if not link then return end
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:SetHyperlink(link)
-    GameTooltip:AddLine(ns.Targets and ns.Targets.Has(self.itemID)
-      and "Right-click to stop targeting." or "Right-click to target.", 0.6, 0.6, 0.7)
-    GameTooltip:Show()
   end)
   row:SetScript("OnLeave", function(self)
     if S then
       self.bg:SetColorTexture(S.COLOR.purple.r, S.COLOR.purple.g, S.COLOR.purple.b,
         self._selected and 0.2 or 0.1)
     end
-    GameTooltip:Hide()
   end)
   return row
 end
 
 --- One boss portrait in the strip.
 ---
---- The selected boss takes a 4px orange underline rather than a rim or a fill:
---- a rim on a 32px tile eats the art, and the underline is what the design draws.
+--- The selected boss takes a 4px orange underline BENEATH the tile rather than a
+--- rim or a fill: a rim on a 32px tile eats the art, and the underline is what
+--- the design draws. It sits outside the tile so it covers none of the picture.
 local function buildBossTile(parent, i)
   local tile = CreateFrame("Button", nil, parent)
   tile:SetSize(BOSS_SIZE, BOSS_SIZE)
@@ -384,10 +390,15 @@ local function buildBossTile(parent, i)
   tile.initial = text(tile, "titleMed", "head", "textDim", "CENTER")
   tile.initial:SetPoint("CENTER")
 
+  -- ⚠️ OUTSIDE THE TILE, NOT ON IT (Jason, Session 251). Anchored BOTTOMLEFT/
+  -- BOTTOMRIGHT of the tile, the bar sat in the tile's own bottom 4px and painted
+  -- over the art — on a 32px tile that is an eighth of the picture, and it read
+  -- as the selection eating the icon. Anchoring its TOP to the tile's BOTTOM puts
+  -- it entirely below, which is what the design draws.
   tile.sel = tile:CreateTexture(nil, "OVERLAY")
-  tile.sel:SetPoint("BOTTOMLEFT")
-  tile.sel:SetPoint("BOTTOMRIGHT")
-  tile.sel:SetHeight(4)
+  tile.sel:SetPoint("TOPLEFT", tile, "BOTTOMLEFT", 0, 0)
+  tile.sel:SetPoint("TOPRIGHT", tile, "BOTTOMRIGHT", 0, 0)
+  tile.sel:SetHeight(SEL_H)
   if S then tile.sel:SetColorTexture(S.rgb(S.COLOR.orange)) end
   tile.sel:Hide()
 
@@ -654,7 +665,9 @@ local function buildLootControls()
   -- TOOLTIP strata so nothing the panel draws can land over the open list.
   frame.diffMenu:SetFrameStrata("TOOLTIP")
   frame.diffMenu:SetPoint("TOPLEFT", frame.diff, "BOTTOMLEFT", 0, -2)
-  frame.diffMenu:SetSize(DIFF_W, 4 + 4 * 20)
+  -- Sized from the CHOICE LIST, not a literal: adding Dungeons to a menu whose
+  -- height said "4" clipped the new row off the bottom with nothing erroring.
+  frame.diffMenu:SetSize(DIFF_W, 4 + #DIFF_CHOICES * 20)
   frame.diffMenu:EnableMouse(true)
   frame.diffMenu:Hide()
   if ns.Style then ns.Style.Surface(frame.diffMenu, ns.Style.COLOR.elevated, 0.98) end
@@ -690,15 +703,11 @@ local function buildLootControls()
     if frame.diffMenu:IsShown() then frame.diffMenu:Hide()
     else frame.diffMenu:Show(); frame.diffMenu:Raise() end
   end)
-  frame.diff:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-    GameTooltip:SetText("Difficulty", 1, 1, 1)
-    GameTooltip:AddLine("Which difficulty's item levels everything is scored against.",
-      0.8, 0.8, 0.8, true)
-    GameTooltip:AddLine("Auto follows the raid you are currently in.", 0.6, 0.6, 0.7, true)
-    GameTooltip:Show()
-  end)
-  frame.diff:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  -- ⚠️ NO TOOLTIP ON THIS CONTROL, deliberately (Jason, Session 251). It
+  -- anchored BELOW the button, which is exactly where the menu opens — so
+  -- hovering to click covered the very list you were reaching for. A tooltip
+  -- that hides the thing it describes is worse than none, and this control does
+  -- not need explaining: every entry names itself.
 
   -- ── Boss context, left of the strip ───────────────────────────────────────
   frame.bossName = at(text(frame, "label", "head", "orange"), 21, CTX_Y, 200)
@@ -716,9 +725,10 @@ local function buildLootControls()
     frame.bossTiles[i] = buildBossTile(frame.strip, i)
     frame.bossTiles[i]:Hide()
   end
-  frame.stripMore = at(text(frame, "body", "tiny", "textDim"), 0, BOSS_Y + BOSS_SIZE + 2, 200, "RIGHT")
+  frame.stripMore = at(text(frame, "body", "tiny", "textDim"), 0,
+    BOSS_Y + BOSS_SIZE + SEL_H + 2, 200, "RIGHT")
   frame.stripMore:ClearAllPoints()
-  frame.stripMore:SetPoint("TOPRIGHT", -PAD, -(BOSS_Y + BOSS_SIZE + 2))
+  frame.stripMore:SetPoint("TOPRIGHT", -PAD, -(BOSS_Y + BOSS_SIZE + SEL_H + 2))
 
   -- ── The two filter toggles ────────────────────────────────────────────────
   local function toggle(col, rowIdx, label, onClick)
@@ -878,10 +888,20 @@ local function buildDetailPane()
   frame.itemHover:SetSize(250, 40)
   frame.itemHover:EnableMouse(true)
   frame.itemHover:SetScript("OnEnter", function(self)
-    local link = self.link or (Panel.CurrentItemID() and ns.ItemLinkFor(Panel.CurrentItemID()))
+    local itemID = Panel.CurrentItemID()
+    local link = self.link or (itemID and ns.ItemLinkFor(itemID))
     if not link then return end
     GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT")
     GameTooltip:SetHyperlink(link)
+    -- ⚠️ THE TARGETING HINT MOVED HERE WITH THE TOOLTIP. It used to ride on the
+    -- item column's tooltip, and nothing else in the panel says a row can be
+    -- right-clicked — so dropping that tooltip without moving this line would
+    -- have quietly removed the only place targeting is explained.
+    if itemID then
+      GameTooltip:AddLine(ns.Targets and ns.Targets.Has(itemID)
+        and "Right-click a row to stop targeting."
+        or "Right-click a row to target it.", 0.6, 0.6, 0.7)
+    end
     GameTooltip:Show()
   end)
   frame.itemHover:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1118,7 +1138,13 @@ end
 
 -- BIS counting lives in Core.lua as ns.BisCountsByBoss: it is pure payload
 -- logic, and Panel.lua is frame construction the headless harness does not load.
+-- THE STRIP'S TILES. Raid bosses from our payload, or the season's DUNGEONS
+-- from the Adventure Guide — one tile per dungeon, because a Mythic+ run has one
+-- chest at the end and listing bosses would show a choice the game never offers.
 local function bossList()
+  if ns.ContentMode() == "mplus" then
+    return ns.DungeonList()
+  end
   local data = ns.Data()
   local counts = ns.BisCountsByBoss()
   local out = {}
@@ -1139,7 +1165,25 @@ end
 --- about somebody else. That is what makes the column answer "is any of this for
 --- me" before a single row of the detail pane is read.
 local function scoreEntry(e)
-  local scored = ns.Loot.ScoreItem(e.itemID, { itemLink = e.link })
+  -- A DUNGEON ITEM IS NOT IN OUR LOOT TABLE — we have never imported dungeon
+  -- loot — so the scorer is handed a record built from what the Adventure Guide
+  -- said: name, slot, and the fixed Mythic+ drop level. What it cannot supply is
+  -- a stat block, so such an item scores its item-level gain and track gap in
+  -- full and its stat alignment as zero, UNLESS it carries a BIS listing or a
+  -- letter grade — those REPLACE stat alignment rather than adding to it, so the
+  -- picks that actually matter score completely. See ns.JournalRecord.
+  local record
+  if ns.ContentMode() == "mplus" then
+    -- The usable set is resolved ONCE per refresh, not per item: it costs a
+    -- journal read per boss in the dungeon, and doing that inside a loop over
+    -- every item would drive the live Adventure Guide dozens of times a frame —
+    -- the same cost that made resolving boss portraits per refresh untenable.
+    record = ns.JournalRecord(
+      { name = e.name, slot = e.slotText, armorType = e.armorType,
+        itemID = e.itemID, unusable = e.unusable },
+      state.usableSet)
+  end
+  local scored = ns.Loot.ScoreItem(e.itemID, { itemLink = e.link, record = record })
   e.quality = scored.quality
   e.ineligible = scored.ineligible or false
   e.reason = scored.reason
@@ -1169,13 +1213,34 @@ end
 local function itemEntries()
   local out, seen = {}, {}
 
+  -- ⚠️ WHO CAN USE WHAT IS THE GAME'S ANSWER, and it is resolved ONCE per
+  -- refresh, here, so that BOTH lists get it and a set from a previous tile can
+  -- never survive a switch. Per item would drive the live Adventure Guide dozens
+  -- of times a frame, which is the cost that made per-refresh portrait lookups
+  -- untenable in Session 250.
+  --
+  -- ⚠️ CLEARED IN RAID MODE, not left behind. Raid items carry their own class
+  -- gate from the payload, and a stale dungeon set applied to them would mark
+  -- real raid loot unusable — a worse bug than the one being fixed.
+  if ns.ContentMode() == "mplus" then
+    local tiles = bossList()
+    local tile = tiles[state.bossIndex]
+    state.usableSet = tile and ns.DungeonUsable(tile.id) or nil
+  else
+    state.usableSet = nil
+  end
+
   if state.source == "drops" then
     -- SCOPED TO THE SELECTED BOSS. The strip is a selector on both lists, not
     -- just the full table; without this it was inert here and the tab looked
     -- frozen on whichever boss died last.
     local bosses = bossList()
     local boss = bosses[state.bossIndex]
-    for _, d in ipairs(ns.Record and ns.Record.RecentDrops(40, boss and boss.id) or {}) do
+    -- ns.EncounterIdsFor, not boss.id: a dungeon tile is an INSTANCE and drops
+    -- are recorded against an ENCOUNTER, so passing the tile id straight through
+    -- would filter on the wrong number space and show nothing.
+    local wanted = ns.EncounterIdsFor(boss and boss.id)
+    for _, d in ipairs(ns.Record and ns.Record.RecentDrops(40, wanted) or {}) do
       if d.itemID and not seen[d.itemID] then
         seen[d.itemID] = true
         out[#out + 1] = {
@@ -1199,8 +1264,19 @@ local function itemEntries()
     -- NOT class/spec filtered here: the Usable Only toggle is the viewer's own
     -- decision, and the pane ranks the whole ROSTER per item, so filtering at
     -- the source would hide somebody else's upgrade.
-    if ns.Journal then
-      for _, j in ipairs(ns.Journal.CachedLoot(boss.id)) do
+    -- IN DUNGEON MODE THE TILE IS A DUNGEON, so its loot is pooled across every
+    -- boss inside it and deduplicated (ns.DungeonLoot). In raid mode the tile is
+    -- one boss and the read is per encounter. Same shape either way, so
+    -- everything below this is unchanged.
+    local journalLoot
+    if ns.ContentMode() == "mplus" then
+      journalLoot = ns.DungeonLoot(boss.id)
+    elseif ns.Journal then
+      journalLoot = ns.Journal.CachedLoot(boss.id)
+    end
+
+    if journalLoot then
+      for _, j in ipairs(journalLoot) do
         -- ⚠️ NOT GEAR, NOT ON THE LIST. The journal enumerates profession
         -- patterns and housing decor alongside the loot, and they arrived here
         -- as UNSCORED rows — the addon truthfully having no opinion about a
@@ -1212,9 +1288,18 @@ local function itemEntries()
         if not seen[j.itemID] and ns.IsGearItem(j.itemID, (data or {}).items
              and data.items[j.itemID]) then
           seen[j.itemID] = true
+          -- ⚠️ IN DUNGEON MODE THE GUIDE'S LINK IS REPLACED, not passed on. It
+          -- tooltips the item at its BASE level, which contradicted the item
+          -- level printed right beneath it. ns.MplusItemLink carries the Hero
+          -- 3/6 bonus id so the client renders the version that really drops.
+          local link = j.link
+          if ns.ContentMode() == "mplus" then link = ns.MplusItemLink(j.itemID) end
           out[#out + 1] = {
-            itemID = j.itemID, name = j.name, link = j.link,
+            itemID = j.itemID, name = j.name, link = link,
             slotText = j.slot, armorType = j.armorType,
+            -- Blizzard's per-entry eligibility flag, carried so the verdict does
+            -- not need a second read of the journal to find it again.
+            unusable = j.unusable,
           }
         end
       end
@@ -1223,7 +1308,11 @@ local function itemEntries()
     -- Anything we hold that the journal did not report is still shown. Where the
     -- two disagree, the union is the degrade-loudly answer and a missing item is
     -- the failure that actually costs somebody an upgrade.
-    for id, it in pairs((data or {}).items or {}) do
+    --
+    -- ⚠️ RAID MODE ONLY. Our payload's `boss` field is a RAID encounter id, and a
+    -- dungeon tile is an INSTANCE id — different id spaces that would collide by
+    -- coincidence and file raid items under a dungeon.
+    for id, it in pairs((ns.ContentMode() == "mplus") and {} or ((data or {}).items or {})) do
       if it.boss == boss.id and not seen[id] then
         seen[id] = true
         out[#out + 1] = { itemID = id, name = it.name }
@@ -1453,8 +1542,19 @@ local function renderBossStrip()
       --
       -- ⚠️ NEW TIER = NEW ART, or these draw as initials. Same standing cost
       -- Build Barn carries; it belongs on the season-rollover checklist.
-      tile.art:SetTexture(("Interface\\AddOns\\HoDLootAdvisor\\Media\\bosses\\%d.png")
-        :format(b.id))
+      -- ⚠️ TWO FOLDERS, TWO ID SPACES, AND THEY MUST NOT BE MIXED. Raid tiles are
+      -- Blizzard ENCOUNTER ids; dungeon tiles are Blizzard INSTANCE ids. The
+      -- ranges overlap by coincidence, so a single folder would eventually put a
+      -- raid boss's face on a dungeon with nothing erroring.
+      --
+      -- Both sets are Build Barn's, renamed. Its Mythic+ section is keyed by
+      -- DUNGEON rather than by boss — which is the same shape this strip needs,
+      -- since a key drops one chest at the end — so it already ships exactly one
+      -- 56x56 icon per dungeon. Renamed from its WarcraftLogs ids to Blizzard's
+      -- by matching NAMES, which agree one-to-one across the two sources.
+      local folder = (ns.ContentMode() == "mplus") and "dungeons" or "bosses"
+      tile.art:SetTexture(("Interface\\AddOns\\HoDLootAdvisor\\Media\\%s\\%d.png")
+        :format(folder, b.id))
       local drew = tile.art:GetTexture() ~= nil
 
       tile.art:SetShown(drew)
@@ -1464,8 +1564,11 @@ local function renderBossStrip()
       tile:Show()
     end
   end
+  -- Nine slots, and the season has more dungeons than that — so the overflow
+  -- line is not a theoretical case here, and it must name the right thing.
+  local noun = (ns.ContentMode() == "mplus") and "dungeons" or "bosses"
   frame.stripMore:SetText(#bosses > BOSS_SLOTS
-    and ("+%d more bosses not shown"):format(#bosses - BOSS_SLOTS) or "")
+    and ("+%d more %s not shown"):format(#bosses - BOSS_SLOTS, noun) or "")
 end
 
 local function renderItemColumn(entries)
@@ -1590,12 +1693,15 @@ end
 
 --- The facts line beneath the header: gain, gap, quality and target state.
 ---
---- ⚠️ NO "Cost: 100 GP" YET, and it is not being faked. The design shows the
---- item's GP price, but the addon has no way to compute one: the raid payload
---- carries each raider's EP/GP/PR and nothing about what an ITEM costs, and the
---- pricing formula lives on the site. A number invented here would be a raw
---- figure with an authoritative label, which is the exact failure Core §7.7
---- forbids. The segment appears when the payload carries a price.
+--- "Cost: 100 GP" appears ONLY when the raid export carried the pricing block,
+--- and is silently absent otherwise — an export made before pricing shipped, or
+--- a client that has never imported one. Nothing is invented to fill the gap: a
+--- fabricated figure under an authoritative label is what Core §7.7 forbids,
+--- and it is the reason this segment took a season to arrive.
+---
+--- The item level priced is candidateIlvl, which is the DIFFICULTY-resolved one
+--- the badge was computed against — so the cost always describes the same copy
+--- of the item the rest of the line is about.
 local function renderFacts(entry, ranked)
   if not entry then frame.facts:SetText("") return end
   local S = ns.Style
@@ -1619,6 +1725,9 @@ local function renderFacts(entry, ranked)
       break
     end
   end
+
+  local price = ns.Payload.PriceText(entry.itemID, entry.candidateIlvl)
+  if price then parts[#parts + 1] = "Cost: " .. price end
 
   local q = entry.quality
   if q and q.bis and S then
@@ -1977,12 +2086,11 @@ local function renderRail(total)
     blocks[3].bigSuffix:SetPoint("BOTTOMLEFT", blocks[3].big, "BOTTOMLEFT",
       blocks[3].big:GetStringWidth() + 1, 3)
     blocks[3].bigSuffix:SetText("/" .. tostring(me.nightsOf))
-    -- ⚠️ THE DESIGN'S THIRD LINE HERE READS "of 17 • PR 3.9", which is the
-    -- PRIORITY block's caption duplicated and not updated — "of 17" says nothing
-    -- about attendance and the PR disagrees with the one three blocks up. This
-    -- says what the figure above it counts instead. Flagged rather than
-    -- reproduced; if the intent was something else, it is a one-line change.
-    blocks[3].line1:SetText("raid nights this season")
+    -- The first mock's caption here was the PRIORITY block's, duplicated and not
+    -- updated ("of 17 • PR 3.9"). Flagged in #250, confirmed an oversight, and
+    -- the design now reads "nights present" — which is also exactly what the
+    -- figure counts, per the comment above.
+    blocks[3].line1:SetText("nights present")
   else
     blocks[3].big:SetText("—")
     blocks[3].line1:SetText("no raid nights recorded yet")
