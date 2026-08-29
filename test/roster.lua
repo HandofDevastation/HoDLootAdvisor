@@ -490,6 +490,26 @@ do
         table.concat(adhocInRanking, ",") == "Alsofine,Normalguy,Warmingup",
         table.concat(adhocInRanking, ","))
 
+  -- ⚠️ THE SWEEP'S PROGRESS IS ITS OWN NUMBER, not "N of M Reporting" — that one
+  -- counts who else is running the addon and reads 0 in a group of strangers
+  -- however well the inspecting is going. Jason read it as sweep progress,
+  -- which is exactly what it looks like when nothing else reports that.
+  do
+    local sweep = ns.InspectionSummary()
+    local stillOut = #Roster.Unresolved()
+    check("the sweep reports its own progress", sweep ~= nil)
+    -- Eight strangers plus the two export raiders the fixture put in the
+    -- instance. Everyone HERE counts, export or not: the sweep inspects roster
+    -- members too, because the payload's gear is only as fresh as their last
+    -- logout while an inspection is what they are wearing now.
+    check("...counting everyone here but yourself, whether or not they are on the export",
+          sweep and sweep.here == #stub.group + 2, sweep and sweep.here)
+    check("...and resolved is the ones no longer waiting on an inspect",
+          sweep and sweep.resolved == sweep.here - stillOut,
+          sweep and ("%d resolved, %d here, %d unresolved")
+            :format(sweep.resolved, sweep.here, stillOut))
+  end
+
   local unresolvedNames = {}
   for _, u in ipairs(Roster.Unresolved()) do unresolvedNames[#unresolvedNames + 1] = u.name end
   table.sort(unresolvedNames)

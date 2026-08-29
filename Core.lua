@@ -447,6 +447,34 @@ function ns.GearReportingSummary()
   return { reporting = reporting, total = #raid.roster, missing = missing }
 end
 
+--- How the inspection sweep is going: how many people standing here we can
+--- actually describe, out of how many are here at all.
+---
+--- ⚠️ THIS IS NOT "N OF M REPORTING" AND THE TWO ARE EASY TO CONFUSE (Jason,
+--- Session 253, having reasonably assumed they were the same thing). Reporting
+--- counts people BROADCASTING over addon comms — i.e. who else has this addon
+--- installed — and is 0 in a group of strangers however well the sweep is
+--- going. This counts what the sweep has resolved, from any source, which is
+--- the question "is everyone inspected yet" actually asks.
+---
+--- Excludes yourself: you are never inspected, and counting yourself would make
+--- a solo "1 of 1" that means nothing.
+function ns.InspectionSummary()
+  local R = ns.Roster
+  if not (R and R.seen and R.NeedsInspect) then return nil end
+  local here, resolved = 0, 0
+  for _, e in pairs(R.seen) do
+    if e.unit and not e.isSelf then
+      here = here + 1
+      -- NeedsInspect is false for "reporting live" too, which is correct: a
+      -- self-report is a better answer than an inspection, not a missing one.
+      if not R.NeedsInspect(e) then resolved = resolved + 1 end
+    end
+  end
+  if here == 0 then return nil end
+  return { resolved = resolved, here = here }
+end
+
 --- How many drops are on a BIS list for THIS character, for EVERY boss at once,
 --- keyed by journal encounter id.
 ---

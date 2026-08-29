@@ -2822,9 +2822,20 @@ local function renderFooterGear()
   else
     frame.gearLine1:SetText("Your Gear: " .. (live and "LIVE" or "SNAPSHOT"))
   end
-  frame.gearLine2:SetText(gear
+  -- ⚠️ TWO DIFFERENT QUESTIONS ON ONE LINE, deliberately (Jason, Session 253).
+  -- "Reporting" is who else is running this addon; it stays 0 among strangers
+  -- however well the sweep goes, and was being read as inspection progress
+  -- because nothing else showed that. "Inspected" is the sweep — it is the line
+  -- that answers "has everyone been read yet", and it goes quiet once there is
+  -- nobody left to ask.
+  local base = gear
     and ("%d of %d Reporting"):format(gear.reporting, gear.total)
-    or "No raid data imported")
+    or "No raid data imported"
+  local sweep = ns.InspectionSummary and ns.InspectionSummary()
+  if sweep then
+    base = base .. ("  ·  %d of %d Inspected"):format(sweep.resolved, sweep.here)
+  end
+  frame.gearLine2:SetText(base)
 end
 
 function Panel.Refresh()
