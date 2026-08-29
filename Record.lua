@@ -103,16 +103,38 @@ local ROLL_NAME_MAP = {
   offspec              = "need_offspec",
 }
 
--- The map the OLD code used. Kept ONLY as the answer when the game has no enum
--- to read, because in that case we know nothing new and changing behaviour on
--- no evidence is the original mistake. It is never mixed with enum answers.
+-- The fallback used when the game exposes no enum to read.
+--
+-- ⚠️ THESE NUMBERS ARE NOW KNOWN, AND THE OLD ONES WERE WRONG (Session 255).
+-- The previous table was inherited guesswork — [0]="noroll", [1]="pass",
+-- [2]="greed", [3]="transmog", [4]="need", [5]="need" — and it was wrong on
+-- EVERY roll type. It is replaced, not preserved, because "wait for evidence
+-- rather than guess" was satisfied: the evidence arrived.
+--
+-- SOURCE 1, the client's own generated API documentation, on the machine at
+-- <install>/BlizzardInterfaceCode/Interface/AddOns/
+-- Blizzard_APIDocumentationGenerated/LootHistoryDocumentation.lua, which lists
+-- Enum.EncounterLootDropRollState outright:
+--   NeedMainSpec=0  NeedOffSpec=1  Transmog=2  Greed=3  NoRoll=4  Pass=5
+--
+-- SOURCE 2, Blizzard_FrameXML/Mainline/LootHistory.lua, which treats the value
+-- as a PRIORITY LADDER (`roll.state < Enum...NoRoll` means "made a real
+-- choice"). Confirmed against 1,322 recorded head-to-head comparisons: the
+-- winner held the lower number 1,321 times.
+--
+-- SOURCE 3, Jason's own LFR of Aug 28 2026, screenshotted roll by roll and
+-- checked against the recording: nine of nine matched, both dice values exact,
+-- and all four roll types plus an off-spec need appeared. The old table had
+-- need and pass swapped, and transmog and greed swapped.
+--
+-- ⚠️ DO NOT "RESTORE" THE OLD NUMBERS. They are what filed 531 passes as needs.
 local INHERITED_ROLL_STATE = {
-  [0] = "noroll",
-  [1] = "pass",
-  [2] = "greed",
-  [3] = "transmog",
-  [4] = "need",
-  [5] = "need",
+  [0] = "need",
+  [1] = "need_offspec",
+  [2] = "transmog",
+  [3] = "greed",
+  [4] = "noroll",
+  [5] = "pass",
 }
 
 --- Build the state -> export-string map from the client's own enum.

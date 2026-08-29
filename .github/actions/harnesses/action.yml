@@ -1,0 +1,88 @@
+name: Run the addon harnesses
+description: >
+  Every headless harness, run against the working tree and against the packaged
+  deliverable. Shared by release.yml and data-refresh.yml deliberately — the
+  CurseForge outage of Sessions 253-254 happened because a fix was applied to
+  ONE workflow and the other was never looked at. There is one copy of this.
+
+inputs:
+  site-url:
+    description: Where to fetch the price-parity fixture from.
+    required: false
+    default: https://www.hodguild.com
+
+runs:
+  using: composite
+  steps:
+    # ⚠️ luajit IS NOT OPTIONAL HERE. WoW runs Lua 5.1 and lua5.4 accepts things
+    # 5.1 refuses — Session 250 shipped a panel that a modern parser passed and
+    # the game would not load (one function closed over more than 60 upvalues,
+    # a hard 5.1 limit raised to 255 in 5.2). The smoke harness checks every
+    # file against a 5.1 parser IF one is installed, and prints a SKIP if not.
+    # A skip in CI is how that check quietly stopped existing, so it is
+    # installed here and skips are treated as failures below.
+    - name: Install both Lua versions
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq lua5.4 luajit
+        echo "lua5.4: $(lua5.4 -v 2>&1)"
+        echo "luajit: $(luajit -v 2>&1 | head -1)"
+
+    # The parity harness compares the addon's prices against the website's own
+    # function. Its fixture is GENERATED, not committed, so without this fetch
+    # the harness skips — 450 green checks while the one check that proves the
+    # prices match never ran.
+    - name: Fetch the price-parity fixture
+      shell: bash
+      run: |
+        set -euo pipefail
+        # ⚠️ --compressed IS NOT OPTIONAL. This fixture is an exhaustive score
+        # matrix — 276,480 one-line cases — and it is 147 MB on the wire without
+        # it and 2 MB with it. It is highly repetitive text, so it compresses
+        # roughly 74:1. Nothing about the ADDON is large: the packaged download
+        # players get is 532 KB. This file is test data and never ships.
+        for attempt in 1 2 3; do
+          if curl -fsSL --compressed "${{ inputs.site-url }}/api/loot-advisor/parity-fixtures" -o test/fixtures.lua; then
+            echo "fixture: $(wc -c < test/fixtures.lua) bytes"
+            exit 0
+          fi
+          echo "attempt $attempt failed; retrying"
+          sleep 5
+        done
+        echo "::error::Could not fetch the parity fixture from ${{ inputs.site-url }}."\
+             "The release is stopped rather than run without the price check."
+        exit 1
+
+    # ⚠️ A SKIPPED CHECK MUST NOT LOOK LIKE A PASSED ONE. This is the same
+    # failure shape as the missing CurseForge token: absence that reads as
+    # success. Each harness's output is captured and a SKIP line fails the run.
+    - name: Run the harnesses
+      shell: bash
+      run: |
+        set -euo pipefail
+        fail=0
+        for t in smoke comms roster parity; do
+          echo "──────── $t ────────"
+          if ! lua5.4 "test/$t.lua" 2>&1 | tee "/tmp/$t.log"; then
+            echo "::error::harness $t FAILED"
+            fail=1
+          fi
+          if grep -q "SKIP" "/tmp/$t.log"; then
+            echo "::error::harness $t SKIPPED a check — a skip is not a pass."
+            grep -n "SKIP" "/tmp/$t.log" || true
+            fail=1
+          fi
+        done
+        exit $fail
+
+    # The one failure a developer cannot see locally: a file the .toc names and
+    # the package omits works on the machine that built it and errors on first
+    # load for everyone else. This boots the STAGED COPY, not the source tree.
+    - name: Package, then test the package itself
+      shell: bash
+      run: |
+        set -euo pipefail
+        ./package.sh
+        lua5.4 test/package.lua dist/HoDLootAdvisor

@@ -122,14 +122,17 @@ jobs:
 
       # The harnesses run against the NEW payload before anything is tagged.
       # They are the only thing standing between a bad emit and every installer.
+      #
+      # ⚠️ THIS RAN ONLY THREE OF THEM, under one Lua, until Session 255. The
+      # price-parity check silently skipped for want of a generated fixture, the
+      # packaged deliverable was never booted, and the Lua 5.1 compile check
+      # skipped because no 5.1 parser was installed — all three reading as
+      # green. The shared action below runs all of them and fails on a skip.
+      # It is shared with release.yml ON PURPOSE: fixing one workflow and not
+      # the other is exactly what caused the CurseForge outage.
       - name: Run the harnesses against the new payload
         if: steps.diff.outputs.changed == 'true'
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq && sudo apt-get install -y -qq lua5.4
-          lua5.4 test/smoke.lua
-          lua5.4 test/comms.lua
-          lua5.4 test/roster.lua
+        uses: ./.github/actions/harnesses
 
       - name: Commit, tag, and push
         if: steps.diff.outputs.changed == 'true'

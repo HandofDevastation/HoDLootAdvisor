@@ -73,5 +73,15 @@ jobs:
             echo "::error::GitHub token missing — no release will be created."
           fi
 
+      # ⚠️ NOTHING USED TO TEST A HAND-CUT RELEASE (fixed Session 255). The
+      # weekly data refresh ran three harnesses before publishing; THIS
+      # workflow — the one that ships actual CODE changes — ran none. So the
+      # safe path (swapping a data file) was guarded and the risky path was not,
+      # and every code change since the addon was born went to players having
+      # never been executed. A failing harness now means NO RELEASE, which is
+      # the point: week-old loot data beats a broken addon in front of the raid.
+      - name: Run every harness before anything is published
+        uses: ./.github/actions/harnesses
+
       - name: Package and create GitHub release
         uses: BigWigsMods/packager@v2

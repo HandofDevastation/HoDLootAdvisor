@@ -824,17 +824,28 @@ ns.Roster.Scan()
 -- Two drops off one boss. The first is a contested Need roll; the second is a
 -- pass-fallthrough, which the site counts differently from a real win and which
 -- therefore has to survive the round trip intact.
+--
+-- ⚠️ THE `state` NUMBERS BELOW ARE THE GAME'S REAL ONES (corrected Session 255):
+--   0 = need (main spec)   1 = need (off spec)   2 = transmog
+--   3 = greed              4 = did not respond   5 = pass
+-- They used to be written in the old inherited scheme, where 5 meant need and 1
+-- meant pass — near enough the inverse. Every fixture in this file was renumbered
+-- at once, and the expected export in test/export.txt did NOT change, which is
+-- the proof the renumbering was faithful: the labels come out identical, only
+-- the raw numbers feeding them are now the ones the client actually sends.
+-- If a fixture here ever disagrees with Enum.EncounterLootDropRollState, the
+-- fixture is wrong. Blizzard's generated docs are on disk; read them.
 stub.lootHistory[2849] = {
   stub.drop(1, 270160, "Sunfury Chestguard", { 12841 }, {
-    { name = "Vörnix",     state = 5, roll = 87, isWinner = true },
-    { name = "Dåmir",      state = 5, roll = 42 },
-    { name = "Mîrâñ",      state = 2, roll = 61 },
-    { name = "Brambleÿ",  state = 1, roll = 0 },
-    { name = "Gloomrift",  state = 0, roll = 0 },
+    { name = "Vörnix",     state = 0, roll = 87, isWinner = true },
+    { name = "Dåmir",      state = 0, roll = 42 },
+    { name = "Mîrâñ",      state = 3, roll = 61 },
+    { name = "Brambleÿ",  state = 5, roll = 0 },
+    { name = "Gloomrift",  state = 4, roll = 0 },
   }),
   stub.drop(2, 270161, "Voidscarred Greaves", { 12841 }, {
-    { name = "Corvá",  state = 1, roll = 55, isWinner = true },
-    { name = "Dåmir",  state = 1, roll = 0 },
+    { name = "Corvá",  state = 5, roll = 55, isWinner = true },
+    { name = "Dåmir",  state = 5, roll = 0 },
   }),
 }
 
@@ -885,7 +896,7 @@ check("a pass is recorded as a pass",
 check("a greed is recorded as a greed",
       chest and chest.rolls["Mîrâñ"] and chest.rolls["Mîrâñ"].rollType == "greed")
 check("the raw roll state is kept for the mapping to be verified against later",
-      chest and chest.rolls["Vörnix"] and chest.rolls["Vörnix"].state == 5)
+      chest and chest.rolls["Vörnix"] and chest.rolls["Vörnix"].state == 0)
 check("the item level is the DROPPED level, not the base one",
       chest and chest.itemILevel == 305, chest and tostring(chest.itemILevel))
 check("bonus IDs survived off the item link",
@@ -901,7 +912,7 @@ check("a pass-fallthrough win keeps its pass roll type",
 
 stub.lootHistory[77301] = {
   stub.drop(9, 270162, "Venom-Drenched Sack", { 12841 }, {
-    { name = "Dåmir", state = 5, roll = 91, isWinner = true },
+    { name = "Dåmir", state = 0, roll = 91, isWinner = true },
   }),
 }
 stub.Fire("LOOT_HISTORY_UPDATE_DROP", 77301, 9)
@@ -925,7 +936,7 @@ check("the run records which character was playing",
 stub.player.name = "Vörnix"
 stub.lootHistory[2850] = {
   stub.drop(1, 270160, "Sunfury Chestguard", { 12841 }, {
-    { name = "Vörnix", state = 5, roll = 73, isWinner = true },
+    { name = "Vörnix", state = 0, roll = 73, isWinner = true },
   }),
 }
 stub.Fire("ENCOUNTER_END", 2850, "Nymrissa Wavecaller", 15, 20, 1)
@@ -1811,7 +1822,7 @@ stub.instance = {
 local before = #stub.printed
 stub.lootHistory[9001] = {
   stub.drop(1, 270160, "Sunfury Chestguard", { 12841 },
-            { { name = "Gloomrift", state = 5, roll = 50, isWinner = true } }),
+            { { name = "Gloomrift", state = 0, roll = 50, isWinner = true } }),
 }
 stub.Fire("ENCOUNTER_END", 9001, "Some Boss", 16, 20, 1)
 stub.RunTimers()
@@ -1873,7 +1884,7 @@ check("we are genuinely outside an instance now", select(2, GetInstanceInfo()) =
 
 stub.lootHistory[2849][#stub.lootHistory[2849] + 1] =
   stub.drop(3, 270162, "Venom-Drenched Sack", { 12841 }, {
-    { name = "Mîrâñ", state = 5, roll = 66, isWinner = true },
+    { name = "Mîrâñ", state = 0, roll = 66, isWinner = true },
   })
 R.ScanAll()
 
@@ -2018,8 +2029,8 @@ stub.items[268238] = { name = "Grips of Swirling Fury", quality = 4, ilvl = 279,
 -- The drop is seen while the roll is still open: rollers, but no winner yet.
 stub.lootHistory[4242] = {
   stub.drop(1, 268238, "Grips of Swirling Fury", { 12825 }, {
-    { name = "Gloomrift", state = 5, roll = 0 },
-    { name = "Dröokz",    state = 5, roll = 0 },
+    { name = "Gloomrift", state = 0, roll = 0 },
+    { name = "Dröokz",    state = 0, roll = 0 },
   }),
 }
 stub.Fire("LOOT_HISTORY_UPDATE_DROP", 4242, 1)
@@ -2041,8 +2052,8 @@ stub.Fire("PLAYER_ENTERING_WORLD", false, true)
 -- Meanwhile the roll resolved, exactly as the client would report afterwards.
 stub.lootHistory[4242] = {
   stub.drop(1, 268238, "Grips of Swirling Fury", { 12825 }, {
-    { name = "Gloomrift", state = 5, roll = 41 },
-    { name = "Dröokz",    state = 5, roll = 93, isWinner = true },
+    { name = "Gloomrift", state = 0, roll = 41 },
+    { name = "Dröokz",    state = 0, roll = 93, isWinner = true },
   }),
 }
 
@@ -3562,8 +3573,23 @@ header("Roll states — read from the client's names, never from numbers")
   -- If the client names nothing, we know nothing new, so behaviour must not
   -- change on no evidence — and the fallback must ANNOUNCE itself.
   local fbMap, fbSource = ns.BuildRollStates(nil)
-  check("with no enum at all, the inherited map is used", fbSource == "inherited", fbSource)
-  check("...and it is the old map, unchanged", fbMap[2] == "greed" and fbMap[5] == "need")
+  check("with no enum at all, the fallback map is used", fbSource == "inherited", fbSource)
+
+  -- ⚠️ THIS ASSERTION USED TO PIN THE OLD GUESSWORK (fbMap[2]=="greed" and
+  -- fbMap[5]=="need") and would now FAIL, correctly. The fallback numbers were
+  -- established in Session 255 from Blizzard's own generated API documentation
+  -- on disk, corroborated by 1,322 recorded head-to-head rolls and a
+  -- screenshotted LFR checked roll by roll. The fallback is no longer a guess,
+  -- so it is pinned to the REAL values — all six of them, so a future edit
+  -- cannot quietly reintroduce the swap.
+  check("...and the fallback carries the real, documented numbers",
+        fbMap[0] == "need" and fbMap[1] == "need_offspec" and fbMap[2] == "transmog"
+        and fbMap[3] == "greed" and fbMap[4] == "noroll" and fbMap[5] == "pass",
+        "fallback map has drifted from Enum.EncounterLootDropRollState")
+
+  -- The specific inversion that caused the damage: passes filed as needs.
+  check("...so a pass is never filed as a need again",
+        fbMap[5] ~= "need" and fbMap[0] ~= "noroll")
 
   -- An enum full of names we do not recognise is no better than no enum.
   local _, alienSource, alienUnresolved = ns.BuildRollStates({ Wibble = 1, Wobble = 2 })

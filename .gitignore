@@ -1,1 +1,5 @@
 dist/
+
+# macOS folder settings — never part of the addon
+.DS_Store
+**/.DS_Store
