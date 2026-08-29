@@ -312,6 +312,35 @@ local function text(parent, role, size, color, justify)
   return t
 end
 
+--- Write text that MUST repaint, even when the string has not changed.
+---
+--- ⚠️ THE OLDEST RECURRING COMPLAINT ABOUT THESE ADDONS, FINALLY MEASURED
+--- (Session 254): "it only shows up after I close and reopen, or switch view."
+--- A line whose FIRST paint did not take stays blank forever, because handing a
+--- text object the string it already holds does not redraw it.
+---
+--- THE EVIDENCE, from two draws logged in the same second on a cold client. The
+--- item name and the verdict beneath it are the same font, the same colour, the
+--- same row, written four lines apart. Both reported visible, alpha 1, font
+--- loaded, a real string width and a resolved rect — IDENTICALLY in the draw
+--- that rendered and the draw that did not. The only difference between them:
+--- the verdict's string CHANGED between the two draws ("TRINKET" from our
+--- payload, then "Trinket" from the journal) and it rendered; the name's string
+--- was identical both times ("Wavecaller's Seastone" from either source) and it
+--- did not.
+---
+--- IT ALSO EXPLAINS THE TWO SYMPTOMS NOTHING ELSE COULD. Switching boss repairs
+--- a row because the name changes. And Nek'zali's sixth item NEVER repaired at
+--- any point, because it is the season's only six-item boss — so that sixth row
+--- is the one row whose name has nothing to change to.
+---
+--- Cheap: nine rows, on a refresh a person triggered.
+local function setTextForce(fs, s)
+  if not fs then return end
+  fs:SetText("")
+  fs:SetText(s)
+end
+
 --- Place a fontstring by the mock's own coordinates.
 local function at(fs, x, y, width, justify)
   fs:ClearAllPoints()
@@ -1991,6 +2020,12 @@ local function renderItemColumn(entries)
       local idx = i + state.colScroll
       row.entryIndex, row.itemID, row.itemName, row.link = idx, e.itemID, e.name, e.link
 
+      -- ⚠️ SHOW THE ROW BEFORE WRITING TO IT (Session 254). It was shown at the
+      -- END of this branch, so on the first draw after a client restart every
+      -- line was written into a row that was still hidden, and that first paint
+      -- did not take.
+      row:Show()
+
       -- ⚠️ THE LAST WRITER GUARDS TOO. `e.name or "?"` cannot save a row from
       -- "", and an invisible row is the one failure nobody reports as a bug —
       -- they report "the addon is broken". If this ever substitutes, the screen
@@ -1999,7 +2034,7 @@ local function renderItemColumn(entries)
       if type(shown) ~= "string" or shown == "" then
         shown = "item:" .. tostring(e.itemID)
       end
-      row.name:SetText(shown)
+      setTextForce(row.name, shown)
 
       -- The verdict word, then the slot. "NOT FOR YOU" is deliberately DISTINCT
       -- from "unscored": one is the system working, the other is our data
@@ -2038,7 +2073,7 @@ local function renderItemColumn(entries)
         row.bg:SetColorTexture(S.COLOR.purple.r, S.COLOR.purple.g, S.COLOR.purple.b,
           selected and 0.2 or 0.1)
       end
-      row:Show()
+      -- Shown at the TOP of this branch now, before anything is written into it.
     end
   end
 
