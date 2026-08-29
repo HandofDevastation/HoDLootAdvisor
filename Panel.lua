@@ -2042,6 +2042,36 @@ local function renderItemColumn(entries)
     end
   end
 
+  -- ⚠️ THE STRING IS PROVEN CORRECT AND THE ROW IS STILL BLANK (Session 254).
+  -- The log already shows this row being handed "Wavecaller's Seastone", 21
+  -- bytes, on the draw that rendered nothing — so the remaining question is not
+  -- what we said but whether the fontstring can draw it. A real GetText with a
+  -- string width of ZERO means the FONT never loaded; no font at all says the
+  -- same thing louder; not visible means something above it in the frame tree.
+  -- Its NEIGHBOUR is measured in the same breath, because that one draws and is
+  -- identical but for its size — so whatever differs between them is the bug.
+  if ns.Diagnostics and total > 0 and frame.itemRows[1] then
+    local r = frame.itemRows[1]
+    local function describe(fs)
+      local ok, path, size, flags = pcall(fs.GetFont, fs)
+      return {
+        text = tostring(fs:GetText()),
+        visible = fs:IsVisible() and true or false,
+        stringWidth = fs:GetStringWidth(),
+        width = fs:GetWidth(), height = fs:GetHeight(),
+        alpha = fs:GetAlpha(),
+        font = ok and tostring(path) or "GetFont errored",
+        fontSize = ok and tostring(size) or "-",
+        flags = ok and tostring(flags) or "-",
+      }
+    end
+    ns.Diagnostics.Note("itemRowFont", {
+      rowShown = r:IsShown() and true or false,
+      name = describe(r.name),   -- blank on screen
+      sub  = describe(r.sub),    -- draws fine, same font, one size smaller
+    })
+  end
+
   frame.colMore:SetText(total > COL_ROWS
     and ("%d–%d of %d · scroll"):format(state.colScroll + 1,
       math.min(total, state.colScroll + COL_ROWS), total) or "")
