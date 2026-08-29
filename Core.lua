@@ -478,7 +478,39 @@ function ns.FillItemNames(entries, catalogue)
       filled = filled + 1
     end
   end
+  -- Recorded so "did this even run?" stops being a thing anyone has to reason
+  -- about from the source. It is called once per refresh, not per item.
+  if ns.Diagnostics then
+    ns.Diagnostics.Note("fillItemNames",
+      { entries = #(entries or {}), filled = filled })
+  end
   return filled
+end
+
+--- Describe what a list is about to draw AS NAMES: type, byte length, brackets.
+---
+--- ⚠️ SIX STATIC READINGS SAID A BLANK ROW WAS IMPOSSIBLE AND ROWS DREW BLANK
+--- ANYWAY (Session 254). FillItemNames is proven by test to leave nothing empty,
+--- every writer of the item column was accounted for, both font sizes resolve,
+--- and the detail pane rendered the SAME field on the SAME entry correctly. When
+--- every explanation is refuted, the thing to do is measure the value nobody has
+--- measured rather than build a seventh explanation.
+---
+--- BYTE LENGTH AND BRACKETS ARE THE POINT. "" and " " and a colour escape with
+--- no glyphs after it all render as nothing and are indistinguishable on screen,
+--- and only ONE of them is what an emptiness guard tests for. len=0 means the
+--- guard should have fired; len>0 with nothing on screen means the string is not
+--- the problem and the frame is.
+function ns.DescribeNames(entries, limit)
+  local out = {}
+  for i, e in ipairs(entries or {}) do
+    if limit and i > limit then break end
+    local n = e and e.name
+    out[#out + 1] = ("%s %s len=%s [%s]"):format(
+      tostring(e and e.itemID), type(n),
+      (type(n) == "string") and tostring(#n) or "-", tostring(n))
+  end
+  return out
 end
 
 --- Make sure every name on screen is a real one, and come back when it is not.

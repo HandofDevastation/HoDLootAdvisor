@@ -1019,6 +1019,41 @@ do
   check("NO entry can leave without a visible name", blank == 0, blank)
 end
 
+-- ── What the row is actually handed ─────────────────────────────────────────
+--
+-- ⚠️ THE ABOVE PASSES AND ROWS STILL DRAW BLANK ON A COLD CLIENT (Session 254).
+-- Six readings of the code each concluded the bug was impossible, so the value
+-- nobody had measured gets measured: what the drawing site receives. The whole
+-- point is BYTE LENGTH — "" and " " and a colour escape with no glyphs are the
+-- same on screen, and only one of them is what an emptiness guard catches.
+do
+  header("A name is described byte-exactly, so an invisible one is visible in the log")
+
+  local d = ns.DescribeNames({
+    { itemID = 111, name = "Real Name" },
+    { itemID = 222, name = "" },
+    { itemID = 333, name = " " },
+    { itemID = 444, name = nil },
+    { itemID = 555, name = "Vörnix" },
+  })
+
+  check("a real name reports its byte length",
+        d[1]:find("len=9", 1, true) ~= nil, d[1])
+  check("an EMPTY name reports len=0 — the guard should have fired",
+        d[2]:find("len=0", 1, true) ~= nil, d[2])
+  check("...and a SINGLE SPACE reports len=1, which is why the two must differ",
+        d[3]:find("len=1", 1, true) ~= nil, d[3])
+  check("an absent name reports its type instead of a length",
+        d[4]:find("nil", 1, true) ~= nil and d[4]:find("len=-", 1, true) ~= nil, d[4])
+  -- BYTES, NOT CHARACTERS: the roster is full of accented names and the JS/Lua
+  -- length trap already cost this project a release. A character count would
+  -- report 6 here.
+  check("length is counted in BYTES, not characters",
+        d[5]:find("len=7", 1, true) ~= nil, d[5])
+  check("the limit is honoured",
+        #ns.DescribeNames({ { itemID = 1 }, { itemID = 2 } }, 1) == 1)
+end
+
 -- ── A placeholder name asks the client, and comes back ──────────────────────
 --
 -- ⚠️ THE BUG THAT KEPT RETURNING IN DIFFERENT COSTUMES (Jason, Session 253:

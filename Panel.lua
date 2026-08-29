@@ -1968,6 +1968,20 @@ local function renderItemColumn(entries)
     return
   end
 
+  -- ⚠️ MEASURE THE STRING THE ROW IS HANDED, because every reading of the code
+  -- says these cannot be blank and on a cold client they are (Session 254). The
+  -- log records type and BYTE LENGTH: len=0 means the fill above did not run;
+  -- len>0 beside a blank row means the string was never the problem.
+  if ns.Diagnostics and ns.DescribeNames then
+    local slice = {}
+    for i = 1, COL_ROWS do
+      local e = entries[i + state.colScroll]
+      if e then slice[#slice + 1] = e end
+    end
+    ns.Diagnostics.Note("itemColumn",
+      { total = total, source = state.source, names = ns.DescribeNames(slice) })
+  end
+
   local S = ns.Style
   for i = 1, COL_ROWS do
     local row, e = frame.itemRows[i], entries[i + state.colScroll]
@@ -1977,7 +1991,15 @@ local function renderItemColumn(entries)
       local idx = i + state.colScroll
       row.entryIndex, row.itemID, row.itemName, row.link = idx, e.itemID, e.name, e.link
 
-      row.name:SetText(e.name or "?")
+      -- ⚠️ THE LAST WRITER GUARDS TOO. `e.name or "?"` cannot save a row from
+      -- "", and an invisible row is the one failure nobody reports as a bug —
+      -- they report "the addon is broken". If this ever substitutes, the screen
+      -- says "item:270160", which is a bug report rather than a mystery.
+      local shown = e.name
+      if type(shown) ~= "string" or shown == "" then
+        shown = "item:" .. tostring(e.itemID)
+      end
+      row.name:SetText(shown)
 
       -- The verdict word, then the slot. "NOT FOR YOU" is deliberately DISTINCT
       -- from "unscored": one is the system working, the other is our data
