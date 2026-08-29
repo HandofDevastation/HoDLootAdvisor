@@ -128,6 +128,44 @@ if loaded then
   check("the roster scanner is present", ns and ns.Roster ~= nil)
 end
 
+-- ── Every Media file the code names is actually in the package ──────────────
+-- ⚠️ A MISSING TEXTURE DRAWS NOTHING, SILENTLY. No error, no placeholder — the
+-- mark or icon is simply absent, which looks like a feature that was never
+-- built rather than a file that did not ship. Adding art means adding a path
+-- string, and a path string is not checked by anything else here: the Lua
+-- compiles fine whether or not the file exists.
+--
+-- Scanned out of the SOURCES rather than listed here, so new art is covered the
+-- day it is referenced instead of the day somebody remembers this test.
+do
+  local root = arg[1] or "dist/HoDLootAdvisor"
+  local refs, missing, scanned = 0, {}, 0
+  local names = io.popen('ls "' .. root .. '"/*.lua 2>/dev/null')
+  for file in names:lines() do
+    scanned = scanned + 1
+    local fh = io.open(file, "r")
+    if fh then
+      local body = fh:read("*a"); fh:close()
+      -- "Interface\\AddOns\\HoDLootAdvisor\\Media\\..." as it appears in source.
+      for path in body:gmatch('Interface\\\\AddOns\\\\HoDLootAdvisor\\\\([%w\\_%-%.]+)') do
+        local rel = path:gsub('\\\\', '/')
+        -- Only whole filenames; a bare directory prefix built at runtime is not
+        -- a claim that a file exists.
+        if rel:match('%.%w+$') then
+          refs = refs + 1
+          local f = io.open(root .. '/' .. rel, "rb")
+          if f then f:close() else missing[#missing + 1] = rel end
+        end
+      end
+    end
+  end
+  names:close()
+  check("the package's Lua files were scanned for media paths", scanned > 0, scanned)
+  check("...and they reference at least one media file", refs > 0, refs)
+  check("every media file the code names is in the package",
+        #missing == 0, table.concat(missing, ", "))
+end
+
 io.write("\n", ("═"):rep(72), "\n")
 if #failures == 0 then
   io.write(("PASS — %d checks, the packaged copy\n"):format(checks))

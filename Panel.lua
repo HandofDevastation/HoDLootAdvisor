@@ -183,9 +183,19 @@ local C_GAIN_R, C_PRIORITY_R = 499, 591
 -- texture every client already has, so this needs no bundled art and cannot
 -- draw blank the way Build Barn's per-tier boss icons can. Desaturated first so
 -- the vertex colour lands clean over the atlas's own yellow and purple.
-local MARK_TEXTURE = "Interface\\TargetingFrame\\UI-RaidTargetingIcons"
-local MARK_STAR    = { 0.00, 0.25, 0.00, 0.25 }   -- icon 1
-local MARK_DIAMOND = { 0.50, 0.75, 0.00, 0.25 }   -- icon 3
+-- ── The gutter marks ────────────────────────────────────────────────────────
+-- ⚠️ THESE ARE THE DESIGN'S OWN ARTWORK, NOT BLIZZARD'S RAID MARKERS. They were
+-- the raid-targeting icon sheet desaturated and tinted, which is close enough to
+-- describe in a sentence and wrong on sight: the design's BIS mark is a faceted
+-- GEM drawn in hairlines, not the solid rhombus that sheet carries, and its
+-- target is an OUTLINED star rather than a filled one.
+--
+-- Exported from the Figma file as vectors and rasterised at 64px — the paths
+-- themselves, so the shapes are the designed ones rather than an approximation.
+-- Drawn WHITE so the existing per-mark tint still applies; the design's colours
+-- (target #20BA56, BIS #FFF468) already live in Style.COLOR and are unchanged.
+local MARK_TARGET_TEX = "Interface\\AddOns\\HoDLootAdvisor\\Media\\ui\\mark-target.png"
+local MARK_BIS_TEX    = "Interface\\AddOns\\HoDLootAdvisor\\Media\\ui\\mark-bis.png"
 local MARK_SIZE = 12
 -- A fixed-width gutter at the row's right so names align whether or not a row
 -- carries marks. Wide enough for BOTH marks plus their inset — an item can be
@@ -304,13 +314,13 @@ local function toggleTarget(itemID, meta)
 end
 
 --- One 12px mark in the item row's gutter.
-local function buildMark(parent, coords, colorKey, offsetFromRight)
+local function buildMark(parent, texture, colorKey, offsetFromRight)
   local m = parent:CreateTexture(nil, "OVERLAY")
   m:SetSize(MARK_SIZE, MARK_SIZE)
   m:SetPoint("RIGHT", -offsetFromRight, 0)
-  m:SetTexture(MARK_TEXTURE)
-  m:SetTexCoord(unpack(coords))
-  m:SetDesaturated(true)
+  m:SetTexture(texture)
+  -- No SetTexCoord and no SetDesaturated: each mark is its own file and is
+  -- already white, so the tint below is the only colour it ever takes.
   local S = ns.Style
   if S and S.COLOR[colorKey] then
     m:SetVertexColor(S.rgb(S.COLOR[colorKey]))
@@ -343,8 +353,8 @@ local function buildItemRow(parent, i)
 
   -- BIS sits outermost, the target inside it — the pair reads left-to-right as
   -- "you want this" then "it is the best one".
-  row.markBis    = buildMark(row, MARK_DIAMOND, "bis", 6)
-  row.markTarget = buildMark(row, MARK_STAR, "target", 6 + MARK_SIZE + 3)
+  row.markBis    = buildMark(row, MARK_BIS_TEX, "bis", 6)
+  row.markTarget = buildMark(row, MARK_TARGET_TEX, "target", 6 + MARK_SIZE + 3)
 
   row:SetScript("OnClick", function(self, button)
     if button == "RightButton" then
@@ -784,9 +794,16 @@ local function buildLootControls()
   -- The caret. A dropdown that looks like a button gets clicked once and
   -- abandoned; the design draws the affordance, so it is drawn.
   frame.diffCaret = frame.diff:CreateTexture(nil, "OVERLAY")
-  frame.diffCaret:SetSize(9, 9)
+  -- 11x11: the design node's own size. The art is drawn into that cell with the
+  -- triangle occupying its lower three-quarters, exactly as Figma places it, so
+  -- the padding is the design's rather than something added here.
+  frame.diffCaret:SetSize(11, 11)
   frame.diffCaret:SetPoint("RIGHT", -8, -1)
-  frame.diffCaret:SetTexture("Interface\\ChatFrame\\ChatFrameExpandArrow")
+  -- The design's own caret, pointing DOWN as a dropdown affordance should. It was
+  -- Blizzard's ChatFrameExpandArrow, which points RIGHT — it reads as "expand
+  -- sideways", and it is not the shape in the mock.
+  frame.diffCaret:SetTexture("Interface\\AddOns\\HoDLootAdvisor\\Media\\ui\\caret.png")
+  if ns.Style then frame.diffCaret:SetVertexColor(ns.Style.rgb(ns.Style.COLOR.white)) end
 
   frame.diffMenu = CreateFrame("Frame", nil, frame)
   -- TOOLTIP strata so nothing the panel draws can land over the open list.
