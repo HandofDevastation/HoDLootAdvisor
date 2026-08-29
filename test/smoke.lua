@@ -1019,39 +1019,39 @@ do
   check("NO entry can leave without a visible name", blank == 0, blank)
 end
 
--- ── What the row is actually handed ─────────────────────────────────────────
+-- ── One vocabulary for the slot line ────────────────────────────────────────
 --
--- ⚠️ THE ABOVE PASSES AND ROWS STILL DRAW BLANK ON A COLD CLIENT (Session 254).
--- Six readings of the code each concluded the bug was impossible, so the value
--- nobody had measured gets measured: what the drawing site receives. The whole
--- point is BYTE LENGTH — "" and " " and a colour escape with no glyphs are the
--- same on screen, and only one of them is what an emptiness guard catches.
+-- ⚠️ THE USER WATCHED US SWITCH SOURCES (Jason, Session 254). The second line is
+-- drawn from OUR payload while the Adventure Guide is cold and from the GUIDE a
+-- moment later, and the two spoke differently: "TRINKET" then "Trinket",
+-- "SHOULDER" then "Shoulder". Both correct, one flicker. The property that
+-- matters is that both sources now produce the SAME string.
 do
-  header("A name is described byte-exactly, so an invisible one is visible in the log")
+  header("Our slot keys and the game's labels produce one string")
 
-  local d = ns.DescribeNames({
-    { itemID = 111, name = "Real Name" },
-    { itemID = 222, name = "" },
-    { itemID = 333, name = " " },
-    { itemID = 444, name = nil },
-    { itemID = 555, name = "Vörnix" },
-  })
+  check("our key becomes the game's word",
+        ns.SlotLabel("TRINKET") == "Trinket", ns.SlotLabel("TRINKET"))
+  check("...including where the wording differs, not just the case",
+        ns.SlotLabel("OFF_HAND") == "Held In Off-hand", ns.SlotLabel("OFF_HAND"))
+  -- A slot key we invented, for which the game has no word at all — a token row
+  -- drew its badge beside an empty second line without this.
+  check("a tier token gets a label rather than nothing",
+        ns.SlotLabel("TOKEN") == "Tier Token", ns.SlotLabel("TOKEN"))
 
-  check("a real name reports its byte length",
-        d[1]:find("len=9", 1, true) ~= nil, d[1])
-  check("an EMPTY name reports len=0 — the guard should have fired",
-        d[2]:find("len=0", 1, true) ~= nil, d[2])
-  check("...and a SINGLE SPACE reports len=1, which is why the two must differ",
-        d[3]:find("len=1", 1, true) ~= nil, d[3])
-  check("an absent name reports its type instead of a length",
-        d[4]:find("nil", 1, true) ~= nil and d[4]:find("len=-", 1, true) ~= nil, d[4])
-  -- BYTES, NOT CHARACTERS: the roster is full of accented names and the JS/Lua
-  -- length trap already cost this project a release. A character count would
-  -- report 6 here.
-  check("length is counted in BYTES, not characters",
-        d[5]:find("len=7", 1, true) ~= nil, d[5])
-  check("the limit is honoured",
-        #ns.DescribeNames({ { itemID = 1 }, { itemID = 2 } }, 1) == 1)
+  -- THE SAFETY PROPERTY: this runs over BOTH sources, so it must never mangle a
+  -- label the Guide already gave us.
+  check("the game's own label passes through untouched",
+        ns.SlotLabel("Trinket") == "Trinket", ns.SlotLabel("Trinket"))
+  check("an unmapped value passes through untouched",
+        ns.SlotLabel("Dagger") == "Dagger", ns.SlotLabel("Dagger"))
+  check("nil survives", ns.SlotLabel(nil) == nil)
+
+  -- The point of the whole change, stated as itself: one item, two sources, one
+  -- rendered line.
+  local fromUs   = ns.ItemSlotLine({ slotText = "SHOULDER", armorType = "Cloth" })
+  local fromGame = ns.ItemSlotLine({ slotText = "Shoulder", armorType = "Cloth" })
+  check("the two sources render IDENTICALLY, so no flicker is possible",
+        fromUs == fromGame and fromUs == "Shoulder, Cloth", fromUs .. " vs " .. fromGame)
 end
 
 -- ── A placeholder name asks the client, and comes back ──────────────────────

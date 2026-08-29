@@ -1997,20 +1997,6 @@ local function renderItemColumn(entries)
     return
   end
 
-  -- ⚠️ MEASURE THE STRING THE ROW IS HANDED, because every reading of the code
-  -- says these cannot be blank and on a cold client they are (Session 254). The
-  -- log records type and BYTE LENGTH: len=0 means the fill above did not run;
-  -- len>0 beside a blank row means the string was never the problem.
-  if ns.Diagnostics and ns.DescribeNames then
-    local slice = {}
-    for i = 1, COL_ROWS do
-      local e = entries[i + state.colScroll]
-      if e then slice[#slice + 1] = e end
-    end
-    ns.Diagnostics.Note("itemColumn",
-      { total = total, source = state.source, names = ns.DescribeNames(slice) })
-  end
-
   local S = ns.Style
   for i = 1, COL_ROWS do
     local row, e = frame.itemRows[i], entries[i + state.colScroll]
@@ -2075,46 +2061,6 @@ local function renderItemColumn(entries)
       end
       -- Shown at the TOP of this branch now, before anything is written into it.
     end
-  end
-
-  -- ⚠️ THE STRING IS PROVEN CORRECT AND THE ROW IS STILL BLANK (Session 254).
-  -- The log already shows this row being handed "Wavecaller's Seastone", 21
-  -- bytes, on the draw that rendered nothing — so the remaining question is not
-  -- what we said but whether the fontstring can draw it. A real GetText with a
-  -- string width of ZERO means the FONT never loaded; no font at all says the
-  -- same thing louder; not visible means something above it in the frame tree.
-  -- Its NEIGHBOUR is measured in the same breath, because that one draws and is
-  -- identical but for its size — so whatever differs between them is the bug.
-  if ns.Diagnostics and total > 0 and frame.itemRows[1] then
-    local r = frame.itemRows[1]
-    local function describe(fs)
-      local ok, path, size = pcall(fs.GetFont, fs)
-      -- ⚠️ TEXT COLOUR ALPHA IS NOT OBJECT ALPHA. GetAlpha() already said 1 while
-      -- the line drew nothing; SetTextColor carries its OWN fourth value, and a
-      -- zero there paints a perfectly healthy string in nothing.
-      local cok, r, g, b, a = pcall(fs.GetTextColor, fs)
-      -- ⚠️ AND A REGION WITH AN UNRESOLVED ANCHOR CHAIN HAS NO RECT AND DOES NOT
-      -- DRAW, while still reporting IsVisible() true and a real string width.
-      -- nil here would be the whole answer.
-      local left, bottom, w, h = fs:GetRect()
-      return {
-        text = tostring(fs:GetText()),
-        color = cok and ("%.2f %.2f %.2f alpha=%.2f"):format(r or -1, g or -1, b or -1, a or -1)
-                or "GetTextColor errored",
-        rect = ("left=%s bottom=%s w=%s h=%s")
-                 :format(tostring(left), tostring(bottom), tostring(w), tostring(h)),
-        top = tostring(fs:GetTop()),
-        visible = fs:IsVisible() and true or false,
-        stringWidth = fs:GetStringWidth(),
-        font = ok and tostring(path) or "GetFont errored",
-        fontSize = ok and tostring(size) or "-",
-      }
-    end
-    ns.Diagnostics.Note("itemRowFont", {
-      rowShown = r:IsShown() and true or false,
-      name = describe(r.name),   -- blank on screen
-      sub  = describe(r.sub),    -- draws fine, same font, one size smaller
-    })
   end
 
   frame.colMore:SetText(total > COL_ROWS
@@ -2340,6 +2286,8 @@ local function renderRanking(itemID)
     local idx = i + state.rankScroll
     local r = ranked[idx]
     resetRow(row)
+    -- Shown BEFORE anything is written into it — see setTextForce (Session 254).
+    row:Show()
 
     row.rank:SetText(tostring(place[idx] or idx))
     row.rank:SetTextColor(unpack(MUTED))
@@ -2353,7 +2301,7 @@ local function renderRanking(itemID)
       displayName = displayName .. "*"
       sawAdhoc = true
     end
-    row.name:SetText(displayName)
+    setTextForce(row.name, displayName)
     local cc = CLASS_COLOR[r.class or ""] or WHITE
     row.name:SetTextColor(cc[1], cc[2], cc[3])
 
@@ -2626,10 +2574,12 @@ local function renderStandingsList()
   for i = 1, ST_ROWS do
     local row, r = frame.stRows[i], rows[i + state.rankScroll]
     if not r then row:Hide() else
+      -- Shown BEFORE anything is written into it — see setTextForce (S254).
+      row:Show()
       row.rank:SetText(tostring(r.rank))
       row.rank:SetTextColor(unpack(MUTED))
 
-      row.name:SetText(r.name or "?")
+      setTextForce(row.name, r.name or "?")
       local cc = CLASS_COLOR[r.class or ""] or WHITE
       row.name:SetTextColor(cc[1], cc[2], cc[3])
 
@@ -2687,6 +2637,8 @@ local function renderTargetsView()
     local row, r = frame.rows[i], rows[i + state.rankScroll]
     if not r then row:Hide() else
       resetRow(row)
+      -- Shown BEFORE anything is written into it — see setTextForce (S254).
+      row:Show()
       row.itemID, row.link = r.itemID, r.link
       row.meta = { name = r.name, icon = r.icon, slot = r.slot, source = r.source }
       row.icon:SetTexture(r.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
@@ -2694,7 +2646,7 @@ local function renderTargetsView()
 
       local marked = ns.Targets and ns.Targets.Has(r.itemID)
       row.name:SetWidth(150)
-      row.name:SetText(r.name or "?")
+      setTextForce(row.name, r.name or "?")
       row.name:SetTextColor(unpack(marked and ns.TARGET_COLOR or WHITE))
       row.upgrade:SetText(r.veryRare and "|cffa335eerare|r" or "")
       row.gain:SetText(r.slot or "")
@@ -2833,7 +2785,7 @@ local function renderRunner()
       if S then row.name:SetTextColor(S.rgb(S.COLOR.textDim)) end
       row.ver:SetText(""); row.gear:SetText("")
     else
-      row.name:SetText(p.name or "?")
+      setTextForce(row.name, p.name or "?")
       -- Class colour where we know the class. Roster.IdentityFor is the seam
       -- that already answers "who is this" from whatever source has an answer;
       -- an unknown name stays plain white rather than being coloured on a guess.

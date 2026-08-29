@@ -478,39 +478,7 @@ function ns.FillItemNames(entries, catalogue)
       filled = filled + 1
     end
   end
-  -- Recorded so "did this even run?" stops being a thing anyone has to reason
-  -- about from the source. It is called once per refresh, not per item.
-  if ns.Diagnostics then
-    ns.Diagnostics.Note("fillItemNames",
-      { entries = #(entries or {}), filled = filled })
-  end
   return filled
-end
-
---- Describe what a list is about to draw AS NAMES: type, byte length, brackets.
----
---- ⚠️ SIX STATIC READINGS SAID A BLANK ROW WAS IMPOSSIBLE AND ROWS DREW BLANK
---- ANYWAY (Session 254). FillItemNames is proven by test to leave nothing empty,
---- every writer of the item column was accounted for, both font sizes resolve,
---- and the detail pane rendered the SAME field on the SAME entry correctly. When
---- every explanation is refuted, the thing to do is measure the value nobody has
---- measured rather than build a seventh explanation.
----
---- BYTE LENGTH AND BRACKETS ARE THE POINT. "" and " " and a colour escape with
---- no glyphs after it all render as nothing and are indistinguishable on screen,
---- and only ONE of them is what an emptiness guard tests for. len=0 means the
---- guard should have fired; len>0 with nothing on screen means the string is not
---- the problem and the frame is.
-function ns.DescribeNames(entries, limit)
-  local out = {}
-  for i, e in ipairs(entries or {}) do
-    if limit and i > limit then break end
-    local n = e and e.name
-    out[#out + 1] = ("%s %s len=%s [%s]"):format(
-      tostring(e and e.itemID), type(n),
-      (type(n) == "string") and tostring(#n) or "-", tostring(n))
-  end
-  return out
 end
 
 --- Make sure every name on screen is a real one, and come back when it is not.
@@ -753,9 +721,43 @@ end
 --- shape instead of vanishing.
 local ARMOR_CLASS = { Cloth = true, Leather = true, Mail = true, Plate = true }
 
+--- OUR SLOT KEYS, IN THE GAME'S OWN WORDING.
+---
+--- ⚠️ TWO VOCABULARIES FOR ONE FIELD, AND THE USER WATCHED US SWITCH BETWEEN
+--- THEM (Jason, Session 254). The row's second line was drawn from OUR payload
+--- while the Adventure Guide was still cold, then redrawn from the Guide half a
+--- second later — so it read "TRINKET" and then "Trinket", "SHOULDER" and then
+--- "Shoulder". Both were right; only one was in the language the game speaks.
+--- Normalising here makes the two sources produce the IDENTICAL string, so the
+--- flicker becomes impossible rather than merely quick.
+---
+--- The wording deliberately mirrors JOURNAL_SLOT below, which already maps the
+--- Guide's labels the other way. These are the two halves of one translation and
+--- must stay in step.
+---
+--- ⚠️ A TIER TOKEN HAD NO LABEL AT ALL, so a token row drew its badge beside an
+--- EMPTY second line (Venomwoven Effigy). "TOKEN" is a slot key we invented; it
+--- is not a place on the body and the Guide has no word for it, so we supply one.
+local SLOT_LABEL = {
+  HEAD = "Head", NECK = "Neck", SHOULDER = "Shoulder", BACK = "Back",
+  CHEST = "Chest", WRIST = "Wrist", HANDS = "Hands", WAIST = "Waist",
+  LEGS = "Legs", FEET = "Feet", FINGER = "Finger", TRINKET = "Trinket",
+  MAIN_HAND = "Main Hand", OFF_HAND = "Held In Off-hand",
+  ONE_HAND = "One-Hand", TWO_HAND = "Two-Hand", RANGED = "Ranged",
+  TOKEN = "Tier Token",
+}
+
+--- ⚠️ UNKNOWN VALUES PASS THROUGH UNTOUCHED, which is what makes this safe to
+--- run over BOTH sources: the Guide's "Trinket" is not a key here and is left
+--- exactly as it arrived, so this can never mangle a label the game gave us.
+function ns.SlotLabel(slot)
+  if type(slot) ~= "string" or slot == "" then return slot end
+  return SLOT_LABEL[slot] or slot
+end
+
 function ns.ItemSlotLine(entry)
   if not entry then return "" end
-  local slot, armor = entry.slotText, entry.armorType
+  local slot, armor = ns.SlotLabel(entry.slotText), entry.armorType
   if armor and ARMOR_CLASS[armor] then
     return slot and slot ~= "" and (slot .. ", " .. armor) or armor
   end
