@@ -3850,6 +3850,18 @@ header("Pixel alignment — the arithmetic behind a blurry panel")
   check("an unaligned client is told text lands between pixels",
         soft:find("BETWEEN pixels", 1, true) ~= nil, soft)
 
+  -- ⚠️ THE READOUT SHIPPED OVERLAPPING THE LAST SETTING'S HELP TEXT. It was
+  -- given no band in the window height, and WoW frames do not clip children, so
+  -- nothing errored — it simply drew on top. Height is derived, so assert that
+  -- every band is in the sum and that adding a setting still moves it.
+  local h = ns.Settings.WindowHeight()
+  local rows = #ns.Settings.SPEC
+  check("the window height grows with the number of settings",
+        h > rows * 40, h)
+  check("...and reserves room for the display readout on top of the footer",
+        h - (rows * 54) - 40 - 48 >= 50,
+        ("leftover band: %d"):format(h - (rows * 54) - 40 - 48))
+
   _G.GetPhysicalScreenSize = realGPSS
 end)()
 

@@ -226,9 +226,24 @@ local FRAME_W  = 460
 local HEADER_H = 40
 local ROW_H    = 54
 local FOOTER_H = 48
+-- ⚠️ THE READOUT NEEDS ITS OWN BAND IN THE HEIGHT, and adding it without one is
+-- exactly the mistake the note above describes — it drew over the last row's
+-- help text, because WoW frames do not clip their children so nothing looked
+-- broken, it just overlapped. Three lines of GameFontDisableSmall plus breathing
+-- room. If the readout ever gains a fourth line, this number moves with it.
+local READOUT_H = 58
+
+--- The window's height, derived rather than fixed. Exposed so the harness can
+--- assert every band is accounted for: a region added without a band of its own
+--- does not error and does not look broken — WoW frames do not clip children, so
+--- it silently draws over whatever was already there. That is how the display
+--- readout landed on top of the last setting's help text.
+function Settings.WindowHeight()
+  return HEADER_H + (#Settings.SPEC * ROW_H) + READOUT_H + FOOTER_H
+end
 
 local function build()
-  local height = HEADER_H + (#Settings.SPEC * ROW_H) + FOOTER_H
+  local height = Settings.WindowHeight()
 
   frame = CreateFrame("Frame", "HoDLootAdvisorConfigFrame", UIParent, "BasicFrameTemplateWithInset")
   frame:SetSize(FRAME_W, height)
@@ -345,10 +360,12 @@ local function build()
   -- ns.DisplayReport does the arithmetic (Core.lua, inside the harness's reach);
   -- this only prints it.
   frame.display = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  frame.display:SetPoint("BOTTOMLEFT", 18, 44)
-  frame.display:SetPoint("BOTTOMRIGHT", -18, 44)
+  frame.display:SetPoint("BOTTOMLEFT", 18, FOOTER_H)
+  frame.display:SetPoint("BOTTOMRIGHT", -18, FOOTER_H)
+  frame.display:SetHeight(READOUT_H - 10)
   frame.display:SetJustifyH("LEFT")
-  frame.display:SetJustifyV("BOTTOM")
+  frame.display:SetJustifyV("TOP")
+  frame.display:SetWordWrap(true)
 
   local close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
   close:SetSize(100, 24)
