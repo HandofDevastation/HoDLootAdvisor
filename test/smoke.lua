@@ -786,6 +786,24 @@ stub.instance = {
   difficultyName = "Heroic (Raid)", instanceID = 2917,
 }
 
+-- A REAL RAID HAS A ROSTER, SO THE FIXTURE MUST TOO (Session 253). The guild
+-- export is what scripts/loot-addon-contract/check-export.ts feeds through the
+-- site's real parser, and the site branches on whether a winner carries a
+-- realm. With no group standing here every winner exported bare, so that check
+-- was proving the round trip for data the addon no longer produces.
+--
+-- Scanned rather than hand-seeded: this is the path that runs in game, so the
+-- realms come from UnitName exactly as they would live. Vörnix is deliberately
+-- on our OWN realm (empty answer from UnitName) and the rest are cross-realm.
+stub.group = {
+  { name = "Vörnix",    realm = nil,           class = "Hunter",  classToken = "HUNTER" },
+  { name = "Dåmir",     realm = "Area52",      class = "Warrior", classToken = "WARRIOR" },
+  { name = "Mîrâñ",     realm = "Illidan",     class = "Mage",    classToken = "MAGE" },
+  { name = "Brambleÿ",  realm = "Tichondrius", class = "Druid",   classToken = "DRUID" },
+  { name = "Corvá",     realm = "Area52",      class = "Priest",  classToken = "PRIEST" },
+}
+ns.Roster.Scan()
+
 -- Two drops off one boss. The first is a contested Need roll; the second is a
 -- pass-fallthrough, which the site counts differently from a real win and which
 -- therefore has to survive the round trip intact.
@@ -956,6 +974,67 @@ R.SetKind(personalRuns[1].index, "guild")
 check("a run can be re-tagged by hand", #R.Sessions("guild") == 3)
 R.SetKind(personalRuns[1].index, "personal")
 check("and tagged back", #R.Sessions("personal") == 1)
+
+-- ── The winner's REALM survives into the export ─────────────────────────────
+--
+-- Abirn has two REAL characters both called Abirnn — a Druid on Area-52 and a
+-- Shaman on Thrall. The export carried the bare name, so the site could not say
+-- which; because it refuses to guess between two same-named characters it
+-- recorded NEITHER, and four contested need wins sat uncharged for a fortnight
+-- while his standing read as an unlucky raider's (Session 253).
+--
+-- The third case is the one that matters most. A realm we cannot establish must
+-- stay ABSENT: the roll window's own playerName omits the realm for cross-realm
+-- players too, so stamping our own realm on any bare name would have invented
+-- "Abirnn-Stormrage" for an Area-52 character.
+do
+  header("The winner's realm reaches the export")
+
+  local function seenAs(name, realm)
+    local key = (ns.Comms and ns.Comms.Normalize and ns.Comms.Normalize(name)) or name:lower()
+    ns.Roster.seen[key] = { name = name, realm = realm, attempts = 0, nextTry = 0 }
+  end
+
+  seenAs("Abirnn",  "Area52")   -- cross-realm: UnitName hands us the realm
+  seenAs("Zandion", "")         -- our own realm: UnitName hands us nothing
+  -- "Straynger" is deliberately NEVER seeded — nobody knows where they are.
+
+  -- Its OWN instance, so these probes form their own run. Dropping them into a
+  -- session the later delete-a-run checks operate on made those fail: a fixture
+  -- that changes shared state is testing the other tests too.
+  local savedInstance = stub.instance
+  stub.instance = { name = "Realm Probe Chamber", difficultyID = 8,
+                    difficultyName = "Mythic+ (5-man)", instanceID = 9999 }
+
+  stub.items[280101] = { name = "Realm Probe Alpha", quality = 4, ilvl = 300, itemType = "Armor" }
+  stub.items[280102] = { name = "Realm Probe Beta",  quality = 4, ilvl = 300, itemType = "Armor" }
+  stub.items[280103] = { name = "Realm Probe Gamma", quality = 4, ilvl = 300, itemType = "Armor" }
+
+  stub.Fire("ENCOUNTER_LOOT_RECEIVED", 0, 280101,
+            stub.link(280101, "Realm Probe Alpha", {}), 1, "Abirnn", "DRUID")
+  stub.Fire("ENCOUNTER_LOOT_RECEIVED", 0, 280102,
+            stub.link(280102, "Realm Probe Beta", {}), 1, "Zandion", "WARLOCK")
+  stub.Fire("ENCOUNTER_LOOT_RECEIVED", 0, 280103,
+            stub.link(280103, "Realm Probe Gamma", {}), 1, "Straynger", "MAGE")
+
+  local realmRun
+  for _, r in ipairs(R.Sessions("personal")) do
+    if r.session.instance == "Realm Probe Chamber" then realmRun = r end
+  end
+  local realmText = realmRun and R.Export({ index = realmRun.index }) or ""
+  stub.instance = savedInstance
+
+  check("a cross-realm winner is exported WITH their realm, so two same-named characters can be told apart",
+        realmText:find("Abirnn-Area52", 1, true) ~= nil,
+        realmText:match("[^\n]*Realm Probe Alpha[^\n]*") or "no line for it")
+  check("a winner on our OWN realm is stamped with it rather than left bare",
+        realmText:find("Zandion-Stormrage", 1, true) ~= nil,
+        realmText:match("[^\n]*Realm Probe Beta[^\n]*") or "no line for it")
+  check("a winner the roster never saw stays BARE — an unknown realm is never invented",
+        realmText:find("~Straynger~", 1, true) ~= nil
+          and realmText:find("Straynger%-") == nil,
+        realmText:match("[^\n]*Realm Probe Gamma[^\n]*") or "no line for it")
+end
 
 -- ── Deleting ONE DROP out of a run ──────────────────────────────────────────
 --
@@ -2552,6 +2631,29 @@ header("Standings — number formatting, ages, and the ladder/roster join")
         rows[3] ~= nil and rows[3].name == "Ghostly", rows[3] and rows[3].name)
   check("...it just has no class to colour by", rows[3].class == nil)
   check("...and its standing still shows", rows[3].pr == 3.60)
+
+  -- ── The ladder carries its own class (Session 253) ────────────────────────
+  --
+  -- ⚠️ THE JOIN ABOVE IS NO LONGER THE ONLY SOURCE, because it silently failed
+  -- for a fifth of the raid team. The ladder was named after the PERSON (their
+  -- display name) while the roster is keyed by CHARACTER, so Abirn, Death,
+  -- Gloom, Televoker and Zugbee matched nothing: white names and an em-dash
+  -- where their Last Item should be, which reads as "won nothing" rather than
+  -- as a broken lookup. The site now names the ladder after the raid-roster
+  -- character AND ships the class, so neither has to be inferred.
+  ns.Payload.Current = function()
+    return { ladder = {
+      -- Not on the roster at all, and still colourable from its own field.
+      { n = "Offroster", c = "Priest",  ep = 800, gp = 100, pr = 8.00, rank = 1 },
+      -- Present on the roster; the empty string must NOT beat the join.
+      { n = "Vörnix",    c = "",        ep = 700, gp = 100, pr = 7.00, rank = 2 },
+    } }
+  end
+  local carried = ns.StandingsRows()
+  check("a ladder rung colours itself from its OWN class, with no roster row to join",
+        carried[1].class == "Priest", tostring(carried[1].class))
+  check("...and an empty class still falls back to the roster join",
+        carried[2].class == "Warlock", tostring(carried[2].class))
 
   ns.Payload.Current = function() return nil end
   local none, zero = ns.StandingsRows()

@@ -568,6 +568,31 @@ function Roster.IdentityFor(name)
   return nil
 end
 
+--- The realm a person is standing on, read off the group roster.
+---
+--- Returns the realm name, "" when they are on OUR realm, or nil when the
+--- roster has never seen them. Those three are different answers and the caller
+--- must keep them apart.
+---
+--- ⚠️ "" IS AN ANSWER, NOT A FAILURE. UnitName() omits the realm for anybody on
+--- the reader's own realm, so an empty realm means "same as us" and the caller
+--- stamps GetRealmName(). Reading it as unknown is precisely how a winner ends
+--- up exported with no realm at all — see Record.lua's qualifyName.
+---
+--- ⚠️ AND DO NOT SUBSTITUTE THE LOOT ROLL'S OWN playerName FOR THIS. That string
+--- is realm-qualified only SOMETIMES: measured across 125 recorded wins it
+--- carried a realm 43 times and omitted it 82, with fourteen players — Abirnn,
+--- Cefas, Hackerslash, Linosia and others — appearing BOTH ways on the same
+--- night. UnitName on a real unit token has a defined contract; that string
+--- does not. The site charged nobody for four of Abirn's wins because two of
+--- his characters share a name across realms and the bare form cannot tell them
+--- apart (Session 253).
+function Roster.RealmFor(name)
+  local entry = Roster.seen[normalize(name) or ""]
+  if not entry then return nil end
+  return entry.realm or ""
+end
+
 --- Do we have any gear at all for this person, from any source? The gate on
 --- ranking an ad-hoc raider: class and spec cannot score an item on their own.
 function Roster.HasGear(name)

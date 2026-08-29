@@ -196,6 +196,41 @@ local function stripRealm(name)
   return name:match("^([^%-]+)") or name
 end
 
+--- Attach a realm to a winner's name, so the site can tell two same-named
+--- characters apart.
+---
+--- ⚠️ A BARE NAME IS NOT A HARMLESS ONE. Abirn has two real characters both
+--- called Abirnn — a Druid on Area-52 and a Shaman on Thrall. Exporting the
+--- bare name left the site unable to say WHICH, and because it refuses to guess
+--- between two same-named characters it recorded neither: four contested need
+--- wins were attributed to nobody and never charged any GP for a fortnight
+--- (Session 253). The realm is the only thing that separates them.
+---
+--- ⚠️ AND DO NOT ASSUME A BARE NAME MEANS OUR OWN REALM. That is true of the
+--- loot MESSAGE (measured: 596 of 620 recipients realm-qualified, and every
+--- bare one was on the reader's realm) but it is NOT true of the roll window's
+--- playerName, which omits the realm for cross-realm players too — bare
+--- "Abirnn" was recorded for an Area-52 character by a Stormrage reader.
+--- Stamping GetRealmName() on that string would invent "Abirnn-Stormrage".
+--- Only UnitName's own empty answer, via Roster.RealmFor, carries that meaning.
+---
+--- Resolution order, most trustworthy first. When none of it answers we return
+--- the name unchanged rather than guessing — the site reports an unresolved
+--- winner, which is visible, instead of silently charging nobody.
+local function qualifyName(name)
+  if not name or name == "" then return name end
+  if name:find("-", 1, true) then return name end
+
+  local realm = ns.Roster and ns.Roster.RealmFor and ns.Roster.RealmFor(name)
+  if realm == nil then return name end         -- roster never saw them; do not guess
+  if realm == "" then                           -- UnitName's "same realm as us"
+    realm = GetRealmName and GetRealmName() or nil
+  end
+  if not realm or realm == "" then return name end
+
+  return name .. "-" .. (realm:gsub("%s+", ""))
+end
+
 -- ---------------------------------------------------------------------------
 -- Field sanitising
 -- ---------------------------------------------------------------------------
@@ -662,6 +697,10 @@ local function upsertDrop(encounterID, info)
   if winnerName and winnerName ~= "" then
     e.winnerFull = winnerName
     e.winner     = stripRealm(winnerName)
+    -- Resolved HERE, not at export time: the realm comes off the group roster,
+    -- and by the time anyone pastes an export the raid has long since
+    -- disbanded and the roster is empty.
+    e.winnerRealm = qualifyName(winnerName)
     local wr     = e.rolls[winnerName]
     if wr then
       e.winRollType  = wr.rollType
@@ -768,6 +807,7 @@ function Record.OnEncounterLoot(encounterID, itemID, itemLink, _quantity, player
     rolls        = {},
     winner       = short,
     winnerFull   = playerName,
+    winnerRealm  = qualifyName(playerName),
     winRollType  = "personal",
     winRollValue = 0,
     timestamp    = time(),
@@ -1416,7 +1456,11 @@ function Record.Export(opts)
           clean(item.itemName),
           clean(item.itemType),
           item.itemILevel or 0,
-          cleanName(item.winner or ""),
+          -- THE REALM-QUALIFIED NAME, falling back to the bare one only for
+          -- sessions logged before this existed. Exporting item.winner here —
+          -- which is the name with the realm deliberately stripped off — is
+          -- what cost Abirn four uncharged wins; see qualifyName above.
+          cleanName(item.winnerRealm or item.winner or ""),
           clean(item.winRollType or ""),
           item.winRollValue or 0,
           item.itemQuality or 0,

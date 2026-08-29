@@ -761,11 +761,25 @@ function ns.StandingsRows()
   local byName = ns.Payload.byName or {}
   local out = {}
   for i, s in ipairs(ladder) do
+    -- ⚠️ THE LADDER CARRIES ITS OWN CLASS NOW, AND THE JOIN IS A FALLBACK
+    -- (Session 253). This used to take class and Last Item SOLELY from a
+    -- name match against the roster — but the ladder was named after the
+    -- PERSON (display name) while the roster is keyed by CHARACTER, so anyone
+    -- whose display name differed from the toon they raid on silently lost
+    -- both. Five of seventeen raid-team members were affected: Abirn, Death,
+    -- Gloom, Televoker and Zugbee rendered white with an em-dash while
+    -- everyone else was coloured, and it read as "they have won nothing".
+    --
+    -- The site now names the ladder after the raid-roster character, so the
+    -- join succeeds by construction; `s.c` is belt and braces for a standing
+    -- whose character is not on the roster at all.
     local roster = s.n and byName[s.n:lower()]
+    local class = s.c
+    if class == "" then class = nil end
     out[#out + 1] = {
       rank = s.rank or i,
       name = s.n,
-      class = roster and roster.c or nil,
+      class = class or (roster and roster.c) or nil,
       ep = s.ep, gp = s.gp, pr = s.pr,
       lastItemDays = roster and roster.lastItemDays or nil,
     }
