@@ -80,6 +80,13 @@ function real.SetSize(self, w, h) self._width, self._height = w, h end
 function real.GetWidth(self) return self._width end
 function real.GetHeight(self) return self._height end
 
+-- Scale is real state here: Panel.ApplyScale multiplies onto a remembered
+-- baseline, and a stub that answered nil would make that arithmetic untestable
+-- — which it was, and the block below died silently for exactly that reason.
+function real.SetScale(self, s) self._scale = s end
+function real.GetScale(self) return self._scale or 1 end
+function real.GetEffectiveScale(self) return self:GetScale() end
+
 function real.SetAlpha(self, a) self._alpha = a end
 function real.GetAlpha(self) return self._alpha end
 
@@ -93,7 +100,16 @@ function real.HookScript(self, which, fn)
   local prev = self.scripts[which]
   self.scripts[which] = function(...) if prev then prev(...) end return fn(...) end
 end
-function real.RegisterEvent(self, e) self.events[e] = true end
+-- ⚠️ THE SAME STRICTNESS THE BASE STUB HAS. It refuses an event name the client
+-- does not define, which is how a typo'd registration gets caught rather than
+-- silently never firing. Dropping that check here would make this harness more
+-- permissive than the one it sits beside.
+function real.RegisterEvent(self, e)
+  if stub.KNOWN_EVENTS and not stub.KNOWN_EVENTS[e] then
+    error("Attempt to register unknown event '" .. tostring(e) .. "'", 2)
+  end
+  self.events[e] = true
+end
 function real.SetFontString(self, fs) self._fontString = fs end
 function real.GetFontString(self) return self._fontString end
 function real.GetObjectType(self) return self._kind end
@@ -128,9 +144,14 @@ widgetMeta.__index = function(self, key)
   return nil
 end
 
-local realCreateFrame = _G.CreateFrame
 _G.CreateFrame = function(kind, name, parent)
   local f = newWidget(kind or "Frame", name, parent)
+  -- ⚠️ REGISTERED WITH THE BASE STUB'S DISPATCHER. stub.Fire walks stub.frames,
+  -- so a widget created here and not added to it can never RECEIVE an event —
+  -- which meant ADDON_LOADED never reached Core, ns.db was never set, and every
+  -- call into Settings died on a nil field. The frames looked fine; they were
+  -- simply not listening.
+  stub.frames[#stub.frames + 1] = f
   if name then _G[name] = f end
   return f
 end
@@ -142,6 +163,9 @@ _G.StaticPopup_Show = function() end
 _G.StaticPopup_Hide = function() end
 _G.ChatFontNormal = newWidget("Font", "ChatFontNormal")
 _G.NORMAL_FONT_COLOR = { r = 1, g = 0.82, b = 0 }
+-- The minimap button anchors to Minimap and reads its scale; without it the
+-- login sequence dies before Settings is ever initialised.
+_G.Minimap = newWidget("Frame", "Minimap")
 _G.GameTooltip = newWidget("Frame", "GameTooltip")
 _G.GameFontNormal = newWidget("Font", "GameFontNormal")
 -- CreateColor returns the table SetGradient is handed, so a test can compare
@@ -156,6 +180,13 @@ local ns = stub.LoadAddon({
   "Tooltip.lua", "Tip.lua", "Record.lua", "Loot.lua",
   "LoadWindow.lua", "RecordWindow.lua", "Panel.lua", "MinimapButton.lua",
 })
+
+-- ⚠️ THE LOGIN SEQUENCE, NOT JUST THE LOAD. Settings keeps its values in the
+-- SavedVariables table that ADDON_LOADED creates, so without this every call
+-- into it dies on a nil field — which is exactly how the size checks below
+-- failed the first time, inside a header with no visible error.
+stub.Fire("ADDON_LOADED", "HoDLootAdvisor")
+stub.Fire("PLAYER_ENTERING_WORLD", true, false)
 
 local failures, checks = {}, 0
 local function check(label, ok, detail)
@@ -300,6 +331,39 @@ do
   local flat = S.Rim(_G.CreateFrame("Frame"), S.COLOR.control, 1)
   check("a rim asked for one colour draws no ramp", flat.left._gradient == nil)
 end
+
+header("Panel size is a knob, and it compounds from one baseline")
+
+drive("the panel size knob behaves", function()
+  local panel = _G.HoDLootAdvisorPanel
+  local base = panel._baseScale or 1
+  ns.Settings.Set("panelScale", 80)
+  ns.Panel.ApplyScale()
+  local at80 = panel:GetScale()
+  ns.Settings.Set("panelScale", 120)
+  ns.Panel.ApplyScale()
+  local at120 = panel:GetScale()
+  ns.Settings.Set("panelScale", 100)
+  ns.Panel.ApplyScale()
+  local at100 = panel:GetScale()
+
+  check("80% is smaller than 100%", at80 < at100, ("%.3f vs %.3f"):format(at80, at100))
+  check("120% is larger than 100%", at120 > at100)
+  -- ⚠️ THE BASELINE MUST NOT DRIFT. Applying 80 then 120 then 100 has to land
+  -- back exactly where it started; multiplying each change onto the CURRENT
+  -- scale rather than a remembered baseline would compound and shrink the
+  -- window a little every time the setting was touched.
+  check("returning to 100% lands exactly back on the baseline",
+        math.abs(at100 - base) < 1e-9, ("%.6f vs %.6f"):format(at100, base))
+
+  -- Out-of-range values are clamped rather than obeyed: a 0 would make the
+  -- window disappear with no way to reach the setting that did it.
+  ns.Settings.Set("panelScale", 0)
+  ns.Panel.ApplyScale()
+  check("a nonsense size is clamped, never applied", panel:GetScale() >= base * 0.5 - 1e-9)
+  ns.Settings.Set("panelScale", 100)
+  ns.Panel.ApplyScale()
+end)
 
 header("No window file reads a constant that was deleted")
 

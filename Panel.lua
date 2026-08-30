@@ -1016,6 +1016,7 @@ local function buildChrome()
   frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
   frame:SetFrameStrata("DIALOG")
   ns.MakeWindow(frame)
+  Panel.ApplyScale()
   frame:Hide()
 
   -- The design's ground: a near-black fill, a warm wash rising from the bottom
@@ -2508,7 +2509,10 @@ local function renderFacts(entry, ranked)
   for i, r in ipairs(ranked or {}) do
     if (r.name or ""):lower() == me then
       if r.gap and i > 1 then
-        parts[#parts + 1] = ("-%d Behind"):format(r.gap)
+        -- ⚠️ THE GAP IS ALREADY NEGATIVE. It is stored as
+        -- `row.result.raw_score - top`, so a "-%d" format printed "--32 Behind"
+        -- on screen. %d carries the sign the value already has.
+        parts[#parts + 1] = ("%d Behind"):format(r.gap)
       elseif i == 1 then
         parts[#parts + 1] = "Top of the list"
       end
@@ -2535,7 +2539,9 @@ local function renderFacts(entry, ranked)
   end
   if entry.targeted then tags[#tags + 1] = "TARGETED" end
 
-  local sepPlain = "  " .. BAR .. "  "
+  -- ⚠️ ONE SPACE EITHER SIDE, NOT TWO. The mock's separator is " | " and the
+  -- doubled version left gaps wide enough to read as column breaks.
+  local sepPlain = " " .. BAR .. " "
   local sep = S and (S.code(S.COLOR.accent) .. sepPlain .. "|r") or sepPlain
 
   if #parts == 0 and #tags == 0 then
@@ -2545,18 +2551,28 @@ local function renderFacts(entry, ranked)
   end
 
   local left = table.concat(parts, sep)
-  -- The tags carry the separator that joins them to the facts, so the gap
-  -- between the two strings is drawn by the same rule as every other gap.
   local right = table.concat(tags, sep)
-  if left ~= "" and right ~= "" then right = sep .. right end
+
+  -- ⚠️ THE JOIN BETWEEN THE TWO STRINGS CANNOT BE A SPACE, and that is why the
+  -- gap before the bold tag came out different from every other one. Leading
+  -- and trailing whitespace is not reliably included in GetStringWidth, so a
+  -- separator built from spaces at the boundary measures as narrower than the
+  -- identical separator drawn INSIDE a string.
+  --
+  -- So the boundary is drawn as a real offset instead: the light run is
+  -- measured, then one space's advance is added, and the bold run STARTS with
+  -- the pipe. 2.00px is the space's own advance at 10px, summed from the
+  -- bundled TTF rather than guessed.
+  local SPACE_ADV = 2
+  if left ~= "" and right ~= "" then
+    right = (S and (S.code(S.COLOR.accent) .. BAR .. "|r") or BAR) .. " " .. right
+  end
 
   frame.facts:SetText(left)
   frame.factTags:SetText(right)
-  -- Placed after measuring, because where the bold run starts depends entirely
-  -- on how long the light one turned out to be.
   frame.factTags:ClearAllPoints()
   frame.factTags:SetPoint("TOPLEFT", frame.facts, "TOPLEFT",
-    frame.facts:GetStringWidth() or 0, 0)
+    (frame.facts:GetStringWidth() or 0) + ((left ~= "" and right ~= "") and SPACE_ADV or 0), 0)
 end
 
 --- The selected item's identity row, and who won it.
@@ -3560,6 +3576,20 @@ function Panel.Refresh()
   renderFooterGear()
 end
 
+--- Apply the user's Panel Size on top of whatever MakeWindow settled on.
+---
+--- ⚠️ MULTIPLIED ONTO THE CLIENT'S SCALE, NOT SUBSTITUTED FOR IT. MakeWindow may
+--- have snapped the window onto whole pixels, and replacing that outright would
+--- undo the crispness it bought. The baseline is remembered on first call so
+--- repeated changes compound from the same place rather than from each other.
+function Panel.ApplyScale()
+  if not frame or not frame.SetScale then return end
+  frame._baseScale = frame._baseScale or (frame.GetScale and frame:GetScale()) or 1
+  local pct = tonumber(ns.Settings and ns.Settings.Get("panelScale")) or 100
+  if pct < 50 then pct = 50 elseif pct > 200 then pct = 200 end
+  pcall(frame.SetScale, frame, frame._baseScale * pct / 100)
+end
+
 function Panel.Show()
   if not frame then build() end
   -- ⚠️ THE OPENING LIST DEPENDS ON WHERE YOU ARE STANDING (Jason). Inside a raid
@@ -3576,6 +3606,9 @@ function Panel.Show()
   -- The panel is the one window with no dock to fall back on — its build-time
   -- CENTER+260 IS the default — so it restores here rather than in
   -- DockBesidePanel.
+  -- Re-read on every open: the size is also reachable from the Settings window,
+  -- and the two must never disagree about how big this one is.
+  Panel.ApplyScale()
   ns.RestoreWindowPosition(frame)
   frame:Raise()
   frame:Show()

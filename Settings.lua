@@ -45,6 +45,26 @@ Settings.SPEC = {
         .. "Dungeons shows the season's Mythic+ loot at its fixed drop level.",
   },
   {
+    key = "panelScale", label = "Panel Size (%)", default = 100,
+    kind = "number", min = 50, max = 200,
+    -- ⚠️ THIS EXISTS BECAUSE WoW UI UNITS ARE NOT DESIGN PIXELS, and nothing
+    -- inside the game can convert between them. The panel is drawn to a 740x600
+    -- frame; how large that lands on a given screen depends on the client's
+    -- resolution, the UI Scale slider, and — on a Mac — the display's own
+    -- scaling mode, which WoW cannot see at all.
+    --
+    -- Two attempts to derive the right number from the outside failed. The
+    -- pixel-snapper was rounding 1.667 pixels-per-unit up to 2 and making every
+    -- window 20% larger than drawn, which is fixed; the remainder is simply that
+    -- the client's own units do not match the design's, and no amount of
+    -- arithmetic here can know by how much for a given monitor.
+    --
+    -- So it is a knob. 100 means whatever the client gives, which is what every
+    -- other addon does, and anyone comparing against the design can dial it.
+    help = "How large the Loot Advisor window draws. 100 is the size your client gives it; "
+        .. "lower it if the window is bigger than you want on your monitor.",
+  },
+  {
     key = "vault", label = "Vault / Voidcore Levels", default = false,
     kind = "toggle",
     -- Paired with the Loot tab's Vault/Voidcore checkbox, which is the same
