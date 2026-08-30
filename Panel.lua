@@ -109,36 +109,51 @@ local LOGO_X, LOGO_Y = 40, 30
 -- defining change to this tab and the reason the old strip's numbers are gone
 -- rather than retuned — a right-aligned row of tiles has no counterpart here.
 --
--- A row is 41 tall, of which 1 is its bottom rule. The mock's EXPANDED row
--- measures 40 because that rule is dropped to join the row to the loot beneath
--- it — which is why the two numbers differ by exactly one.
+-- ⚠️ A ROW IS 37, MEASURED — not the 41 a backlog note gave, which came from an
+-- earlier state of the mock and was taken on trust here for one commit. The file
+-- has 37, 37, 37 and then 36 for the last, which drops its bottom rule; four of
+-- them occupy exactly 147. Read the node, not the note about the node.
 local BOSS_X, BOSS_TOP, BOSS_W = 40, 171, 200
-local BOSS_ROW_H, BOSS_ICON = 41, 28
--- The whole column's height, bosses and item cards together (the mock's own
--- 200x344 group). Everything below divides THIS between the two lists.
-local COL_AREA_H = 344
+local BOSS_ROW_H, BOSS_ICON = 37, 28
+-- The column's content height, bosses and item cards together.
+local COL_AREA_H = 339
 -- ⚠️ FOUR ROWS, AND THE RAIL SCROLLS. The mock draws four bosses and three item
--- cards, which is exactly what 344 holds. The season has nine bosses, so a
+-- cards, which is exactly what 339 holds. The season has nine bosses, so a
 -- fixed four would have made five of them unreachable — a functional loss, not
 -- a cosmetic one — hence the rail carries its own scroll offset rather than the
 -- count being trimmed to what fits.
 local BOSS_VISIBLE = 4
--- Icon inset, then the gap to the name: pl-4, then 10.
-local BOSS_ICON_X, BOSS_NAME_X = 4, 42
+-- Icon inset 4, name at 42 (4 + 28 + a 10 gap), and the name sits 12 down
+-- inside the row rather than being centred in it.
+local BOSS_ICON_X, BOSS_NAME_X, BOSS_TEXT_Y = 4, 42, 12
 local BOSS_SLOTS = 9
 
 -- The item cards sit DIRECTLY BENEATH the last boss row, so their top is not a
 -- constant — it follows however many bosses the season has. COL_TOP is the
 -- fallback for a client with no boss list at all.
 local COL_X, COL_W, COL_TOP = BOSS_X, BOSS_W, BOSS_TOP
-local ITEM_H, ITEM_PITCH = 44, 46
+-- A card is 61 tall with a 2px gap to the next; the SELECTED card measures 62,
+-- the same one-pixel tell the rail uses — its own rule is not drawn. Inside: 10
+-- of padding either side, the name and slot line as one 29-tall block at y 8,
+-- and the chip row at y 39.
+local ITEM_H, ITEM_PITCH = 61, 63
+-- Grouped for the same 200-locals reason as DET above.
+local CARD = {
+  padX = 10, nameY = 8, slotY = 22, chipY = 39,
+  -- Between chips on a card: 10 -> 61 -> 103, across widths of 44 and 36.
+  chipGap = 6,
+}
 -- The gap between the last boss row and the first item card (pt-4 in the mock).
 local COL_GAP = 4
 
--- The filter row, above the column.
-local TOG_X, TOG_Y = 40, 128
-local TOG_W, TOG_H = 118, 27
-local TOG_COL, TOG_ROW = 128, 0
+-- The filter row, above the column. Each piece carries its own x because the
+-- mock places them individually — the two rows have very different label
+-- lengths and still line up, which a shared pitch could not reproduce.
+local TOG = {
+  y = 132, trackY = 131,
+  srcL = 40,  srcTrack = 129, srcR = 169,
+  filL = 296, filTrack = 372, filR = 412,
+}
 
 -- The detail column. NO PANEL BEHIND IT — the mock puts it on the window ground
 -- and separates it with hairlines, so these are the bounds of a region rather
@@ -151,10 +166,12 @@ local PANE_X, PANE_Y, PANE_W, PANE_H = 263, 177, 440, 360
 -- these are the file's numbers, and squaring them up is a change to the design
 -- rather than a tidy-up of the code.
 local FOOT_Y, FOOT_H = 550, 50
-local FOOT_TEXT_X, FOOT_RIGHT, FOOT_GAP = 47, 34, 10
-local FOOT_LINE1_Y, FOOT_LINE2_Y = 10, 22
--- The button row's own top inset inside the bar (3344 - 3333).
-local FOOT_BTN_Y = 11
+local FOOT = {
+  textX = 47, right = 34, gap = 10,
+  line1Y = 10, line2Y = 22,
+  -- The button row's own top inset inside the bar (3344 - 3333).
+  btnY = 11,
+}
 
 -- ── Standings tab ──────────────────────────────────────────────────────────
 --
@@ -260,40 +277,55 @@ local ST_EP_R, ST_GP_R, ST_PR_R, ST_LAST_R = 335, 410, 488, 583
 -- change without anything being created mid-draw.
 local COL_ROWS = math.floor(COL_AREA_H / ITEM_PITCH)
 
--- Detail-pane internals, all absolute in frame space.
-local HEAD_Y      = 161     -- the three header blocks
--- ⚠️ CENTRED BY MEASUREMENT, NOT BY EYE (Session 254; the S252 rule about
--- measuring the string rather than eyeballing the layout, applied to a box). The
--- hairlines are 1px, so the band between them runs 206 to 230 — 24 tall — and
--- this line's text box measures 10.94 at the 11px size. Centred is
--- 206 + (24 - 10.94)/2 = 212.5, taken DOWN to 212 because the box carries
--- descender space the glyphs do not fill, so the ink sits high within it. It was
--- 209, which put 3px above the text and 10 below and read as sloppy.
-local FACTS_Y     = 212     -- "+17 ilvl | -16 behind | Overall BIS | Targeted"
-local ITEM_Y      = 240     -- the selected item's icon + name
-local ITEM_ICON   = 32      -- sized to the text beside it; see DIV3_Y below
--- ⚠️ EVERYTHING BELOW THE ITEM ROW MOVED UP 8 WITH IT, so the gaps it sits in are
--- unchanged: div3 to this heading was 12 before and is 12 now. Shifting the line
--- alone would have fixed the icon and opened a hole underneath it.
-local RANK_HEAD_Y = 294     -- RAIDER / UPGRADE / GAIN / PRIORITY
-local RANK_TOP    = 318
-local RANK_PITCH  = 16
-local RANK_ROWS   = 9
-local MORE_Y      = 464
-local NOTE_Y      = 481
+-- ── The detail column, all absolute in frame space ─────────────────────────
+--
+-- Every number below is a Figma node position minus the frame's own origin
+-- (814, 2783), so any one of them can be checked against the file by
+-- subtracting. NOTHING here is derived by eye.
+--
+-- ⚠️ THE HEADER IS THE ITEM NOW, NOT THREE STAT BLOCKS. The old build opened
+-- with "Upgrade for You / Your Standing / Priority-EP-GP"; the mock opens with
+-- the item itself — icon, name, slot line — and puts the viewer's own verdict in
+-- ONE badge on the right. The standing figures moved to the Standings tab and
+-- the rail, which is where a question about the ladder belongs.
+-- ⚠️ A TABLE, NOT TWENTY LOCALS, AND THAT IS A HARD REQUIREMENT. Lua 5.1 — the
+-- version the game runs — allows 200 local variables per chunk, and this file
+-- crossed it while these were being added. The limit is per CHUNK, so grouping
+-- related numbers into one table is the fix that also reads better; see the
+-- Core rule about checking against the runtime's language, not the one on this
+-- machine, and note that luac on this Mac accepts what the game refuses.
+local DET = {
+  headY   = 177,                      -- the header row, 41 tall
+  iconX   = 263, iconY = 178, icon = 40,
+  nameX   = 313, nameY = 177,         -- name (13 Regular) over slot line (12 Light)
+  line2Y  = 194,                      -- the block is 34 tall for two lines
+  -- The verdict badge: a 10%-blush box with the grade over the word "Upgrade".
+  badgeX  = 623, badgeY = 178, badgeW = 75, badgeH = 40,
+  badgePadX = 10, badgeTop = 9,
+}
 
-local DIV_X, DIV_W = 230, 360   -- the pane's horizontal hairlines
--- ⚠️ DIV3 FOLLOWS THE ICON, WHICH FOLLOWS THE TEXT (Jason, Session 254: shrink
--- the icon to the text rather than moving the text to the icon). The name and
--- sub-line occupy 243 to 268.94; a 32px icon at ITEM_Y spans 240 to 272 and so
--- centres them with 3.0 above and 3.06 below. div2 sits 10 above the block, so
--- div3 sits 10 below it: 272 + 10 = 282, where a 40px icon had forced 290.
-local DIV1_Y, DIV2_Y, DIV3_Y = 205, 230, 282
+-- TWO hairlines, not three. The mock separates header / meta / table and
+-- nothing else; the old third rule under the item row has no counterpart
+-- because the item row IS the header now.
+local DIV_X, DIV_W = 260, 440
+local DIV1_Y, DIV2_Y = 238, 269
+local FACTS_X, FACTS_Y = 280, 246
+
+-- The ranked table.
+local RANK_HEAD_Y = 299     -- RAIDER / UPGRADE / ILVL GAIN / PRIORITY
+local RANK_TOP    = 320
+local RANK_PITCH  = 20
+local RANK_ROWS   = 9
+-- Under the last row. 320 + 9 * 20 = 500, then the mock's own gap.
+local MORE_Y      = 505
+local NOTE_Y      = 521
 
 -- Column x positions inside the ranked table. GAIN and PRIORITY are RIGHT
--- edges, because both are numbers and numbers align on their right.
-local C_RANK, C_NAME, C_UPGRADE = 231, 246, 352
-local C_GAIN_R, C_PRIORITY_R = 499, 591
+-- edges, because both are numbers and numbers align on their right — confirmed
+-- against the mock, where the header and its values share an edge rather than a
+-- left margin (GAIN 560+56 = 616; PRIORITY 636+54 = 690).
+local C_RANK, C_NAME, C_UPGRADE = 270, 288, 384
+local C_GAIN_R, C_PRIORITY_R = 616, 690
 
 -- ⚠️ MARKS ARE IMAGES, NEVER CHARACTERS (Session 249, verified against the
 -- bundled fonts: General Sans and Khand carry NONE of the star or diamond
@@ -485,19 +517,46 @@ local function buildItemRow(parent, i)
   row:SetPoint("TOPLEFT", 0, -(i - 1) * ITEM_PITCH)
 
   local S = ns.Style
+  -- ⚠️ TWO GROUNDS, AND THEY ARE DIFFERENT COLOURS. The mock fills the SELECTED
+  -- card with the rule blush at 20% and every other card with the control violet
+  -- at 20% — not one colour at two alphas. Selection is a change of hue here,
+  -- which is why it reads at a glance in a column of otherwise identical cards.
   row.bg = row:CreateTexture(nil, "BACKGROUND")
   row.bg:SetAllPoints()
   if S then
-    row.bg:SetColorTexture(S.COLOR.purple.r, S.COLOR.purple.g, S.COLOR.purple.b, 0.1)
+    row.bg:SetColorTexture(S.COLOR.control.r, S.COLOR.control.g, S.COLOR.control.b, 0.2)
   else
     row.bg:SetColorTexture(1, 1, 1, 0.05)
   end
 
-  -- Two lines, as the design draws them: name on top, verdict and slot beneath.
-  -- The name gives up the gutter's width so a marked row and an unmarked one
-  -- start their text at the same place and truncate at the same place.
-  row.name = at(text(row, "body", "small", "text"), 12, 5, COL_W - 12 - MARK_GUTTER)
-  row.sub  = at(text(row, "body", "tiny", "text"), 12, 21, COL_W - 12 - MARK_GUTTER)
+  -- ⚠️ WHITE NAME OVER A BLUSH SLOT LINE — the opposite of the detail header,
+  -- and read off the node. 11 over 10, both Light.
+  row.name = at(text(row, "light", "name", "white"), CARD.padX, CARD.nameY,
+    COL_W - CARD.padX * 2 - MARK_GUTTER)
+  row.sub  = at(text(row, "light", "label", "body"), CARD.padX, CARD.slotY,
+    COL_W - CARD.padX * 2 - MARK_GUTTER)
+
+  -- ⚠️ THE CARD'S TAGS ARE CHIPS, THE SAME TWO KINDS THE RANKING ROWS USE. The
+  -- mock draws MAJOR outlined and O-BIS / TARGET filled, in that order — the
+  -- verdict first because it is what you are scanning the column for.
+  row.chips = {}
+  for ci = 1, 3 do
+    row.chips[ci] = S and S.Chip(row, ci == 1 and "outlined" or "filled")
+  end
+
+  function row:LayoutChips()
+    local x = CARD.padX
+    for _, ch in ipairs(self.chips) do
+      if ch and ch:IsShown() then
+        ch:ClearAllPoints()
+        ch:SetPoint("TOPLEFT", self, "TOPLEFT", x, -CARD.chipY)
+        x = x + ch:GetWidth() + CARD.chipGap
+      end
+    end
+  end
+  function row:ClearChips()
+    for _, ch in ipairs(self.chips) do if ch then ch:Hide() end end
+  end
 
   -- BIS sits outermost, the target inside it — the pair reads left-to-right as
   -- "you want this" then "it is the best one".
@@ -522,15 +581,16 @@ local function buildItemRow(parent, i)
   -- The item tooltip now lives on the detail pane's icon and name, which is the
   -- one place you are actually looking at an item rather than choosing between
   -- them. Hovering still highlights the row.
-  row:SetScript("OnEnter", function(self)
-    if S then self.bg:SetColorTexture(S.COLOR.purple.r, S.COLOR.purple.g, S.COLOR.purple.b, 0.28) end
-  end)
-  row:SetScript("OnLeave", function(self)
-    if S then
-      self.bg:SetColorTexture(S.COLOR.purple.r, S.COLOR.purple.g, S.COLOR.purple.b,
-        self._selected and 0.2 or 0.1)
-    end
-  end)
+  --- Paint the card's ground for its current state. One place, because hover has
+  --- to be able to put it back — and selected and unselected are different HUES,
+  --- so a hover that reset to a constant would silently deselect a card visually.
+  function row:PaintGround(hover)
+    if not S then return end
+    local c = self._selected and S.COLOR.rule or S.COLOR.control
+    self.bg:SetColorTexture(c.r, c.g, c.b, hover and 0.3 or 0.2)
+  end
+  row:SetScript("OnEnter", function(self) self:PaintGround(true) end)
+  row:SetScript("OnLeave", function(self) self:PaintGround(false) end)
   return row
 end
 
@@ -562,10 +622,8 @@ local function buildBossTile(parent, i)
   -- biggest thing the rail buys. Truncation is left to the fontstring's own
   -- width rather than to a character count: the names vary from "Vashnik" to
   -- "Tidebound Sorceress's Reliquary" and any count is wrong for one of them.
-  tile.name = at(text(tile, "body", "name", "body"), BOSS_NAME_X, 0, BOSS_W - BOSS_NAME_X - 24)
-  tile.name:ClearAllPoints()
-  tile.name:SetPoint("LEFT", BOSS_NAME_X, 0)
-  tile.name:SetWidth(BOSS_W - BOSS_NAME_X - 24)
+  tile.name = at(text(tile, "light", "name", "body"), BOSS_NAME_X, BOSS_TEXT_Y,
+    BOSS_W - BOSS_NAME_X - 24)
 
   -- The row rule. DROPPED ON THE SELECTED ROW, which is how the mock joins a
   -- boss to the loot listed beneath it — and why its expanded row measures one
@@ -657,19 +715,55 @@ local function buildRankRow(parent, i)
 
   row.TEXT_KEYS = { "rank", "name", "upgrade", "gap", "gain", "pr", "src" }
 
+  --- Place whichever chips are showing, left to right from the UPGRADE column.
+  --- Called after they are Set, because each one's width is its own label's.
+  function row:LayoutChips()
+    local x = C_UPGRADE - C_RANK
+    for _, ch in ipairs({ self.chips[1], self.chips[2], self.chips[3], self.gapChip }) do
+      if ch and ch:IsShown() then
+        ch:ClearAllPoints()
+        ch:SetPoint("LEFT", self, "LEFT", x, 0)
+        x = x + ch:GetWidth() + 4
+      end
+    end
+  end
+
+  --- Hide every chip. Rows are recycled, so a chip left over from the previous
+  --- occupant is a claim about the wrong raider.
+  function row:ClearChips()
+    for _, ch in ipairs({ self.chips[1], self.chips[2], self.chips[3], self.gapChip }) do
+      if ch then ch:Hide() end
+    end
+  end
+
   -- Positions are relative to the ROW, which is anchored at the pane's left, so
   -- the mock's absolute x values are offset by the rank column's own origin.
   local o = C_RANK
-  row.rank    = at(text(row, "label", "small", "text"), C_RANK - o, 1, 12, "LEFT")
-  -- ⚠️ REGULAR WEIGHT, NOT "label" (Jason, Session 252). The name and the verdict
-  -- are the two longest strings on a dense row, and Semibold on both made every
-  -- row read as emphasised — which is the same as none of it being emphasised.
-  -- The rank number keeps its weight: it is one or two characters doing the work
-  -- of a column header, and it is what the eye scans down.
-  row.name    = at(text(row, "body", "small", "text"), C_NAME - o, 1, 100)
-  row.upgrade = at(text(row, "body", "small", "text"), C_UPGRADE - o, 1, 118)
-  row.gain    = atRight(text(row, "body", "small", "text"), C_GAIN_R - o, 1, 44)
-  row.pr      = atRight(text(row, "body", "small", "text"), C_PRIORITY_R - o, 1, 48)
+  -- ⚠️ THE RANK IS 14 AND EVERYTHING ELSE ON THE ROW IS 11 — the mock's one
+  -- deliberate size jump inside the table. It is what the eye scans down.
+  row.rank    = at(text(row, "light", "rank", "body"), C_RANK - o, 1, 14, "LEFT")
+  -- ⚠️ CLASS-COLOURED, AND THE ASTERISK IS NOT. The mock paints each name in its
+  -- class colour and leaves the ad-hoc "*" white, so the marker stays legible on
+  -- a dark class and does not read as part of the name.
+  row.name    = at(text(row, "light", "name", "white"), C_NAME - o, 1, 90)
+  row.gain    = atRight(text(row, "light", "name", "white"), C_GAIN_R - o, 1, 44)
+  row.pr      = atRight(text(row, "light", "name", "white"), C_PRIORITY_R - o, 1, 48)
+
+  -- ⚠️ THE UPGRADE COLUMN IS CHIPS NOW, NOT A STRING. The mock puts the verdict,
+  -- the BIS listing and the gap side by side as separate tags — "MAJOR  O-BIS
+  -- TARGET" — each sized to its own label. A single fontstring could not give
+  -- them their own borders and fills, and the filled/outlined distinction is
+  -- what separates a fact about the ITEM from a verdict about this RAIDER.
+  row.chips = {}
+  for ci = 1, 3 do
+    local kind = (ci == 1) and "outlined" or "filled"
+    row.chips[ci] = ns.Style and ns.Style.Chip(row, kind)
+  end
+  -- The gap ("-16") is an outlined chip like the verdict, and always last.
+  row.gapChip = ns.Style and ns.Style.Chip(row, "outlined")
+  -- Kept so call sites that still write a plain string have somewhere to put it
+  -- until each is converted; it draws nothing once the chips are filled.
+  row.upgrade = at(text(row, "light", "name", "white"), C_UPGRADE - o, 1, 0)
   -- Gear provenance, in the space between GAIN and PRIORITY. Blank is the common
   -- case and that is deliberate: almost every row is scored from the site
   -- snapshot, so tagging all twenty turns the signal into wallpaper. What is
@@ -868,6 +962,11 @@ local function resetRow(row)
     local fsObj = row[key]
     if fsObj and fsObj.SetText then fsObj:SetText("") end
   end
+  -- ⚠️ CHIPS ARE PART OF THE ROW'S STATE. They are frames rather than
+  -- fontstrings, so the TEXT_KEYS sweep above cannot reach them — and a chip
+  -- left behind is a claim about the previous occupant of the row, which is
+  -- exactly the failure that sweep exists to prevent.
+  if row.ClearChips then row:ClearChips() end
   -- Rows are RECYCLED, so a stale breakdown would explain the previous
   -- occupant's number under the new one — the same trap the TEXT_KEYS sweep
   -- above exists for.
@@ -1114,49 +1213,55 @@ local function buildLootControls()
   frame.stripMore:Hide()
 
   -- ── The two filter toggles ────────────────────────────────────────────────
-  local function toggle(col, rowIdx, label, onClick)
-    local b = ns.Style and ns.Style.Pill(frame, TOG_W, TOG_H, label)
-      or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    b:SetPoint("TOPLEFT", TOG_X + col * TOG_COL, -(TOG_Y + rowIdx * TOG_ROW))
-    -- A filter that is not selected is still a choice on offer, so its label
-    -- stays readable while its fill recedes. Only the TABS dim their text.
-    b._dimText = false
-    b:SetScript("OnClick", onClick)
-    return b
-  end
-  local function pickSource(which)
+  -- ⚠️ TWO SWITCHES, NOT FOUR BUTTONS (Session 257). The mock draws each filter
+  -- as one labelled switch — "CURRENT DROPS (o—) FULL LOOT TABLE" — where the
+  -- knob's position is the entire state indication and both labels stay the
+  -- same weight and colour. Four pills said it four times, in two stacked rows.
+  --
+  -- Positions are the mock's own, per element rather than per group, because the
+  -- labels differ in length and the design still lines both rows up.
+  local function pick(field, which)
     return function()
-      state.source = which
+      state[field] = which
       state.sel, state.colScroll, state.rankScroll = 1, 0, 0
       Panel.Refresh()
     end
   end
-  local function pickFilter(which)
-    return function()
-      state.filter = which
-      state.sel, state.colScroll, state.rankScroll = 1, 0, 0
-      Panel.Refresh()
-    end
-  end
-  -- ⚠️ ONE ROW OF FOUR, NOT A 2x2 BLOCK. The mock puts all four filters on a
-  -- single line under the tabs — as two labelled switches, which these are not
-  -- yet; that conversion comes with the rest of the tab. Laid out across rather
-  -- than stacked so the interim sits where the finished control will.
-  frame.togDrops  = toggle(0, 0, "Current Drops",   pickSource("drops"))
-  frame.togTable  = toggle(1, 0, "Full Loot Table", pickSource("table"))
-  frame.togUsable = toggle(2, 0, "Usable Only",     pickFilter("usable"))
-  frame.togAll    = toggle(3, 0, "All Loot",        pickFilter("all"))
 
-  frame.togUsable:SetScript("OnEnter", function(self)
-    ns.Tip:SetOwner(self, "ANCHOR_RIGHT")
-    ns.Tip:SetText("Usable Only", 1, 1, 1)
-    ns.Tip:AddLine("Hides items your class cannot equip.", 0.8, 0.8, 0.8, true)
-    ns.Tip:AddLine("Anything you have targeted stays visible either way — "
-      .. "hiding something you asked for is worse than showing one you cannot use.",
-      0.6, 0.6, 0.7, true)
-    ns.Tip:Show()
-  end)
-  frame.togUsable:SetScript("OnLeave", function() ns.Tip:Hide() end)
+  local function switchAt(leftLabel, rightLabel, leftX, trackX, rightX, onPick)
+    if not ns.Style then return nil end
+    local s = ns.Style.Switch(frame, leftLabel, rightLabel)
+    s:SetPoint("TOPLEFT", trackX, -TOG.trackY)
+    s.left:ClearAllPoints()
+    s.left:SetPoint("TOPLEFT", leftX, -TOG.y)
+    s.right:ClearAllPoints()
+    s.right:SetPoint("TOPLEFT", rightX, -TOG.y)
+    s:Wire(onPick)
+    return s
+  end
+
+  frame.swSource = switchAt("CURRENT DROPS", "FULL LOOT TABLE",
+    TOG.srcL, TOG.srcTrack, TOG.srcR,
+    function(right) pick("source", right and "table" or "drops")() end)
+
+  frame.swFilter = switchAt("USABLE ONLY", "ALL LOOT",
+    TOG.filL, TOG.filTrack, TOG.filR,
+    function(right) pick("filter", right and "all" or "usable")() end)
+
+  -- The one filter that needs explaining keeps its tooltip, moved onto the
+  -- switch itself now that the pill it hung from is gone.
+  if frame.swFilter then
+    frame.swFilter:SetScript("OnEnter", function(self)
+      ns.Tip:SetOwner(self, "ANCHOR_RIGHT")
+      ns.Tip:SetText("Usable Only", 1, 1, 1)
+      ns.Tip:AddLine("Hides items your class cannot equip.", 0.8, 0.8, 0.8, true)
+      ns.Tip:AddLine("Anything you have targeted stays visible either way — "
+        .. "hiding something you asked for is worse than showing one you cannot use.",
+        0.6, 0.6, 0.7, true)
+      ns.Tip:Show()
+    end)
+    frame.swFilter:SetScript("OnLeave", function() ns.Tip:Hide() end)
+  end
 
   -- ── The item column ───────────────────────────────────────────────────────
   frame.col = CreateFrame("Frame", nil, frame)
@@ -1321,42 +1426,51 @@ local function buildDetailPane()
   -- and separates it with two hairlines instead. The slab was the single largest
   -- reason the right half read as a different design from the left.
 
-  -- Header block 1: how big an upgrade this is for the viewer.
-  frame.hUpgradeLabel = at(text(frame, "titleMed", "row", "text"), 236, HEAD_Y, 130)
-  frame.hUpgradeLabel:SetText("Upgrade for You:")
-  frame.hUpgrade = at(text(frame, "title", "title", "major"), 236, HEAD_Y + 13, 140)
-  if ns.Style then ns.Style.SetFont(frame.hUpgrade, ns.Style.FONT.title, 24) end
-
-  -- Header block 2: where the viewer sits on the global ladder.
-  frame.hStandLabel = at(text(frame, "titleMed", "row", "text"), 379, HEAD_Y, 110)
-  frame.hStandLabel:SetText("Your Standing:")
-  frame.hStand = at(text(frame, "title", "title", "orange"), 379, HEAD_Y + 13, 110)
-  if ns.Style then ns.Style.SetFont(frame.hStand, ns.Style.FONT.title, 24) end
-
-  -- Header block 3: the raw EPGP numbers behind it.
-  frame.hEpgp = at(text(frame, "body", "tiny", "text"), 500, HEAD_Y + 2, 92)
-  frame.hEpgp:SetWordWrap(true)
-  frame.hEpgp:SetHeight(36)
-  frame.hEpgp:SetJustifyV("TOP")
-
-  frame.div1 = divider(frame, DIV_X, DIV1_Y, DIV_W)
-  frame.facts = at(text(frame, "body", "small", "text"), 236, FACTS_Y, DIV_W - 12)
-  frame.div2 = divider(frame, DIV_X, DIV2_Y, DIV_W)
-
-  -- The selected item's identity.
+  -- ── The header: the ITEM, and one verdict badge ──────────────────────────
+  --
+  -- ⚠️ THE ICON IS CIRCULAR AND 40px, matching the boss rail. Masked with the
+  -- client's own portrait mask, so there is nothing to bundle.
   frame.itemIcon = frame:CreateTexture(nil, "ARTWORK")
-  frame.itemIcon:SetSize(ITEM_ICON, ITEM_ICON)
-  frame.itemIcon:SetPoint("TOPLEFT", 231, -ITEM_Y)
+  frame.itemIcon:SetSize(DET.icon, DET.icon)
+  frame.itemIcon:SetPoint("TOPLEFT", DET.iconX, -DET.iconY)
   frame.itemIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+  if frame.itemIcon.SetMask then
+    pcall(frame.itemIcon.SetMask, frame.itemIcon,
+      "Interface\\CharacterFrame\\TempPortraitAlphaMask")
+  end
 
-  frame.itemName = at(text(frame, "label", "head", "text"), 281, ITEM_Y + 3, 200)
-  frame.itemSub  = at(text(frame, "body", "small", "textDim"), 281, ITEM_Y + 18, 200)
+  -- ⚠️ THE NAME IS BLUSH AND THE SLOT LINE IS WHITE — the OPPOSITE of the left
+  -- rail's cards, and read off the node rather than reasoned about. See the note
+  -- on Style.COLOR.body.
+  frame.itemName = at(text(frame, "regular", "detail", "body"), DET.nameX, DET.nameY, 300)
+  frame.itemSub  = at(text(frame, "light", "row", "white"), DET.nameX, DET.line2Y, 300)
+
+  -- The verdict badge. Its ground is the blush at 10%, and the grade sits over
+  -- the word "Upgrade" in two tight 10px lines — which is why both are anchored
+  -- to the box rather than flowed.
+  frame.badgeBox = CreateFrame("Frame", nil, frame)
+  frame.badgeBox:SetSize(DET.badgeW, DET.badgeH)
+  frame.badgeBox:SetPoint("TOPLEFT", DET.badgeX, -DET.badgeY)
+  if ns.Style then
+    local S = ns.Style
+    frame.badgeBg = frame.badgeBox:CreateTexture(nil, "BACKGROUND")
+    frame.badgeBg:SetAllPoints()
+    frame.badgeBg:SetColorTexture(S.COLOR.body.r, S.COLOR.body.g, S.COLOR.body.b, 0.1)
+  end
+  -- ⚠️ BOLD, AND IT IS THE ONLY BOLD IN THE PANEL. The mock sets the grade at
+  -- 16 Bold and everything else Light or Regular, so this is the one place the
+  -- third weight is bundled for.
+  frame.hUpgrade = atRight(text(frame.badgeBox, "bold", "badge", "major", "RIGHT"),
+    DET.badgeW - DET.badgePadX, DET.badgeTop, DET.badgeW - DET.badgePadX * 2)
+  frame.hUpgradeWord = atRight(text(frame.badgeBox, "light", "label", "white", "RIGHT"),
+    DET.badgeW - DET.badgePadX, DET.badgeTop + 13, DET.badgeW - DET.badgePadX * 2)
+  frame.hUpgradeWord:SetText("Upgrade")
 
   -- The item name is the biggest representation of the item on screen, so
   -- hovering it should do what hovering an item anywhere else in the game does.
   frame.itemHover = CreateFrame("Frame", nil, frame)
-  frame.itemHover:SetPoint("TOPLEFT", 231, -ITEM_Y)
-  frame.itemHover:SetSize(250, ITEM_ICON)
+  frame.itemHover:SetPoint("TOPLEFT", DET.iconX, -DET.iconY)
+  frame.itemHover:SetSize(DET.badgeX - DET.iconX - 10, DET.icon)
   frame.itemHover:EnableMouse(true)
   frame.itemHover:SetScript("OnEnter", function(self)
     local itemID = Panel.CurrentItemID()
@@ -1364,10 +1478,8 @@ local function buildDetailPane()
     if not link then return end
     GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT")
     GameTooltip:SetHyperlink(link)
-    -- ⚠️ THE TARGETING HINT MOVED HERE WITH THE TOOLTIP. It used to ride on the
-    -- item column's tooltip, and nothing else in the panel says a row can be
-    -- right-clicked — so dropping that tooltip without moving this line would
-    -- have quietly removed the only place targeting is explained.
+    -- ⚠️ THE TARGETING HINT RIDES HERE. Nothing else in the panel says a row can
+    -- be right-clicked, so this is the only place targeting is explained.
     if itemID then
       GameTooltip:AddLine(ns.Targets and ns.Targets.Has(itemID)
         and "Right-click a row to stop targeting."
@@ -1377,24 +1489,35 @@ local function buildDetailPane()
   end)
   frame.itemHover:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-  frame.wonDiv = frame:CreateTexture(nil, "ARTWORK")
-  frame.wonDiv:SetSize(1, 32)
-  frame.wonDiv:SetPoint("TOPLEFT", 485, -245)
-  if ns.Style then
-    frame.wonDiv:SetColorTexture(ns.Style.COLOR.rim.r, ns.Style.COLOR.rim.g,
-      ns.Style.COLOR.rim.b, 0.25)
-  end
-  frame.wonLabel = at(text(frame, "body", "tiny", "text"), 495, 246, 96)
-  frame.wonLabel:SetText("Won By:")
-  frame.wonBy = at(text(frame, "label", "tiny", "orange"), 495, 258, 96)
+  -- ── The meta line, between two hairlines ─────────────────────────────────
+  --
+  -- ⚠️ TWO FONTSTRINGS, BECAUSE A COLOUR ESCAPE CANNOT CHANGE WEIGHT. The mock
+  -- writes this as one run: the facts in Light white, the separators in the
+  -- accent purple, and the trailing tags — OVERALL BIS, TARGETED — in BOLD
+  -- blush. WoW's |cff escape changes colour only, so the tags are a second
+  -- string placed after the first is measured. The separators, being a colour
+  -- change alone, stay inline.
+  frame.div1 = divider(frame, DIV_X, DIV1_Y, DIV_W)
+  frame.facts = at(text(frame, "light", "label", "white"), FACTS_X, FACTS_Y, DIV_W - 20)
+  frame.factTags = at(text(frame, "bold", "label", "body"), FACTS_X, FACTS_Y, DIV_W - 20)
+  frame.div2 = divider(frame, DIV_X, DIV2_Y, DIV_W)
 
-  frame.div3 = divider(frame, DIV_X, DIV3_Y, DIV_W)
+  -- ⚠️ WON BY IS NOT IN THE MOCK and is kept anyway, moved onto the meta row's
+  -- right end where nothing else sits. It states who actually received a drop,
+  -- which the panel is the only surface to show during a raid; deleting a fact
+  -- because a mock did not draw it is a scope decision, not a styling one.
+  frame.wonLabel = atRight(text(frame, "light", "label", "body", "RIGHT"),
+    DIV_X + DIV_W, FACTS_Y, 150)
+  frame.wonBy = frame.wonLabel
 
   -- The ranked table's column headings.
   frame.head = {}
-  frame.head[1] = at(text(frame, "label", "tiny", "text"), C_NAME, RANK_HEAD_Y, 90)
-  frame.head[2] = at(text(frame, "label", "tiny", "text"), C_UPGRADE, RANK_HEAD_Y, 110)
-  frame.head[3] = atRight(text(frame, "label", "tiny", "text"), C_GAIN_R, RANK_HEAD_Y, 44)
+  -- ⚠️ THE HEADERS ARE 12 AND IN THE ACCENT PURPLE, not 10 white — the mock
+  -- treats them as headings rather than as labels, which is the same purple it
+  -- uses for the Standings rail's section titles.
+  frame.head[1] = at(text(frame, "light", "head", "accent"), C_NAME, RANK_HEAD_Y, 90)
+  frame.head[2] = at(text(frame, "light", "head", "accent"), C_UPGRADE, RANK_HEAD_Y, 110)
+  frame.head[3] = atRight(text(frame, "light", "head", "accent"), C_GAIN_R, RANK_HEAD_Y, 60)
   -- ⚠️ 64, NOT 48 — "PRIORITY" MEASURES 47.3px AND WAS TRUNCATING TO "PRIORI…".
   -- The field had been sized to the string with 0.7px to spare, which is not a
   -- margin: the game's own text measurement differs slightly from the font's
@@ -1404,7 +1527,7 @@ local function buildDetailPane()
   -- C_GAIN_R (499) against this field's new left edge at 527.
   -- Header widths are now sized with real slack. Measured, not eyeballed:
   -- RAIDER 37.3 / UPGRADE 49.2 / GAIN 25.9 / PRIORITY 47.3 at 10px Semibold.
-  frame.head[4] = atRight(text(frame, "label", "tiny", "text"), C_PRIORITY_R, RANK_HEAD_Y, 64)
+  frame.head[4] = atRight(text(frame, "light", "head", "accent"), C_PRIORITY_R, RANK_HEAD_Y, 70)
 
   frame.list = CreateFrame("Frame", nil, frame)
   frame.list:SetPoint("TOPLEFT", C_RANK, -RANK_TOP)
@@ -1441,8 +1564,8 @@ local function buildFooter()
     S.Rim(frame.foot, S.COLOR.rim, 0.4)
   end
 
-  frame.gearLine1 = at(text(frame.foot, "body", "label", "body"), FOOT_TEXT_X, FOOT_LINE1_Y, 240)
-  frame.gearLine2 = at(text(frame.foot, "body", "label", "body"), FOOT_TEXT_X, FOOT_LINE2_Y, 240)
+  frame.gearLine1 = at(text(frame.foot, "body", "label", "body"), FOOT.textX, FOOT.line1Y, 240)
+  frame.gearLine2 = at(text(frame.foot, "body", "label", "body"), FOOT.textX, FOOT.line2Y, 240)
 
   -- ⚠️ THE ROW IS RIGHT-ALIGNED AND ITS BUTTONS SIZE THEMSELVES, so the row's
   -- total width is only known once all three have measured their labels. Laying
@@ -1467,11 +1590,11 @@ local function buildFooter()
   local btns = { frame.load, frame.log, frame.cfg }
   local total = 0
   for i, b in ipairs(btns) do
-    total = total + (b:GetWidth() or 0) + (i > 1 and FOOT_GAP or 0)
+    total = total + (b:GetWidth() or 0) + (i > 1 and FOOT.gap or 0)
   end
   if ns.Style then
     ns.Style.LayoutRow(btns, frame.foot,
-      FRAME_W - FOOT_RIGHT - total, -FOOT_BTN_Y, FOOT_GAP)
+      FRAME_W - FOOT.right - total, -FOOT.btnY, FOOT.gap)
   end
 
   frame.load:SetScript("OnEnter", function(self)
@@ -1578,12 +1701,12 @@ local function buildTabControls()
   -- giving it a home is a matter of showing them again.
   frame.standingsView = ns.Style and ns.Style.Pill(frame, 92, 22, "Targets")
     or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.standingsView:SetPoint("TOPLEFT", TOG_X, -TOG_Y)
+  frame.standingsView:SetPoint("TOPLEFT", TOG_X, -TOG.y)
   frame.standingsView:Hide()
 
   frame.instDrop = ns.Style and ns.Style.Pill(frame, 170, 22, "")
     or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.instDrop:SetPoint("TOPLEFT", TOG_X, -(TOG_Y + TOG_ROW))
+  frame.instDrop:SetPoint("TOPLEFT", TOG_X, -(TOG.y + TOG_ROW))
   frame.instDrop:Hide()
   frame.instDrop:SetScript("OnClick", function()
     local list = ns.Journal and ns.Journal.CachedInstances() or {}
@@ -1595,7 +1718,7 @@ local function buildTabControls()
 
   frame.encDrop = ns.Style and ns.Style.Pill(frame, 170, 22, "")
     or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.encDrop:SetPoint("TOPLEFT", TOG_X, -(TOG_Y + TOG_ROW * 2))
+  frame.encDrop:SetPoint("TOPLEFT", TOG_X, -(TOG.y + TOG_ROW * 2))
   frame.encDrop:Hide()
   frame.encDrop:SetScript("OnClick", function()
     local list = Panel._encounterList and Panel._encounterList() or {}
@@ -2045,10 +2168,9 @@ end
 --- a list it has nothing to do with.
 local function showLootPaneParts(shown)
   for _, part in ipairs({
-    frame.hUpgradeLabel, frame.hUpgrade, frame.hStandLabel, frame.hStand, frame.hEpgp,
-    frame.div1, frame.facts, frame.div2, frame.div3,
+    frame.badgeBox, frame.div1, frame.facts, frame.factTags, frame.div2,
     frame.itemIcon, frame.itemHover, frame.itemName, frame.itemSub,
-    frame.wonDiv, frame.wonLabel, frame.wonBy,
+    frame.wonLabel,
   }) do
     if part then part:SetShown(shown) end
   end
@@ -2057,19 +2179,16 @@ end
 --- Blank every part of the detail pane that a view does not own, so nothing one
 --- view sets bleeds into the next.
 local function clearPane()
-  frame.hUpgradeLabel:SetText("")
   frame.hUpgrade:SetText("")
-  frame.hStandLabel:SetText("")
-  frame.hStand:SetText("")
-  frame.hEpgp:SetText("")
+  frame.badgeBox:Hide()
   frame.facts:SetText("")
+  frame.factTags:SetText("")
   frame.itemIcon:Hide()
   frame.itemHover:Hide()
   frame.itemName:SetText("")
   frame.itemSub:SetText("")
-  frame.wonDiv:Hide()
   frame.wonLabel:Hide()
-  frame.wonBy:SetText("")
+  frame.wonLabel:SetText("")
   frame.more:SetText("")
   frame.note:SetText("")
   setHeaders()
@@ -2234,9 +2353,14 @@ local function renderItemColumn(entries)
       end
       setTextForce(row.name, shown)
 
-      -- The verdict word, then the slot. "NOT FOR YOU" is deliberately DISTINCT
-      -- from "unscored": one is the system working, the other is our data
-      -- falling short, and conflating them hides a real gap.
+      -- ⚠️ THE VERDICT IS A CHIP NOW, NOT THE FIRST WORD OF THE SLOT LINE. The
+      -- mock puts the slot line on its own — "Back, Cloth" — and gives the
+      -- verdict its own outlined tag on the row below, beside any filled tags.
+      -- Running them into one string was the old two-line card's compromise for
+      -- want of room; the 61-tall card has the room.
+      --
+      -- "NOT FOR YOU" stays deliberately DISTINCT from "UNSCORED": one is the
+      -- system working, the other is our data falling short.
       local verdict, vColor
       if e.ineligible then
         verdict, vColor = "NOT FOR YOU", S and S.COLOR.grey
@@ -2248,29 +2372,34 @@ local function renderItemColumn(entries)
         local label, color = badgeOf(e.badge)
         verdict, vColor = (label or ""):upper(), color
       end
-      local slotLine = ns.ItemSlotLine(e)
-      local sep = (verdict ~= "" and slotLine ~= "") and " • " or ""
-      if S then
-        -- Each run closes with |r before the next opens. Nesting colour codes
-        -- without a reset is accepted by some clients and not others, and the
-        -- failure is a whole line taking the first colour.
-        row.sub:SetText(
-          S.code(vColor or S.COLOR.grey) .. verdict .. "|r"
-          .. S.code(S.COLOR.grey) .. sep .. "|r"
-          .. slotLine)
-      else
-        row.sub:SetText(verdict .. sep .. slotLine)
-      end
+      row.sub:SetText(ns.ItemSlotLine(e))
 
-      row.markTarget:SetShown(e.targeted and true or false)
-      row.markBis:SetShown((e.quality and e.quality.bis) and true or false)
+      row:ClearChips()
+      if verdict ~= "" and row.chips[1] then
+        row.chips[1]:Set(verdict, vColor)
+      end
+      -- BIS and TARGET are FILLED chips: facts about the item, true whoever is
+      -- looking. The old marks were images in a gutter, which said the same
+      -- thing with less room for a word.
+      local q = e.quality
+      local nextChip = 2
+      if q and q.bis and row.chips[nextChip] then
+        row.chips[nextChip]:Set(ns.BIS_SHORT[q.bis] or "BIS")
+        nextChip = nextChip + 1
+      end
+      if e.targeted and row.chips[nextChip] then
+        row.chips[nextChip]:Set("TARGET")
+      end
+      row:LayoutChips()
+
+      -- ⚠️ THE GUTTER MARKS ARE RETIRED WITH THE CHIPS THAT REPLACED THEM. Two
+      -- signals for one fact, on one card, is how a list stops being scannable.
+      row.markTarget:Hide()
+      row.markBis:Hide()
 
       local selected = (idx == state.sel)
       row._selected = selected
-      if S then
-        row.bg:SetColorTexture(S.COLOR.purple.r, S.COLOR.purple.g, S.COLOR.purple.b,
-          selected and 0.2 or 0.1)
-      end
+      row:PaintGround(false)
       -- Shown at the TOP of this branch now, before anything is written into it.
     end
   end
@@ -2280,59 +2409,35 @@ local function renderItemColumn(entries)
       math.min(total, state.colScroll + rows), total) or "")
 end
 
---- The pane's three header blocks: the viewer's own verdict, their place on the
---- ladder, and the numbers behind it.
+--- The header's verdict badge: the viewer's own answer for this item.
+---
+--- ⚠️ THE STANDING BLOCKS ARE GONE FROM HERE (Session 257). "Your Standing" and
+--- the Priority / EP / GP figures used to sit beside this; the mock moves that
+--- question to the Standings tab and its rail, and leaves the Loot header to
+--- describe the ITEM. The Session 254 rule that the standing block and the
+--- Standings tab must hide together is satisfied trivially now — there is no
+--- standing block on this tab to disagree with anything.
 local function renderPaneHeader(entry)
-  frame.hUpgradeLabel:SetText("Upgrade for You:")
   local S = ns.Style
+  frame.badgeBox:Show()
 
+  -- Two lines, always: the grade and the word under it. The word is constant, so
+  -- only the grade and its colour change.
+  local label, color
   if not entry then
-    frame.hUpgrade:SetText("—")
-    if S then frame.hUpgrade:SetTextColor(S.rgb(S.COLOR.grey)) end
+    label, color = "—", S and S.COLOR.grey
   elseif entry.ineligible then
-    frame.hUpgrade:SetText("Not For You")
-    if S then frame.hUpgrade:SetTextColor(S.rgb(S.COLOR.grey)) end
+    label, color = "NOT FOR YOU", S and S.COLOR.grey
   elseif entry.reason then
-    frame.hUpgrade:SetText("Unscored")
-    if S then frame.hUpgrade:SetTextColor(S.rgb(S.COLOR.red)) end
+    label, color = "UNSCORED", S and S.COLOR.red
   elseif entry.isUpgrade == false then
-    frame.hUpgrade:SetText("No Upgrade")
-    if S then frame.hUpgrade:SetTextColor(S.rgb(S.COLOR.grey)) end
+    label, color = "NO UPGRADE", S and S.COLOR.grey
   else
-    local label, color = badgeOf(entry.badge)
-    frame.hUpgrade:SetText(label or "?")
-    if S and color then frame.hUpgrade:SetTextColor(S.rgb(color)) end
+    local l, c = badgeOf(entry.badge)
+    label, color = (l or "?"):upper(), c
   end
-
-  -- ⚠️ NO STANDING WITHOUT A RAID NIGHT (Jason, Session 254). EPGP arrives only
-  -- in the raid-night export, so with nothing imported there is no ladder, no
-  -- priority and no rank — and an em-dash under "Your Standing" reads as a
-  -- number we failed to find rather than a question that does not apply here.
-  -- This is the case for ANYONE outside the guild who installs the addon, for
-  -- whom the whole EPGP half is meaningless; the Standings tab hides for the
-  -- same reason (layoutTabs). The scoring half still works completely — it runs
-  -- off the baked payload and their own gear.
-  local loaded = ns.Payload.Current() and true or false
-  frame.hStandLabel:SetShown(loaded)
-  frame.hStand:SetShown(loaded)
-  frame.hEpgp:SetShown(loaded)
-  if not loaded then return end
-
-  frame.hStandLabel:SetText("Your Standing:")
-  local me = myEntry()
-  if me and me.rank then
-    local n, suffix = ns.Ordinal(me.rank)
-    frame.hStand:SetText((n or "?") .. (suffix or ""))
-  else
-    frame.hStand:SetText("—")
-  end
-
-  if me and me.pr then
-    frame.hEpgp:SetText(("Priority: %.2f\nEffort Points: %s\nGear Points: %s")
-      :format(me.pr, tostring(me.ep), tostring(me.gp)))
-  else
-    frame.hEpgp:SetText("No EPGP standing\nyet this season")
-  end
+  frame.hUpgrade:SetText(label)
+  if S and color then frame.hUpgrade:SetTextColor(S.rgb(color)) end
 end
 
 --- The facts line beneath the header: gain, gap, quality and target state.
@@ -2400,9 +2505,8 @@ local function renderItemIdentity(entry)
     frame.itemHover:Hide()
     frame.itemName:SetText("")
     frame.itemSub:SetText("")
-    frame.wonDiv:Hide()
     frame.wonLabel:Hide()
-    frame.wonBy:SetText("")
+    frame.wonLabel:SetText("")
     return
   end
 
@@ -2425,16 +2529,22 @@ local function renderItemIdentity(entry)
   if (entry.candidateIlvl or 0) > 0 then
     bits[#bits + 1] = ("ilvl %d"):format(entry.candidateIlvl)
   end
-  frame.itemSub:SetText(table.concat(bits, " • "))
+  -- ⚠️ THE BULLETS ARE #632753, NOT THE TEXT COLOUR. The mock colours the two
+  -- separators in this line differently from the words either side of them, and
+  -- a colour change is exactly what an inline escape CAN do — so this is one
+  -- fontstring rather than five.
+  local sep = ns.Style
+    and (ns.Style.code(ns.Style.COLOR.control) .. " • |r")
+    or " • "
+  frame.itemSub:SetText(table.concat(bits, sep))
 
   -- WON BY, from the RECORDER. nil is a real answer and is shown as one: nothing
   -- in the addon registers that a roll ENDED, only that one started, so "still
   -- open" and "we never found out" are indistinguishable from here. Saying
   -- nothing is honest; a countdown or a "pending" would not be.
   local winner = entry.winner or (ns.Record and ns.Record.WinnerFor(entry.itemID))
-  frame.wonDiv:SetShown(winner ~= nil)
   frame.wonLabel:SetShown(winner ~= nil)
-  frame.wonBy:SetText(winner or "")
+  frame.wonLabel:SetText(winner and ("Won by " .. winner) or "")
 end
 
 local function renderRanking(itemID)
@@ -2451,7 +2561,10 @@ local function renderRanking(itemID)
   -- PRIORITY only when something can fill it — see the meta field's own note in
   -- Loot.RankRaiders. A heading over a column of em-dashes is a number we failed
   -- to find; no heading is a question that does not apply.
-  setHeaders("RAIDER", "UPGRADE", "GAIN", (meta and meta.priority) and "PRIORITY" or nil)
+  -- "ILVL GAIN" is the mock's wording. "GAIN" alone left it ambiguous with the
+  -- score gap sitting one column to its left, which is the exact confusion the
+  -- Session 254 breakdown tooltip was added to settle.
+  setHeaders("RAIDER", "UPGRADE", "ILVL GAIN", (meta and meta.priority) and "PRIORITY" or nil)
 
   if not ranked then
     -- ⚠️ SAY WHAT IS SHOWN, NOT ONLY WHAT IS MISSING. The grades and BIS marks
@@ -2555,36 +2668,44 @@ local function renderRanking(itemID)
     local cc = CLASS_COLOR[r.class or ""] or WHITE
     row.name:SetTextColor(cc[1], cc[2], cc[3])
 
-    -- The UPGRADE column carries the badge, the grade or BIS mark, and the gap,
-    -- in that order — the design's "BIS Major" and "Major −16".
-    local upgrade = {}
-    local qText, qColor = qualityTag(r.quality)
-    if qText and S and qColor then
-      upgrade[#upgrade + 1] = ("|cff%02x%02x%02x%s|r"):format(
-        qColor[1] * 255, qColor[2] * 255, qColor[3] * 255, qText)
-    end
+    -- ── The UPGRADE column: chips, in the mock's own order ────────────────
+    --
+    -- ⚠️ THE VERDICT IS OUTLINED, THE LISTING IS FILLED, and the difference is
+    -- meaning rather than decoration. An outlined chip is a claim about THIS
+    -- RAIDER (their badge, their gap); a filled one is a fact about the ITEM
+    -- that is true whoever is looking (O-BIS, R-BIS, TARGET). Mixing them would
+    -- make "best in slot" look like one person's opinion.
+    row:ClearChips()
+    local slot = 1
     local label, color = badgeOf(r.result and r.result.badge)
-    if label and S and color then
-      upgrade[#upgrade + 1] = S.code(color) .. label .. "|r"
+    if label then
+      row.chips[1]:Set(label:upper(), color)
     end
-    -- Gap is ABSENT, not zero, when the sort cannot guarantee score order.
-    if r.gap and idx > 1 then
-      if r.gap == 0 then
-        upgrade[#upgrade + 1] = (S and S.code(S.COLOR.textDim) or "") .. "tie"
-      else
-        upgrade[#upgrade + 1] = (S and S.code(S.COLOR.textDim) or "") .. tostring(r.gap)
-      end
+    local qText = qualityTag(r.quality)
+    if qText and row.chips[2] then
+      row.chips[2]:Set(qText:upper())
+      slot = 3
+    else
+      slot = 2
     end
-    row.upgrade:SetText(table.concat(upgrade, " "))
 
     -- A raider ranked as one spec while standing in another gets a marker, and
     -- the sentence goes in the row tooltip. ns.SpecSplitTag stays quiet unless
     -- the spec change actually changes this item's grade.
     local splitMark, splitName, splitHelp = ns.SpecSplitTag(r)
     row.splitName, row.splitHelp = splitName, splitHelp
-    if splitMark then
-      row.upgrade:SetText(row.upgrade:GetText() .. (S and S.code(S.COLOR.gold) or "") .. splitMark)
+    if splitMark and row.chips[slot] then
+      row.chips[slot]:Set("ALT SPEC")
     end
+
+    -- Gap is ABSENT, not zero, when the sort cannot guarantee score order — and
+    -- it is always the last chip, as the mock draws it.
+    if r.gap and idx > 1 and row.gapChip then
+      row.gapChip:Set(r.gap == 0 and "tie" or tostring(r.gap),
+        S and S.COLOR.body or nil)
+    end
+    row:LayoutChips()
+    row.upgrade:SetText("")
 
     -- One field on both paths (Loot.RankRaiders sets it, the wire carries it).
     local gain = r.ilvlGain or 0
@@ -3237,8 +3358,12 @@ function Panel.Refresh()
   frame.stripMore:SetShown(onLoot)
   frame.bossName:SetShown(onLoot)
   frame.bossSub:SetShown(onLoot)
-  for _, b in ipairs({ frame.togDrops, frame.togTable, frame.togUsable, frame.togAll }) do
-    b:SetShown(onLoot)
+  for _, s in ipairs({ frame.swSource, frame.swFilter }) do
+    if s then
+      s:SetShown(onLoot)
+      s.left:SetShown(onLoot)
+      s.right:SetShown(onLoot)
+    end
   end
   frame.col:SetShown(onLoot)
   frame.colEmpty:SetShown(false)
@@ -3250,11 +3375,11 @@ function Panel.Refresh()
     Panel._entries = nil
   end
 
-  if onLoot and frame.togDrops.SetPillState then
-    frame.togDrops:SetPillState(state.source == "drops")
-    frame.togTable:SetPillState(state.source == "table")
-    frame.togUsable:SetPillState(state.filter == "usable")
-    frame.togAll:SetPillState(state.filter == "all")
+  if onLoot then
+    -- Right-hand option selected = the knob sits right, which is the whole of
+    -- the state the design shows.
+    if frame.swSource then frame.swSource:SetSwitch(state.source == "table") end
+    if frame.swFilter then frame.swFilter:SetSwitch(state.filter == "all") end
   end
 
   -- The Standings tab's own furniture. The provisional switcher that used to

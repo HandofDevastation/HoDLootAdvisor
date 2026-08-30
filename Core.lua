@@ -302,9 +302,17 @@ local GRADE_COLOR = {
   d = { 0.533, 0.533, 0.600 }, f = { 0.533, 0.533, 0.600 },
   defensive = { 0.470, 0.700, 0.900 },
 }
-local BIS_SHORT = { overall = "BIS", raid = "R-BIS", mplus = "M-BIS" }
+-- ⚠️ OVERALL IS "O-BIS", NOT "BIS" (Session 257, from the mock). The three
+-- listings now read as a set — O-BIS / R-BIS / M-BIS — where a bare "BIS" beside
+-- an "R-BIS" invited the reading that one was a general claim and the other a
+-- qualified one. They are three answers to the same question about different
+-- content, and the design names them symmetrically.
+local BIS_SHORT = { overall = "O-BIS", raid = "R-BIS", mplus = "M-BIS" }
 local BIS_LONG  = { overall = "Overall BIS", raid = "Raid BIS", mplus = "M+ BIS" }
 ns.BIS_LONG = BIS_LONG
+-- Exported so the panel's chips can label themselves without a second copy of
+-- the map — the drift trap this file exists to avoid.
+ns.BIS_SHORT = BIS_SHORT
 
 --- The compact tag for one resolved quality entry, or nil when there is none.
 --- Returns text plus colour so every surface renders it identically.

@@ -66,10 +66,13 @@ Style.FONT = {
   bodyMed  = FONT_DIR .. "Manrope-Light.ttf",
   -- The filled chip, and nothing else.
   label    = FONT_DIR .. "Manrope-Regular.ttf",
-  -- The two true weights, for call sites written after the redesign that should
-  -- say what they mean rather than inherit a role name from the old pairing.
+  -- The three true weights, for call sites written after the redesign that
+  -- should say what they mean rather than inherit a role name from the old
+  -- pairing. BOLD earns its place on one element: the large upgrade badge, where
+  -- the mock sets MAJOR at 16 Bold — the only genuinely loud text in the panel.
   light    = FONT_DIR .. "Manrope-Light.ttf",
   regular  = FONT_DIR .. "Manrope-Regular.ttf",
+  bold     = FONT_DIR .. "Manrope-Bold.ttf",
 }
 
 -- Type scale — every value read off the mock, all whole numbers.
@@ -227,10 +230,17 @@ Style.COLOR = {
   controlRim  = hex("6f2b57"),   -- the inactive control's 1px border
   controlText = hex("fef5bf"),   -- every tab and button label; 50% when inactive
 
-  -- ⚠️ THE WORKHORSE, AND IT IS NOT WHITE. Boss names, slot lines, the meta
-  -- line, the footer and most chip text are all this warm blush. PURE WHITE is
-  -- reserved for ITEM NAMES alone, which is what makes an item name read as the
-  -- subject of its row rather than as one more label.
+  -- ⚠️ THE WORKHORSE, AND IT IS NOT WHITE. Boss names, the meta line, the
+  -- footer and most chip text are all this warm blush.
+  --
+  -- ⚠️ WHITE AND BLUSH SWAP ROLES BETWEEN THE TWO ITEM SURFACES, and this is
+  -- read out of the file rather than reasoned about. In the LEFT RAIL's cards
+  -- the item name is white (11) over a blush slot line (10); in the DETAIL
+  -- HEADER the item name is blush (13 Regular) over a WHITE slot line (12
+  -- Light). An earlier version of this comment claimed white was "reserved for
+  -- item names" — that is a generalisation from one of the two, and it is wrong.
+  -- Take the colour from the node being built, never from a rule about which
+  -- kind of thing it is.
   body        = hex("f2bdad"),
 
   -- Headings, and the MODERATE badge. The mock uses one purple for both.
@@ -674,6 +684,125 @@ function Style.LayoutRow(controls, anchorTo, x, y, gap)
     cursor = cursor + (c:GetWidth() or 0) + gap
   end
   return cursor - gap - (x or 0)
+end
+
+--- A chip: the small tag that appears beside a raider's row and on an item card.
+---
+--- ⚠️ TWO KINDS, AND THE KIND CARRIES MEANING. Read off the mock, not invented:
+---   FILLED   — a solid #f2bdad box with #0c0721 text in REGULAR. Used for what
+---              is TRUE OF THE ITEM regardless of who is looking: O-BIS, R-BIS,
+---              TARGET.
+---   OUTLINED — no fill, a 1px border of the text colour at 30% ALPHA, text in
+---              LIGHT in that same colour. Used for the VERDICT and the gap —
+---              MAJOR, MODERATE, -16 — which differ per raider.
+--- Both are 15 tall with 6px of padding either side, and both are 9px.
+---
+--- The outlined kind takes its colour from the badge, so one call site handles
+--- every grade: the border is always the text colour at 30%, never a separate
+--- value that could drift from it.
+local CHIP_H, CHIP_PAD_X = 15, 6
+
+function Style.Chip(parent, kind)
+  local c = CreateFrame("Frame", nil, parent)
+  c:SetHeight(CHIP_H)
+  c._filled = (kind == "filled")
+
+  c.bg = c:CreateTexture(nil, "BACKGROUND")
+  c.bg:SetAllPoints()
+
+  c.rim = Style.Rim(c, Style.COLOR.body, 0.3)
+
+  c.text = Style.Text(c, c._filled and "regular" or "light", "chip",
+    Style.COLOR.body, "CENTER")
+  c.text:SetPoint("CENTER")
+
+  --- label, and (outlined only) the colour the text and border take.
+  function c:Set(label, color)
+    if not label or label == "" then self:Hide() return self end
+    self.text:SetText(label)
+    if self._filled then
+      self.bg:SetColorTexture(Style.rgb(Style.COLOR.body))
+      self.text:SetTextColor(Style.rgb(Style.COLOR.ground))
+      self.rim:SetColor(Style.COLOR.body, 0)
+    else
+      local col = color or Style.COLOR.body
+      self.bg:SetColorTexture(0, 0, 0, 0)
+      self.text:SetTextColor(Style.rgb(col))
+      self.rim:SetColor(col, 0.3)
+    end
+    -- Width follows the label, exactly as the mock's chips do — MAJOR, O-BIS and
+    -- TARGET are all different widths for the same padding.
+    local w = self.text:GetStringWidth() or 0
+    if w > 0 then self:SetWidth(math.floor(w + 0.5) + CHIP_PAD_X * 2) end
+    self:Show()
+    return self
+  end
+
+  c:Hide()
+  return c
+end
+
+--- A two-state switch: a label, a track with a sliding knob, a second label.
+---
+--- ⚠️ THE KNOB'S POSITION IS THE ONLY STATE INDICATOR, and this was checked on
+--- both sides rather than assumed. Every one of the four filter labels is the
+--- IDENTICAL 10px Light in #f2bdad — the design does not dim the unselected one,
+--- and adding a highlight "so you can tell" would be inventing a signal the
+--- design deliberately puts in one place. It replaces four separate pills, which
+--- said the same thing four times and took twice the height.
+---
+--- Geometry straight off the mock's SVG: a 30x16 track with rx 8, and a knob of
+--- radius 6 centred at x=8 or x=22. Both are TEXTURES because WoW has no rounded
+--- rectangle and no gradient fill on a primitive — the knob's vertical
+--- #DCA75E -> #FEF5BE is a real gradient in the design, so it is baked into the
+--- art at 2x rather than approximated with a flat colour.
+Style.SWITCH = { w = 30, h = 16, knob = 12, knobLeft = 2, knobRight = 16 }
+
+function Style.Switch(parent, leftLabel, rightLabel)
+  local SW = Style.SWITCH
+  local f = CreateFrame("Button", nil, parent)
+  f._hodStyled = true
+  f:SetSize(SW.w, SW.h)
+
+  f.track = f:CreateTexture(nil, "ARTWORK")
+  f.track:SetAllPoints()
+  f.track:SetTexture("Interface\\AddOns\\HoDLootAdvisor\\Media\\ui\\toggle-track.png")
+
+  f.knob = f:CreateTexture(nil, "OVERLAY")
+  f.knob:SetSize(SW.knob, SW.knob)
+  f.knob:SetTexture("Interface\\AddOns\\HoDLootAdvisor\\Media\\ui\\toggle-knob.png")
+
+  -- The labels are SIBLINGS of the track, not children, because the mock places
+  -- each at its own x on the row rather than at a fixed distance from the track
+  -- — "FULL LOOT TABLE" and "ALL LOOT" are very different lengths and both rows
+  -- still line up.
+  f.left  = Style.Text(parent, "light", "label", Style.COLOR.body, "LEFT")
+  f.right = Style.Text(parent, "light", "label", Style.COLOR.body, "LEFT")
+  f.left:SetText(leftLabel or "")
+  f.right:SetText(rightLabel or "")
+
+  --- on = the RIGHT-hand option is selected.
+  function f:SetSwitch(on)
+    self._on = on and true or false
+    self.knob:ClearAllPoints()
+    self.knob:SetPoint("LEFT", self._on and SW.knobRight or SW.knobLeft, 0)
+  end
+
+  --- Clicking anywhere on the row picks the side you clicked; clicking the track
+  --- flips it. A 30x16 track is not a comfortable target on its own, which is
+  --- why the labels are click targets too.
+  function f:Wire(onPick)
+    self:SetScript("OnClick", function(s) onPick(not s._on) end)
+    for _, pair in ipairs({ { self.left, false }, { self.right, true } }) do
+      local fs, want = pair[1], pair[2]
+      local hit = CreateFrame("Button", nil, parent)
+      hit:SetAllPoints(fs)
+      hit:SetScript("OnClick", function() onPick(want) end)
+    end
+  end
+
+  f:SetSwitch(false)
+  return f
 end
 
 --- The header lockup: crest and wordmark as one texture.

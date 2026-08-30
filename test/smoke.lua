@@ -2256,8 +2256,15 @@ check("...and it updated the existing row rather than adding a second one",
   -- reads: the compact tag on a chip or a ranking row, and the tooltip wording.
   -- Without them BIS is invisible except as a badge that silently got bigger.
 
+  -- ⚠️ DERIVED FROM THE MAP, NOT SPELT OUT — and it still bites. What this
+  -- check is FOR is that a BIS listing beats a grade, so it asserts the tag is
+  -- the BIS label AND is not the grade's letter. Hardcoding "BIS" made it fail
+  -- when the overall listing was renamed to "O-BIS" (Session 257), which is a
+  -- label change and not a behaviour change — the S247 rule about deriving from
+  -- the fixture rather than repeating its contents, applied to a label map.
   check("BIS outranks a grade in the tag, matching the scorer's strongest-wins",
-        ns.QualityTag({ grade = "c", bis = "overall" }) == "BIS",
+        ns.QualityTag({ grade = "c", bis = "overall" }) == ns.BIS_SHORT.overall
+        and ns.QualityTag({ grade = "c", bis = "overall" }) ~= "C",
         tostring(ns.QualityTag({ grade = "c", bis = "overall" })))
   check("a single-content BIS listing is distinguishable from an overall one",
         ns.QualityTag({ bis = "raid" }) == "R-BIS" and ns.QualityTag({ bis = "mplus" }) == "M-BIS")
@@ -2951,7 +2958,14 @@ header("The badge ramp — one table, three surfaces")
   -- BIS AND THE TARGET MARK MUST NOT SHARE A HUE (Session 249). Both were the
   -- brand gold, which is exactly the collision the rule forbids.
   local bisTag, bisColor = ns.QualityTag({ bis = "overall" })
-  check("BIS still tags as BIS", bisTag == "BIS")
+  check("the overall listing tags with its own label",
+        bisTag == ns.BIS_SHORT.overall and bisTag ~= nil, tostring(bisTag))
+  -- The three listings must stay distinguishable from one another; that is the
+  -- property the labels exist for, and it survives any renaming of them.
+  check("the three BIS listings are three distinct labels",
+        ns.BIS_SHORT.overall ~= ns.BIS_SHORT.raid
+        and ns.BIS_SHORT.raid ~= ns.BIS_SHORT.mplus
+        and ns.BIS_SHORT.overall ~= ns.BIS_SHORT.mplus)
   check("BIS and the target marker are different colours",
         bisColor and ns.TARGET_COLOR
         and not (bisColor[1] == ns.TARGET_COLOR[1]
