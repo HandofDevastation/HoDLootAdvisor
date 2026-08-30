@@ -2706,46 +2706,98 @@ header("The column's second line, the standing ordinal, and the header counts")
   check("a nil list is handled", nb == 0 and nt == 0)
 end)()
 
-header("Today's drops and the winner lookup (what the Loot tab reads)")
+header("Current Drops and the winner lookup (what the Loot tab reads)")
 
 ;(function()
   -- WHY THE PANEL READS THE RECORDER AND NOT Loot.recent: the in-memory roll
   -- list is wiped by a /reload and never learns a WINNER, because the roll event
   -- fires when the window OPENS and who won arrives minutes later on a rescan.
+  --
+  -- ⚠️ "CURRENT" IS A RUN, NOT A CALENDAR DAY (Session 256). It used to be every
+  -- run dated today, which answered a question nobody asked — a lunchtime LFR sat
+  -- under the same boss portrait as the guild night — and which changed its
+  -- answer to "none of them" at midnight, mid-raid. These fixtures therefore
+  -- carry TIMESTAMPS rather than only dates; the date no longer decides anything.
   local db = _G.HoDLootAdvisorDB
   local saved = db.loot
-  -- The STUB's date, not the machine's: "today" has to mean what the addon
-  -- thinks it means, and since Session 256 the harness clock is frozen so that
-  -- generated fixtures stop changing on every run.
-  local today = date("%Y-%m-%d")
+  local savedInstance = stub.instance
+  local now = time()
+  local HOURS = 3600
+
+  -- Out of an instance is the post-raid case: the run you just left is still the
+  -- one being asked about, because the winner of a late roll lands after you have
+  -- gone. stub.instance is restored at the end of the block.
+  -- ⚠️ instanceType MATTERS AND THE STUB DEFAULTS IT TO "raid". Without it set,
+  -- a fixture named Orgrimmar is still reported as a raid instance and the
+  -- out-of-instance path never runs.
+  stub.instance = { name = "Orgrimmar", difficultyID = 0, difficultyName = "",
+                    instanceID = 1, instanceType = "none" }
 
   db.loot = { sessions = {
-    { date = "1999-01-01", items = { { itemID = 111, itemName = "Ancient", winner = "Nobody" } } },
-    { date = today, items = {
-        { itemID = 222, itemName = "First drop",  winner = "Vörnix" },
-        { itemID = 333, itemName = "Second drop" },
-    } },
-    { date = today, items = {
-        { itemID = 444, itemName = "Third drop", winner = "Dåmir" },
+    { date = "1999-01-01", timestamp = now - (10 * 24 * HOURS),
+      items = { { itemID = 111, itemName = "Ancient", winner = "Nobody",
+                  timestamp = now - (10 * 24 * HOURS) } } },
+    { date = "2026-08-28", timestamp = now - (30 * HOURS),
+      items = { { itemID = 555, itemName = "Last night", timestamp = now - (30 * HOURS) } } },
+    { date = "2026-08-29", timestamp = now - (2 * HOURS),
+      items = {
+        { itemID = 222, itemName = "First drop",  winner = "Vörnix", timestamp = now - (2 * HOURS) },
+        { itemID = 333, itemName = "Second drop", timestamp = now - (90 * 60) },
+        { itemID = 444, itemName = "Third drop",  winner = "Dåmir",  timestamp = now - (60 * 60) },
     } },
   } }
 
   local drops = ns.Record.RecentDrops()
-  check("only today's runs are read", #drops == 3, #drops)
+  check("the current run is read, and only it", #drops == 3, #drops)
   check("newest first", drops[1].itemID == 444, drops[1] and drops[1].itemID)
   check("a run from another day is not included", (function()
     for _, e in ipairs(drops) do if e.itemID == 111 then return false end end
     return true
   end)())
+  check("...nor last night's, which is inside no window", (function()
+    for _, e in ipairs(drops) do if e.itemID == 555 then return false end end
+    return true
+  end)())
   check("the cap is honoured", #ns.Record.RecentDrops(2) == 2)
+
+  -- ⚠️ THE MIDNIGHT REGRESSION, and the reason any of this changed. A run STAMPED
+  -- with yesterday but written into ten minutes ago is the current run: a raid
+  -- that started at 21:00 and is still going at 00:30 has not become a different
+  -- raid. Before this the tab emptied itself mid-pull and the night split into
+  -- two runs, which then exported with two different dates — and the site files a
+  -- night against the raid session on the date it carries, so the second half had
+  -- nowhere to land.
+  db.loot = { sessions = {
+    { date = "2026-08-28", timestamp = now - (4 * HOURS),
+      items = {
+        { itemID = 777, itemName = "Before midnight", timestamp = now - (3 * HOURS) },
+        { itemID = 888, itemName = "After midnight",  timestamp = now - (10 * 60) },
+    } },
+  } }
+  local across = ns.Record.RecentDrops()
+  check("a run that crossed midnight is still the current run", #across == 2, #across)
+  check("...and the drop from before the rollover is still in it", (function()
+    for _, e in ipairs(across) do if e.itemID == 777 then return true end end
+    return false
+  end)())
+
+  -- The other side of the same rule: a run nobody has touched for a day is over,
+  -- whatever its date says. This is what stops Tuesday and Thursday merging.
+  db.loot = { sessions = {
+    { date = "2026-08-29", timestamp = now - (26 * HOURS),
+      items = { { itemID = 999, itemName = "Yesterday", timestamp = now - (26 * HOURS) } } },
+  } }
+  check("a run that went cold is not current, whatever its date",
+        #ns.Record.RecentDrops() == 0, #ns.Record.RecentDrops())
 
   -- ⚠️ THE BOSS FILTER. Without it the Loot tab showed every drop of the night
   -- under whichever boss portrait was selected, so clicking the strip changed
   -- nothing and the panel looked stuck on the last kill.
-  db.loot = { sessions = { { date = today, items = {
-    { itemID = 11, itemName = "From boss A", encounterID = 2888 },
-    { itemID = 22, itemName = "From boss B", encounterID = 2894 },
-    { itemID = 33, itemName = "Also boss A", encounterID = 2888, winner = "Vörnix" },
+  db.loot = { sessions = { { date = "2026-08-29", timestamp = now - HOURS, items = {
+    { itemID = 11, itemName = "From boss A", encounterID = 2888, timestamp = now - HOURS },
+    { itemID = 22, itemName = "From boss B", encounterID = 2894, timestamp = now - 1800 },
+    { itemID = 33, itemName = "Also boss A", encounterID = 2888, winner = "Vörnix",
+      timestamp = now - 600 },
   } } } }
   check("no boss id returns everything", #ns.Record.RecentDrops() == 3)
   check("a boss id returns only that boss's drops",
@@ -2758,19 +2810,24 @@ header("Today's drops and the winner lookup (what the Loot tab reads)")
         #ns.Record.RecentDrops(nil, 2871) == 0, #ns.Record.RecentDrops(nil, 2871))
 
   db.loot = { sessions = {
-    { date = "1999-01-01", items = { { itemID = 111, itemName = "Ancient", winner = "Nobody" } } },
-    { date = today, items = {
-        { itemID = 222, itemName = "First drop",  winner = "Vörnix" },
-        { itemID = 333, itemName = "Second drop" },
-    } },
-    { date = today, items = {
-        { itemID = 444, itemName = "Third drop", winner = "Dåmir" },
+    { date = "1999-01-01", timestamp = now - (10 * 24 * HOURS),
+      items = { { itemID = 111, itemName = "Ancient", winner = "Nobody",
+                  timestamp = now - (10 * 24 * HOURS) } } },
+    { date = "2026-08-29", timestamp = now - (2 * HOURS),
+      items = {
+        { itemID = 222, itemName = "First drop",  winner = "Vörnix", timestamp = now - (2 * HOURS) },
+        { itemID = 333, itemName = "Second drop", timestamp = now - (90 * 60) },
+        { itemID = 444, itemName = "Third drop",  winner = "Dåmir",  timestamp = now - 600 },
     } },
   } }
 
   check("a settled item reports its winner", ns.Record.WinnerFor(444) == "Dåmir",
         tostring(ns.Record.WinnerFor(444)))
-  check("...across more than one run today", ns.Record.WinnerFor(222) == "Vörnix")
+  -- ⚠️ SCOPED TO THE CURRENT RUN, and this NARROWED in Session 256 — it used to
+  -- search every run dated today. On a raid night nothing is lost, because the
+  -- night is one run; what it stops is a winner from a different instance
+  -- entirely being reported under tonight's item.
+  check("...anywhere within that run", ns.Record.WinnerFor(222) == "Vörnix")
 
   -- ⚠️ nil IS A REAL ANSWER AND MUST NOT BE DRESSED UP. Nothing in the addon
   -- registers that a roll ENDED — only that one started — so "still open" and
@@ -2784,6 +2841,76 @@ header("Today's drops and the winner lookup (what the Loot tab reads)")
   check("a nil item id is handled", ns.Record.WinnerFor(nil) == nil)
 
   db.loot = saved
+  stub.instance = savedInstance
+end)()
+
+header("A raid that runs past midnight is still one run")
+
+;(function()
+  -- THE WRITER'S HALF of the same rule, and the half that reaches the SITE. A
+  -- run used to be stamped with the day it started and only continued while that
+  -- was still "today", so the moment the clock rolled over the recorder stopped
+  -- recognising the raid it was already recording and opened a second run.
+  --
+  -- ⚠️ THAT IS AN IMPORT BUG, NOT A COSMETIC ONE. Each run exports with its own
+  -- date and the site files a night against the raid session carrying that date,
+  -- so the post-midnight half arrived stamped with the NEXT day and had no
+  -- session to land on. The site reports such a night rather than filing it
+  -- somewhere wrong, so it would surface as loot that simply did not import.
+  local db = _G.HoDLootAdvisorDB
+  local saved, savedInstance, savedEpoch = db.loot, stub.instance, stub.epoch
+  db.loot = { sessions = {} }
+  stub.instance = { name = "The Venomous Abyss", difficultyID = 15,
+                    difficultyName = "Heroic (Raid)", instanceID = 2917 }
+
+  -- Ten minutes either side of a UTC midnight. Derived rather than written down,
+  -- so the fixture cannot drift away from the harness clock.
+  local dayStart = stub.epoch - (stub.epoch % 86400)
+  local before, after = dayStart + 86400 - 600, dayStart + 86400 + 600
+
+  -- ⚠️ A DIFFERENT ENCOUNTER PER KILL, and the first version of this test got it
+  -- wrong. A kill is BOUND to its run the first time it is seen and every later
+  -- scan writes back into that same record, so re-firing one encounter id is a
+  -- rescan of one kill — not a second kill — and the run never has to be looked
+  -- up again. Reusing the id tested nothing and reported it as a failure.
+  local function killWith(itemID, name, at, encounterID)
+    stub.epoch = at
+    stub.items[itemID] = { name = name, quality = 4, ilvl = 305, itemType = "Armor" }
+    stub.lootHistory[encounterID] = { stub.drop(1, itemID, name, { 12841 }, {
+      { name = "Vörnix", state = 0, roll = 87, isWinner = true } }) }
+    stub.Fire("ENCOUNTER_END", encounterID, "A Boss", 15, 20, 1)
+    stub.RunTimers(300)
+  end
+
+  killWith(270701, "Before Midnight", before, 2849)
+  check("the raid opens one run", #db.loot.sessions == 1, #db.loot.sessions)
+  local startedOn = db.loot.sessions[1].date
+  -- ⚠️ ASSERT THE SHAPE, NOT JUST THAT IT MATCHES ITSELF. The first version of
+  -- this block only ever compared this value to itself, so when the change
+  -- accidentally wrote an EMPTY date into every run, every check here still
+  -- passed — nil equals nil. The tracked export fixture caught it instead.
+  -- A date is what the SITE matches a night against; it has to be a real one.
+  check("...stamped with a real calendar date",
+        type(startedOn) == "string" and startedOn:match("^%d%d%d%d%-%d%d%-%d%d$") ~= nil,
+        tostring(startedOn))
+
+  killWith(270702, "After Midnight", after, 2850)
+  check("the date really did roll over", date("%Y-%m-%d") ~= startedOn,
+        ("%s -> %s"):format(tostring(startedOn), date("%Y-%m-%d")))
+  check("the kill after midnight joins the SAME run",
+        #db.loot.sessions == 1, #db.loot.sessions)
+  check("...and the run keeps the date the raid STARTED on, which is the one the "
+        .. "site matches against", db.loot.sessions[1].date == startedOn,
+        tostring(db.loot.sessions[1].date))
+  check("...with both kills in it", #db.loot.sessions[1].items == 2,
+        #db.loot.sessions[1].items)
+
+  -- The other direction: come back to the same raid a day later and it is a new
+  -- night, because nothing has been written into the old run for far too long.
+  killWith(270703, "Tomorrow Night", after + (24 * 3600), 2851)
+  check("a visit a day later is a new run", #db.loot.sessions == 2, #db.loot.sessions)
+
+  db.loot, stub.instance, stub.epoch = saved, savedInstance, savedEpoch
 end)()
 
 header("The badge ramp — one table, three surfaces")

@@ -422,27 +422,53 @@ local function warnLoweredThreshold(s)
   ns.Line("recorded and included in Export Guild Loot. |cffF3C56B/la set minQuality 4|r restores Epic-only.")
 end
 
+--- How long a run stays open to be rejoined. A raid night is about three hours
+--- and the next one is a day away, so anything between roughly four and twelve
+--- hours behaves identically; six is the middle of that and not a fine judgement.
+---
+--- ⚠️ THIS REPLACED A CALENDAR-DATE TEST, and the date was the bug (Session 256).
+--- A run was stamped with the day it started and only continued while that was
+--- still "today", so a raid crossing LOCAL MIDNIGHT stopped matching itself: the
+--- night split into two runs mid-pull, and Current Drops — which asked the same
+--- question — went blank while people were still killing things. Nothing about a
+--- raid changes at midnight, so nothing about the recording should.
+---
+--- IT ALSO FIXES THE IMPORT, which is the half that would have hurt quietly. The
+--- export writes each run's own start date and the site files a night against the
+--- raid session on that date, so the post-midnight half arrived stamped with the
+--- NEXT day and had no session to land on. One run, one date, one destination.
+local RUN_WINDOW = 6 * 3600
+
+--- When a run last had something written into it. Items are appended in order,
+--- so the last one is the newest; a run with no drops yet falls back to when it
+--- was opened. NOT the session's own timestamp alone — that is when the run
+--- STARTED, and a five-hour night would then age out of its own window.
+local function lastActive(s)
+  if not s then return 0 end
+  local items = s.items
+  local newest = (items and #items > 0 and items[#items].timestamp) or nil
+  return newest or s.timestamp or 0
+end
+
 --- The session to append to, creating one if needed. nil outside an instance.
 ---
---- An existing tail session is REUSED when the date, instance and difficulty all
---- match. HoDLootTracker starts a fresh session on every zone-in, so a night with
---- three /reloads exports as three SESSION blocks for one raid; matching on those
---- three fields collapses them while still treating a difficulty change as the
---- genuinely different session it is.
+--- An existing tail session is REUSED when the instance, difficulty and character
+--- match and it is still inside RUN_WINDOW. HoDLootTracker starts a fresh session
+--- on every zone-in, so a night with three /reloads exports as three SESSION
+--- blocks for one raid; matching on those fields collapses them while still
+--- treating a difficulty change as the genuinely different session it is.
 local function session()
   local db = lootDB()
   if not db then return nil end
   local ctx = instanceContext()
   if not ctx then return nil end
 
-  local today = date("%Y-%m-%d")
-
   -- The CHARACTER is part of a run's identity, not just a label on it. Two of
   -- your own characters running the same instance at the same difficulty on the
   -- same day are two runs with two lockouts, and merging them would attribute
   -- one character's drops to the other's session.
   local function matches(s)
-    return s and s.date == today
+    return s and (time() - lastActive(s)) < RUN_WINDOW
       and s.instanceID == ctx.instanceID
       and s.difficultyID == ctx.difficultyID
       and (s.character or ctx.character) == ctx.character
@@ -467,8 +493,14 @@ local function session()
     return reconcile(tail)
   end
 
+  -- ⚠️ THE DATE IS STILL RECORDED, IT JUST NO LONGER DECIDES ANYTHING. Matching
+  -- moved to recency (RUN_WINDOW) so a raid crossing midnight stays one run —
+  -- but the run must still SAY which night it was, because the site files a
+  -- night against the raid session carrying that date. Removing the variable
+  -- along with the comparison wrote an EMPTY date into every export, and the
+  -- only thing that noticed was the tracked export fixture changing.
   local s = {
-    date         = today,
+    date         = date("%Y-%m-%d"),
     timestamp    = time(),
     instance     = ctx.instance,
     instanceID   = ctx.instanceID,
@@ -1324,13 +1356,47 @@ end
 --- Passing the instance id instead would be worse than nothing: instance ids and
 --- encounter ids are different number spaces, so a match would be a coincidence
 --- filing one boss's drops under an unrelated dungeon.
-function Record.RecentDrops(limit, bossID)
+--- The run "Current Drops" is about, WITHOUT ever creating one. Read-only on
+--- purpose: opening the panel in a city must not open a run.
+---
+--- IN an instance it is the run you are standing in, which is what makes the tab
+--- honest — this raid, not this morning's dungeon. OUT of one it is the run you
+--- just left, while that is still recent, because the recorder keeps rescanning
+--- for four minutes after a kill and WHO WON arrives later still. Clearing the
+--- moment you step outside would throw away the part that finally knows.
+---
+--- ⚠️ IT USED TO BE "EVERY RUN DATED TODAY" and that answered a question nobody
+--- asked. An LFR wing at lunchtime sat under the same boss as the guild night;
+--- and at midnight, mid-raid, the answer changed to "none of them".
+function Record.CurrentRun()
   local db = lootDB()
-  local today = date("%Y-%m-%d")
+  local sessions = (db or {}).sessions or {}
+  if #sessions == 0 then return nil end
+
+  local ctx = instanceContext()
+  local newest, newestAt = nil, 0
+  for _, s in ipairs(sessions) do
+    local at = lastActive(s)
+    if ctx then
+      if s.instanceID == ctx.instanceID
+        and s.difficultyID == ctx.difficultyID
+        and (s.character or ctx.character) == ctx.character
+        and (time() - at) < RUN_WINDOW
+        and at >= newestAt
+      then newest, newestAt = s, at end
+    elseif (time() - at) < RUN_WINDOW and at >= newestAt then
+      newest, newestAt = s, at
+    end
+  end
+  return newest
+end
+
+function Record.RecentDrops(limit, bossID)
   local wanted = (type(bossID) == "table") and bossID or nil
   local out = {}
-  for _, s in ipairs((db or {}).sessions or {}) do
-    if s.date == today then
+  do
+    local s = Record.CurrentRun()
+    if s then
       for _, e in ipairs(s.items or {}) do
         local keep
         if wanted then keep = wanted[e.encounterID] == true
