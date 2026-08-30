@@ -219,9 +219,17 @@ end)
 do
   local panel = _G.HoDLootAdvisorPanel
   ns.Panel.Show()
+  -- ⚠️ READ FROM THE RULE, NOT A FILL. An expanded boss row has NO background
+  -- in the mock — the row says it is open by DROPPING its bottom rule, which is
+  -- what joins it to the loot beneath. A fill was invented here for one round
+  -- and this check was written against it, so the check has to move with it.
+  local function isExpanded(tile)
+    return tile:IsShown() and tile.rule and not tile.rule:IsShown()
+  end
+
   local expanded = 0
   for _, tile in ipairs(panel.bossTiles or {}) do
-    if tile:IsShown() and tile.sel and tile.sel:IsShown() then expanded = expanded + 1 end
+    if isExpanded(tile) then expanded = expanded + 1 end
   end
   check("the panel opens with no boss expanded", expanded == 0, expanded)
 
@@ -230,11 +238,17 @@ do
   local first = panel.bossTiles and panel.bossTiles[1]
   if first and first.scripts.OnClick then
     first.scripts.OnClick(first)
-    local opened = first.sel and first.sel:IsShown()
+    local opened = isExpanded(first)
     first.scripts.OnClick(first)
-    local closed = not (first.sel and first.sel:IsShown())
+    local closed = not isExpanded(first)
     check("clicking a boss expands it", opened == true)
     check("...and clicking it again collapses it", closed == true)
+    -- And no boss row is ever filled, in either state.
+    local filled = false
+    for _, tile in ipairs(panel.bossTiles or {}) do
+      if tile.sel then filled = true end
+    end
+    check("no boss row carries a background fill in any state", filled == false)
   end
 end
 

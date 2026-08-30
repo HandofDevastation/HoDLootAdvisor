@@ -668,18 +668,16 @@ local function buildBossTile(parent, i)
   tile.initial = text(tile, "titleMed", "head", "textDim", "CENTER")
   tile.initial:SetPoint("CENTER", tile.fallback, "CENTER")
 
-  -- ⚠️ THE SELECTED ROW IS A FILL NOW, NOT AN UNDERLINE. The Session 251
-  -- underline existed because a 32px portrait had no other free edge; a
-  -- full-width row does, so the mock marks selection by tinting the row and
-  -- dropping its rule to join it to the loot beneath. Behind everything else in
-  -- the row, which is what the old underline had to sit outside the tile to
-  -- avoid.
-  tile.sel = tile:CreateTexture(nil, "BACKGROUND", nil, -1)
-  tile.sel:SetAllPoints()
-  if S then
-    tile.sel:SetColorTexture(S.COLOR.rule.r, S.COLOR.rule.g, S.COLOR.rule.b, 0.2)
-  end
-  tile.sel:Hide()
+  -- ⚠️ AN EXPANDED BOSS ROW HAS NO FILL AT ALL (Jason). It carried a blush tint
+  -- for one round, invented on the reasoning that a selected thing ought to look
+  -- selected. The mock's boss rows have no background in ANY state — only the
+  -- item CARDS are filled — and the row says it is open by DROPPING ITS RULE,
+  -- which joins it to the loot listed beneath it. That is the whole signal, and
+  -- it is enough because the loot appearing underneath is the other half of it.
+  --
+  -- This also retires the Session 251 selection underline for good: that existed
+  -- because a 32px portrait had no free edge to mark, and the question does not
+  -- arise on a full-width row in an accordion.
 
   tile:SetScript("OnClick", function(self)
     if not self.bossIndex then return end
@@ -2388,7 +2386,6 @@ function fillBossTile(tile, en)
   -- The rule is DROPPED on the expanded row, which is what joins a boss to the
   -- loot listed beneath it — and is why the mock's expanded row measures one
   -- pixel shorter than the others.
-  tile.sel:SetShown(en.expanded)
   tile.rule:SetShown(not en.expanded)
 end
 
