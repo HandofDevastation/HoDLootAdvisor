@@ -8,19 +8,22 @@ name: Loot data refresh
 # trigger release.yml: tags pushed by the built-in GITHUB_TOKEN do not trigger
 # other workflows. Learned once already on Gloom's Build Barn; do not "simplify"
 # it back.
-# ⚠️ THE WEEKLY SCHEDULE IS PAUSED FOR THE PANEL REDESIGN (Session 255, Jason).
-# A scheduled run publishes to CurseForge, and everything on main goes out with
-# the data — so while the redesign is in flight this job would ship whatever
-# happened to be merged. Redesign work lives on the `redesign-loot-panel`
-# branch, which a scheduled job can never see; this pause covers the remaining
-# case, which is finished-but-unreleased work on main going out unasked.
+# ⚠️ THIS JOB IS MANUAL ONLY, ON PURPOSE (Session 255, Jason). Do NOT "restore"
+# the weekly schedule — it was never right for this addon.
 #
-# COST OF THE PAUSE IS NEAR ZERO: the season's loot table is essentially static.
-# The last two automatic refreshes moved a 136 KB file by about 100 bytes each.
+# THE CADENCE WAS COPIED FROM GLOOM'S BUILD BARN, where a weekly run is the
+# whole point: talent builds move with the meta, so Monday's harvest genuinely
+# produces new data every week. LOOT DOES NOT WORK THAT WAY. A season's table is
+# fixed once it is populated — the last two automatic refreshes here changed a
+# 136 KB file by roughly 100 and 280 bytes. So it was cutting a release, and
+# pushing a new file at CurseForge, to deliver nothing.
 #
-# ⚠️ RESTORE THIS when the redesign ships — uncomment the two schedule lines.
-# Build Barn is UNAFFECTED and still refreshes every Tuesday; it has its own
-# workflow in its own repo and this changes nothing about it.
+# WHAT ACTUALLY WARRANTS A RUN: a new season, or a deliberate audit of the BIS
+# lists (Jason expects to ask for one every few weeks). Both are occasions
+# somebody decides on, not a clock. Trigger it by hand when one arrives.
+#
+# ⚠️ BUILD BARN IS UNAFFECTED and still refreshes every Tuesday. Its workflow
+# lives in its own repo; nothing here touches it, and its schedule IS correct.
 on:
   # schedule:
   #   - cron: "0 13 * * 2" # Tuesdays 13:00 UTC, an hour after Build Barn's
