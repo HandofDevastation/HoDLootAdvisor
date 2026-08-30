@@ -257,10 +257,16 @@ Style.COLOR = {
 -- column all read it, so a retune moves every surface at once instead of three
 -- tables drifting apart — which is how the strip and the ranking list ended up
 -- disagreeing about Moderate before.
+-- ⚠️ READ OFF THE MOCK'S FOUR CHIPS, ONE AT A TIME (Session 257). This ramp had
+-- MODERATE on the old orange and MINOR on dimmed white, neither of which is in
+-- the design. The real one is a HEAT SCALE that cools rather than a good/bad
+-- scale: #ff595b -> #9f50d4 -> #ac7666 -> #606060. MINOR being the title
+-- gradient's own far end is why it reads as part of the panel rather than as a
+-- warning, and it is the same value the row rules are drawn in.
 Style.BADGE = {
   major     = { label = "Major",     color = "major" },
-  moderate  = { label = "Moderate",  color = "orange" },
-  minor     = { label = "Minor",     color = "textDim" },
+  moderate  = { label = "Moderate",  color = "accent" },
+  minor     = { label = "Minor",     color = "rule" },
   sidegrade = { label = "Sidegrade", color = "grey" },
 }
 

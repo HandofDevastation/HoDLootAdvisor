@@ -113,6 +113,11 @@ local LOGO_X, LOGO_Y = 40, 30
 -- earlier state of the mock and was taken on trust here for one commit. The file
 -- has 37, 37, 37 and then 36 for the last, which drops its bottom rule; four of
 -- them occupy exactly 147. Read the node, not the note about the node.
+-- Blizzard's own portrait mask, which is what MinimapButton.lua already rounds
+-- this addon's button with — so a circular icon needs nothing exported and
+-- nothing copied in at a new tier.
+local CIRCLE_MASK = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
+
 local BOSS_X, BOSS_TOP, BOSS_W = 40, 171, 200
 local BOSS_ROW_H, BOSS_ICON = 37, 28
 -- The column's content height, bosses and item cards together.
@@ -123,6 +128,8 @@ local COL_AREA_H = 339
 -- a cosmetic one — hence the rail carries its own scroll offset rather than the
 -- count being trimmed to what fits.
 local BOSS_VISIBLE = 4
+-- The height the "+N more — scroll" line reserves when it is showing.
+local BOSS_MORE_H = 16
 -- Icon inset 4, name at 42 (4 + 28 + a 10 gap), and the name sits 12 down
 -- inside the row rather than being centred in it.
 local BOSS_ICON_X, BOSS_NAME_X, BOSS_TEXT_Y = 4, 42, 12
@@ -608,15 +615,11 @@ local function buildBossTile(parent, i)
   tile.art = tile:CreateTexture(nil, "ARTWORK")
   tile.art:SetSize(BOSS_ICON, BOSS_ICON)
   tile.art:SetPoint("LEFT", BOSS_ICON_X, 0)
-  -- ⚠️ CIRCULAR, AND THE CLIENT SUPPLIES THE MASK. Blizzard's own portrait mask
-  -- is what MinimapButton.lua already rounds this addon's button with, so there
-  -- is nothing to export and nothing to copy in at a new tier. Guarded because
-  -- SetMask is not on every texture object in every client build, and a square
-  -- icon is a far better failure than an error inside the thing that draws the
-  -- whole rail.
-  if tile.art.SetMask then
-    pcall(tile.art.SetMask, tile.art, "Interface\\CharacterFrame\\TempPortraitAlphaMask")
-  end
+  -- ⚠️ THE MASK IS APPLIED AFTER THE TEXTURE, IN THE RENDERER — not here. Set
+  -- on a texture that has no image yet, it produced the striped noise Jason
+  -- screenshotted rather than a circle. MinimapButton.lua, which has been
+  -- drawing correctly for months, calls SetTexture FIRST and masks second; this
+  -- copied the call without the ordering.
 
   -- The boss's name, which the portrait strip had no room for — the single
   -- biggest thing the rail buys. Truncation is left to the fontstring's own
@@ -650,9 +653,9 @@ local function buildBossTile(parent, i)
   if S then
     tile.fallback:SetColorTexture(S.COLOR.elevated.r, S.COLOR.elevated.g, S.COLOR.elevated.b, 1)
   end
-  if tile.fallback.SetMask then
-    pcall(tile.fallback.SetMask, tile.fallback, "Interface\\CharacterFrame\\TempPortraitAlphaMask")
-  end
+  -- Safe to mask at build: it is a solid colour, not a file, so there is no
+  -- image still to arrive.
+  if tile.fallback.SetMask then pcall(tile.fallback.SetMask, tile.fallback, CIRCLE_MASK) end
   tile.initial = text(tile, "titleMed", "head", "textDim", "CENTER")
   tile.initial:SetPoint("CENTER", tile.fallback, "CENTER")
 
@@ -741,7 +744,10 @@ local function buildRankRow(parent, i)
   local o = C_RANK
   -- ⚠️ THE RANK IS 14 AND EVERYTHING ELSE ON THE ROW IS 11 — the mock's one
   -- deliberate size jump inside the table. It is what the eye scans down.
-  row.rank    = at(text(row, "light", "rank", "body"), C_RANK - o, 1, 14, "LEFT")
+  -- ⚠️ BOLD, AND THE ONLY BOLD IN THE TABLE. The node is 14px Bold in #f2bdad
+  -- — not the muted grey it used to be. It is what the eye scans down, and the
+  -- design gives it weight rather than a second colour to do that job.
+  row.rank    = at(text(row, "bold", "rank", "body"), C_RANK - o, 1, 20, "LEFT")
   -- ⚠️ CLASS-COLOURED, AND THE ASTERISK IS NOT. The mock paints each name in its
   -- class colour and leaves the ad-hoc "*" white, so the marker stays legible on
   -- a dark class and does not read as part of the name.
@@ -1433,11 +1439,12 @@ local function buildDetailPane()
   frame.itemIcon = frame:CreateTexture(nil, "ARTWORK")
   frame.itemIcon:SetSize(DET.icon, DET.icon)
   frame.itemIcon:SetPoint("TOPLEFT", DET.iconX, -DET.iconY)
-  frame.itemIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-  if frame.itemIcon.SetMask then
-    pcall(frame.itemIcon.SetMask, frame.itemIcon,
-      "Interface\\CharacterFrame\\TempPortraitAlphaMask")
-  end
+  -- ⚠️ NO SetTexCoord ALONGSIDE A MASK. The 8% crop exists to trim the border
+  -- baked into every WoW item icon — but a mask samples the texture in its OWN
+  -- coordinate space, so cropping fights it and the two together produced the
+  -- striped noise in Jason's screenshot rather than a circle. The mask already
+  -- hides the border, which is what the crop was for. Applied in the renderer,
+  -- after there is an image to mask.
 
   -- ⚠️ THE NAME IS BLUSH AND THE SLOT LINE IS WHITE — the OPPOSITE of the left
   -- rail's cards, and read off the node rather than reasoned about. See the note
@@ -1448,9 +1455,21 @@ local function buildDetailPane()
   -- The verdict badge. Its ground is the blush at 10%, and the grade sits over
   -- the word "Upgrade" in two tight 10px lines — which is why both are anchored
   -- to the box rather than flowed.
+  -- ⚠️ IT GROWS LEFTWARDS FROM A PINNED RIGHT EDGE, and that is not a
+  -- refinement — the fixed 75 from the mock TRUNCATED ITS OWN EXAMPLE. Measured
+  -- from the bundled TTF: "MAJOR" at 16 Bold is 55.0px against an inner width of
+  -- exactly 55.0, which is the Session 252 trap word for word ("sized to its own
+  -- string with 0.7px to spare... the game's text metrics differ slightly from
+  -- the font's advance widths, so it tipped over"). It rendered "MAJ…".
+  --
+  -- And MAJOR is the SHORT one. The same 16px Bold measures MODERATE 86.6,
+  -- SIDEGRADE 89.1 and "NOT FOR YOU" 103.8 — so no fixed width drawn for one
+  -- word could have held the set. The right edge is what the mock actually
+  -- fixes (623 + 75 = 698); the width follows the word.
   frame.badgeBox = CreateFrame("Frame", nil, frame)
   frame.badgeBox:SetSize(DET.badgeW, DET.badgeH)
-  frame.badgeBox:SetPoint("TOPLEFT", DET.badgeX, -DET.badgeY)
+  frame.badgeBox:SetPoint("TOPRIGHT", frame, "TOPLEFT",
+    DET.badgeX + DET.badgeW, -DET.badgeY)
   if ns.Style then
     local S = ns.Style
     frame.badgeBg = frame.badgeBox:CreateTexture(nil, "BACKGROUND")
@@ -1460,11 +1479,23 @@ local function buildDetailPane()
   -- ⚠️ BOLD, AND IT IS THE ONLY BOLD IN THE PANEL. The mock sets the grade at
   -- 16 Bold and everything else Light or Regular, so this is the one place the
   -- third weight is bundled for.
-  frame.hUpgrade = atRight(text(frame.badgeBox, "bold", "badge", "major", "RIGHT"),
-    DET.badgeW - DET.badgePadX, DET.badgeTop, DET.badgeW - DET.badgePadX * 2)
-  frame.hUpgradeWord = atRight(text(frame.badgeBox, "light", "label", "white", "RIGHT"),
-    DET.badgeW - DET.badgePadX, DET.badgeTop + 13, DET.badgeW - DET.badgePadX * 2)
+  -- No SetWidth on either line: a fontstring with a fixed width TRUNCATES, and
+  -- the box is what resizes here. They anchor to its right edge instead.
+  frame.hUpgrade = text(frame.badgeBox, "bold", "badge", "major", "RIGHT")
+  frame.hUpgrade:SetPoint("TOPRIGHT", -DET.badgePadX, -DET.badgeTop)
+  frame.hUpgradeWord = text(frame.badgeBox, "light", "label", "white", "RIGHT")
+  frame.hUpgradeWord:SetPoint("TOPRIGHT", -DET.badgePadX, -(DET.badgeTop + 13))
   frame.hUpgradeWord:SetText("Upgrade")
+
+  --- Resize the box around whichever verdict it is currently showing, never
+  --- below the mock's own 75 so a short word still reads as the drawn block.
+  function frame.badgeBox:FitToLabel()
+    local w = math.max((frame.hUpgrade:GetStringWidth() or 0),
+                       (frame.hUpgradeWord:GetStringWidth() or 0))
+    if w > 0 then
+      self:SetWidth(math.max(DET.badgeW, math.floor(w + 0.5) + DET.badgePadX * 2))
+    end
+  end
 
   -- The item name is the biggest representation of the item on screen, so
   -- hovering it should do what hovering an item anywhere else in the game does.
@@ -2252,6 +2283,11 @@ local function renderBossStrip()
       tile.art:SetTexture(("Interface\\AddOns\\HoDLootAdvisor\\Media\\%s\\%d.png")
         :format(folder, b.id))
       local drew = tile.art:GetTexture() ~= nil
+      -- Masked here, with an image already in place. Guarded: a square icon is
+      -- untidy, an error inside the thing that draws the whole rail is not.
+      if drew and tile.art.SetMask then
+        pcall(tile.art.SetMask, tile.art, CIRCLE_MASK)
+      end
 
       tile.art:SetShown(drew)
       tile.fallback:SetShown(not drew)
@@ -2279,7 +2315,12 @@ local function renderBossStrip()
   -- than fixed. The old strip was horizontal and the column beneath it started
   -- at a constant; in one shared column a hardcoded top would either overlap the
   -- rail or float below it, depending on how many bosses the season has.
-  local railH = math.max(0, shown) * BOSS_ROW_H
+  -- ⚠️ THE OVERFLOW LINE OCCUPIES SPACE, so the cards start below it. It was
+  -- drawn at the rail's bottom edge and the cards began 4px later, so
+  -- "+5 more bosses — scroll" printed straight through the first item's name.
+  local hidden = #bosses - shown - state.bossScroll
+  local moreH = (hidden > 0) and BOSS_MORE_H or 0
+  local railH = math.max(0, shown) * BOSS_ROW_H + moreH
   frame.col:ClearAllPoints()
   frame.col:SetPoint("TOPLEFT", COL_X, -(BOSS_TOP + railH + COL_GAP))
 
@@ -2287,11 +2328,12 @@ local function renderBossStrip()
   -- minus a constant. Scrolling changes it, and a line that said "+5 more" while
   -- you were looking at the last five would be worse than no line.
   local noun = (ns.ContentMode() == "mplus") and "dungeons" or "bosses"
-  local hidden = #bosses - shown - state.bossScroll
   frame.stripMore:Hide()
   if hidden > 0 then
     frame.stripMore:ClearAllPoints()
-    frame.stripMore:SetPoint("TOPLEFT", BOSS_X, -(BOSS_TOP + railH + 2))
+    -- Inside the space railH now reserves for it, not after the rail's rows.
+    frame.stripMore:SetPoint("TOPLEFT", BOSS_X,
+      -(BOSS_TOP + shown * BOSS_ROW_H + 2))
     frame.stripMore:SetText(("+%d more %s — scroll"):format(hidden, noun))
     frame.stripMore:Show()
   end
@@ -2304,9 +2346,11 @@ local function renderItemColumn(entries)
   -- season with four bosses on screen leaves room for three cards, and one with
   -- fewer leaves room for more. WoW frames do not clip their children, so a row
   -- count taken from the whole column would draw straight through the footer.
-  local railRows = math.min(#bossList(), BOSS_VISIBLE)
+  local allBosses = bossList()
+  local railRows = math.min(#allBosses, BOSS_VISIBLE)
+  local railMore = (#allBosses > railRows) and BOSS_MORE_H or 0
   local rows = math.max(0, math.floor(
-    (COL_AREA_H - railRows * BOSS_ROW_H - COL_GAP) / ITEM_PITCH))
+    (COL_AREA_H - railRows * BOSS_ROW_H - railMore - COL_GAP) / ITEM_PITCH))
   if rows > COL_ROWS then rows = COL_ROWS end
   local maxScroll = math.max(0, total - rows)
   if state.colScroll > maxScroll then state.colScroll = maxScroll end
@@ -2438,6 +2482,7 @@ local function renderPaneHeader(entry)
   end
   frame.hUpgrade:SetText(label)
   if S and color then frame.hUpgrade:SetTextColor(S.rgb(color)) end
+  frame.badgeBox:FitToLabel()
 end
 
 --- The facts line beneath the header: gain, gap, quality and target state.
@@ -2452,12 +2497,19 @@ end
 --- the badge was computed against — so the cost always describes the same copy
 --- of the item the rest of the line is about.
 local function renderFacts(entry, ranked)
-  if not entry then frame.facts:SetText("") return end
+  if not entry then
+    frame.facts:SetText("")
+    frame.factTags:SetText("")
+    return
+  end
   local S = ns.Style
   local parts = {}
 
+  -- ⚠️ "ITEM LEVELS", NOT "ILVL" (the mock's own wording). This line is the one
+  -- place the panel spells the measurement out; the abbreviation belongs in the
+  -- table's column heading, where the space is genuinely tight.
   if (entry.gain or 0) > 0 and not entry.ineligible then
-    parts[#parts + 1] = ("+%d ilvl"):format(entry.gain)
+    parts[#parts + 1] = ("+%d Item Levels"):format(entry.gain)
   end
 
   -- The viewer's own gap from the leader, read off the ranking rather than
@@ -2467,9 +2519,9 @@ local function renderFacts(entry, ranked)
   for i, r in ipairs(ranked or {}) do
     if (r.name or ""):lower() == me then
       if r.gap and i > 1 then
-        parts[#parts + 1] = ("%d behind"):format(r.gap)
+        parts[#parts + 1] = ("-%d Behind"):format(r.gap)
       elseif i == 1 then
-        parts[#parts + 1] = "top of the list"
+        parts[#parts + 1] = "Top of the list"
       end
       break
     end
@@ -2478,24 +2530,44 @@ local function renderFacts(entry, ranked)
   local price = ns.Payload.PriceText(entry.itemID, entry.candidateIlvl)
   if price then parts[#parts + 1] = "Cost: " .. price end
 
+  -- ⚠️ THE TAGS ARE A SECOND FONTSTRING, IN BOLD, AND UPPERCASE. The mock sets
+  -- OVERALL BIS and TARGETED in Manrope Bold #f2bdad while the facts either side
+  -- are Light white — and a colour escape cannot change WEIGHT, only colour. So
+  -- the facts run in one string and the tags in another, placed after the first
+  -- has measured itself. They were previously inline, in the BIS yellow, which
+  -- is a colour this line does not use anywhere.
+  local tags = {}
   local q = entry.quality
-  if q and q.bis and S then
-    parts[#parts + 1] = S.code(S.COLOR.bis) .. (ns.BIS_LONG[q.bis] or "BIS") .. "|r"
-  elseif q and q.grade and S then
+  if q and q.bis then
+    tags[#tags + 1] = (ns.BIS_LONG[q.bis] or "BIS"):upper()
+  elseif q and q.grade then
     local tag = qualityTag(q)
-    if tag then parts[#parts + 1] = tag .. " grade" end
+    if tag then tags[#tags + 1] = (tag .. " GRADE"):upper() end
   end
+  if entry.targeted then tags[#tags + 1] = "TARGETED" end
 
-  if entry.targeted and S then
-    parts[#parts + 1] = S.code(S.COLOR.target) .. "Targeted" .. "|r"
-  end
+  local sepPlain = "  " .. BAR .. "  "
+  local sep = S and (S.code(S.COLOR.accent) .. sepPlain .. "|r") or sepPlain
 
-  if #parts == 0 then
+  if #parts == 0 and #tags == 0 then
     frame.facts:SetText(entry.reason or "")
-  else
-    local sep = S and (S.code(S.COLOR.grey) .. "  " .. BAR .. "  |r") or ("  " .. BAR .. "  ")
-    frame.facts:SetText(table.concat(parts, sep))
+    frame.factTags:SetText("")
+    return
   end
+
+  local left = table.concat(parts, sep)
+  -- The tags carry the separator that joins them to the facts, so the gap
+  -- between the two strings is drawn by the same rule as every other gap.
+  local right = table.concat(tags, sep)
+  if left ~= "" and right ~= "" then right = sep .. right end
+
+  frame.facts:SetText(left)
+  frame.factTags:SetText(right)
+  -- Placed after measuring, because where the bold run starts depends entirely
+  -- on how long the light one turned out to be.
+  frame.factTags:ClearAllPoints()
+  frame.factTags:SetPoint("TOPLEFT", frame.facts, "TOPLEFT",
+    frame.facts:GetStringWidth() or 0, 0)
 end
 
 --- The selected item's identity row, and who won it.
@@ -2513,6 +2585,9 @@ local function renderItemIdentity(entry)
   local icon = entry.icon
   if not icon and GetItemIcon then icon = GetItemIcon(entry.itemID) end
   frame.itemIcon:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+  if frame.itemIcon.SetMask then
+    pcall(frame.itemIcon.SetMask, frame.itemIcon, CIRCLE_MASK)
+  end
   frame.itemIcon:Show()
   frame.itemHover.link = entry.link
   frame.itemHover:Show()
@@ -2650,7 +2725,6 @@ local function renderRanking(itemID)
     row:Show()
 
     row.rank:SetText(tostring(place[idx] or idx))
-    row.rank:SetTextColor(unpack(MUTED))
 
     local displayName = r.name or "?"
     -- Only where an export exists to be off — see meta.roster. With none loaded
@@ -3355,9 +3429,13 @@ function Panel.Refresh()
   -- The boss strip, the context line and the two filter toggles belong to the
   -- Loot tab: on the others they would offer navigation that changes nothing.
   frame.strip:SetShown(onLoot)
-  frame.stripMore:SetShown(onLoot)
-  frame.bossName:SetShown(onLoot)
-  frame.bossSub:SetShown(onLoot)
+  -- ⚠️ NOT bossName / bossSub. They are RETIRED — the rail names its own bosses
+  -- now — and this line was switching them back on for the Loot tab, so the
+  -- boss name and "For You: 1 BIS | 0 Targets" drew straight through the first
+  -- rail row. Hiding something at build is not enough if a refresh shows it.
+  -- stripMore manages its own visibility in renderBossStrip, from the count of
+  -- bosses actually off-screen.
+  if not onLoot then frame.stripMore:Hide() end
   for _, s in ipairs({ frame.swSource, frame.swFilter }) do
     if s then
       s:SetShown(onLoot)
