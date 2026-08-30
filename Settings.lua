@@ -46,7 +46,13 @@ Settings.SPEC = {
   },
   {
     key = "panelScale", label = "Panel Size (%)", default = 100,
-    kind = "number", min = 50, max = 200,
+    kind = "slider", min = 50, max = 200, step = 1, suffix = "%",
+    -- ⚠️ APPLIED ON EVERY STEP, NOT ON RELEASE. This is the one setting whose
+    -- effect you can only judge by looking at it, so the window resizes under
+    -- the drag. `apply` is a general hook on the spec rather than a special
+    -- case in the renderer — the next setting that needs to do something the
+    -- moment it changes uses the same door.
+    apply = function() if ns.Panel and ns.Panel.ApplyScale then ns.Panel.ApplyScale() end end,
     -- ⚠️ THIS EXISTS BECAUSE WoW UI UNITS ARE NOT DESIGN PIXELS, and nothing
     -- inside the game can convert between them. The panel is drawn to a 740x600
     -- frame; how large that lands on a given screen depends on the client's
@@ -147,13 +153,22 @@ end
 
 --- Returns ok, errorMessage. Validates rather than trusting input: a bad value
 --- here would not error, it would quietly change what the raid sees.
+--- Run a setting's `apply` hook, if it has one. Guarded: a fault in something
+--- a setting drives must not stop the setting itself being stored.
+local function runApply(spec)
+  if spec and spec.apply then pcall(spec.apply) end
+end
+
 function Settings.Set(key, value)
   local spec, canonical = resolveKey(key)
   if not spec then return false, "unknown setting: " .. tostring(key) end
   key = canonical
   ns.db.settings = ns.db.settings or Settings.Defaults()
 
-  if spec.kind == "number" then
+  -- ⚠️ A SLIDER IS A NUMBER THAT IS DRAWN DIFFERENTLY. It validates, clamps and
+  -- stores through this same branch, so the range can never disagree between
+  -- the control and the slash command that sets the same key.
+  if spec.kind == "number" or spec.kind == "slider" then
     local n = tonumber(value)
     if not n then return false, ("%s needs a number"):format(spec.label) end
     n = math.floor(n)
@@ -161,6 +176,7 @@ function Settings.Set(key, value)
       return false, ("%s must be between %d and %d"):format(spec.label, spec.min, spec.max)
     end
     ns.db.settings[key] = n
+    runApply(spec)
     return true
 
   elseif spec.kind == "toggle" then
@@ -172,12 +188,13 @@ function Settings.Set(key, value)
     else
       return false, ("%s is on or off"):format(spec.label)
     end
+    runApply(spec)
     return true
 
   elseif spec.kind == "choice" then
     local want = tostring(value):upper()
     for _, c in ipairs(spec.choices) do
-      if c == want then ns.db.settings[key] = c; return true end
+      if c == want then ns.db.settings[key] = c; runApply(spec); return true end
     end
     return false, ("%s must be one of: %s"):format(spec.label, table.concat(spec.choices, ", "))
   end
@@ -302,6 +319,18 @@ local function build()
       control:SetScript("OnClick", function(self)
         Settings.Set(spec.key, self:GetChecked() and "on" or "off")
       end)
+
+    elseif spec.kind == "slider" then
+      control = ns.Style and ns.Style.Slider(frame, 150, spec.min, spec.max, spec.step)
+      if control then
+        control:SetPoint("TOPRIGHT", -60, y)
+        control:Wire(spec.suffix, function(v)
+          -- Only write when it actually moved: OnValueChanged fires while the
+          -- window is being POPULATED too, and storing there would rewrite the
+          -- setting from the widget on every open.
+          if v ~= Settings.Get(spec.key) then Settings.Set(spec.key, v) end
+        end)
+      end
 
     elseif spec.kind == "number" then
       control = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
@@ -428,6 +457,8 @@ function Settings.Refresh()
     local v = Settings.Get(row.spec.key)
     if row.spec.kind == "toggle" then
       row.control:SetChecked(v and true or false)
+    elseif row.spec.kind == "slider" then
+      row.control:SetValue(tonumber(v) or row.spec.default)
     elseif row.spec.kind == "number" then
       row.control:SetText(tostring(v))
     elseif row.spec.kind == "choice" then

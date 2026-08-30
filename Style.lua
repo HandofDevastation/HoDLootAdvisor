@@ -892,6 +892,60 @@ function Style.Switch(parent, leftLabel, rightLabel)
   return f
 end
 
+--- A slider: a track, a draggable knob, and its current value.
+---
+--- ⚠️ NO SLIDER EXISTS IN THE MOCK, so this is built from the parts that do.
+--- The knob is the SWITCH's knob — the same 12px circle with the same
+--- #DCA75E -> #FEF5BE gradient — and the track is the switch's fill colour at
+--- full length. That makes the two controls read as one family rather than as a
+--- slider borrowed from somewhere else, which is the only defensible way to add
+--- a control a design does not contain.
+---
+--- Square ends, like every other control here: the toggle is the one rounded
+--- thing in this design and it is rounded because it is a 16px pill.
+---
+--- Built on Blizzard's Slider template for the drag behaviour — hit testing,
+--- clamping and the click-anywhere-on-the-track behaviour are genuinely fiddly
+--- — with its artwork stripped, the same trade Style.Window makes.
+function Style.Slider(parent, width, minV, maxV, step)
+  local s = CreateFrame("Slider", nil, parent)
+  s._hodStyled = true
+  s:SetOrientation("HORIZONTAL")
+  s:SetSize(width or 160, 16)
+  s:SetMinMaxValues(minV or 0, maxV or 100)
+  s:SetValueStep(step or 1)
+  s:SetObeyStepOnDrag(true)
+
+  s.track = s:CreateTexture(nil, "BACKGROUND")
+  s.track:SetHeight(4)
+  s.track:SetPoint("LEFT")
+  s.track:SetPoint("RIGHT")
+  s.track:SetColorTexture(Style.rgb(Style.COLOR.control))
+
+  s.knob = s:CreateTexture(nil, "OVERLAY")
+  s.knob:SetSize(12, 12)
+  s.knob:SetTexture("Interface\\AddOns\\HoDLootAdvisor\\Media\\ui\\toggle-knob.png")
+  s:SetThumbTexture(s.knob)
+
+  -- The value, to the right of the track. A slider with no readout is a control
+  -- you can only set by eye, and this one has a number the user cares about.
+  s.value = Style.Text(parent, "light", "label", Style.COLOR.body, "LEFT")
+  s.value:SetPoint("LEFT", s, "RIGHT", 10, 0)
+
+  --- suffix is appended to the readout ("%" here). onChange fires on every
+  --- step, so a caller can apply the value live rather than on release —
+  --- dragging a SIZE control you cannot see the effect of is guesswork.
+  function s:Wire(suffix, onChange)
+    self:SetScript("OnValueChanged", function(self2, v)
+      v = math.floor(v + 0.5)
+      self2.value:SetText(tostring(v) .. (suffix or ""))
+      if onChange then onChange(v) end
+    end)
+  end
+
+  return s
+end
+
 --- The header lockup: crest and wordmark as one texture.
 ---
 --- ⚠️ IT HAS TO BE AN IMAGE AND THAT IS SETTLED, NOT A SHORTCUT. The wordmark

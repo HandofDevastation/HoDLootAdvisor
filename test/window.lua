@@ -356,6 +356,16 @@ drive("the panel size knob behaves", function()
   check("returning to 100% lands exactly back on the baseline",
         math.abs(at100 - base) < 1e-9, ("%.6f vs %.6f"):format(at100, base))
 
+  -- ⚠️ THE APPLY HOOK IS WHAT MAKES THE SLIDER LIVE. Settings.Set runs it, so a
+  -- value stored by ANY route — the slider, a slash command, a restored
+  -- SavedVariable — resizes the window. Without it the setting would take
+  -- effect only on the next open, which is unusable for a control you judge by
+  -- looking at the thing it changes.
+  ns.Settings.Set("panelScale", 70)
+  check("setting the size applies it immediately, without reopening",
+        math.abs(panel:GetScale() - base * 0.7) < 1e-9,
+        ("%.4f vs %.4f"):format(panel:GetScale(), base * 0.7))
+
   -- Out-of-range values are clamped rather than obeyed: a 0 would make the
   -- window disappear with no way to reach the setting that did it.
   ns.Settings.Set("panelScale", 0)
