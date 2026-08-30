@@ -194,11 +194,19 @@ end
 
 header("The states that differ")
 
-drive("scrolling the boss rail", function()
-  ns.Panel.ScrollBosses(1); ns.Panel.ScrollBosses(-1)
+-- One scroll, because the column is one list: boss rows and the expanded boss's
+-- cards share it. Driven well past the end and back, since the clamp has to
+-- measure from the end over two different entry heights.
+drive("scrolling the column, including past both ends", function()
+  for _ = 1, 30 do ns.Panel.ScrollColumn(1) end
+  for _ = 1, 60 do ns.Panel.ScrollColumn(-1) end
 end)
-drive("scrolling the item column", function()
-  ns.Panel.ScrollColumn(1); ns.Panel.ScrollColumn(-1)
+
+drive("selecting each boss in turn expands its loot without erroring", function()
+  local panel = _G.HoDLootAdvisorPanel
+  for _, tile in ipairs(panel.bossTiles or {}) do
+    if tile.scripts.OnClick and tile.bossIndex then tile.scripts.OnClick(tile) end
+  end
 end)
 
 header("No window file reads a constant that was deleted")

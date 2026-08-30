@@ -113,23 +113,10 @@ local LOGO_X, LOGO_Y = 40, 30
 -- earlier state of the mock and was taken on trust here for one commit. The file
 -- has 37, 37, 37 and then 36 for the last, which drops its bottom rule; four of
 -- them occupy exactly 147. Read the node, not the note about the node.
--- Blizzard's own portrait mask, which is what MinimapButton.lua already rounds
--- this addon's button with — so a circular icon needs nothing exported and
--- nothing copied in at a new tier.
-local CIRCLE_MASK = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
-
 local BOSS_X, BOSS_TOP, BOSS_W = 40, 171, 200
 local BOSS_ROW_H, BOSS_ICON = 37, 28
 -- The column's content height, bosses and item cards together.
 local COL_AREA_H = 339
--- ⚠️ FOUR ROWS, AND THE RAIL SCROLLS. The mock draws four bosses and three item
--- cards, which is exactly what 339 holds. The season has nine bosses, so a
--- fixed four would have made five of them unreachable — a functional loss, not
--- a cosmetic one — hence the rail carries its own scroll offset rather than the
--- count being trimmed to what fits.
-local BOSS_VISIBLE = 4
--- The height the "+N more — scroll" line reserves when it is showing.
-local BOSS_MORE_H = 16
 -- Icon inset 4, name at 42 (4 + 28 + a 10 gap), and the name sits 12 down
 -- inside the row rather than being centred in it.
 local BOSS_ICON_X, BOSS_NAME_X, BOSS_TEXT_Y = 4, 42, 12
@@ -150,8 +137,6 @@ local CARD = {
   -- Between chips on a card: 10 -> 61 -> 103, across widths of 44 and 36.
   chipGap = 6,
 }
--- The gap between the last boss row and the first item card (pt-4 in the mock).
-local COL_GAP = 4
 
 -- The filter row, above the column. Each piece carries its own x because the
 -- mock places them individually — the two rows have very different label
@@ -191,7 +176,16 @@ local FOOT = {
 -- design puts the season name in that space instead).
 -- WIDER SINCE SESSION 251: the label now names the CONTENT as well as the
 -- difficulty ("Raid: Heroic"), which no longer fits 100px.
-local DIFF_X, DIFF_Y, DIFF_W, DIFF_H = 460, 60, 140, 24
+-- ⚠️ READ OFF THE NODE (Session 257). It was at x 460 on a 620-wide window and
+-- never moved when the frame grew; the mock puts it at 577, which is 123 wide
+-- ending 40 from the right edge — the same margin as the tab row's left. Its y
+-- is 82, the SAME LINE as the tabs, so the row reads as one band of controls.
+-- The Vault checkbox sits ABOVE it at 56, left edges flush.
+local DIFF_X, DIFF_Y, DIFF_W, DIFF_H = 577, 82, 123, 27
+-- The caret: a 6x6 triangle, 14 in from the control's right edge.
+local DIFF_CARET, DIFF_CARET_R = 6, 14
+-- The checkbox: a 16x16 box at 56, its label 22 across (box plus a 6 gap).
+local VAULT_Y, VAULT_BOX, VAULT_LABEL_X = 56, 16, 22
 -- Gap between the Vault/Voidcore checkbox and the difficulty control it now sits
 -- ABOVE, right edges aligned.
 --
@@ -393,7 +387,7 @@ local frame
 local state = {
   tab = "Loot",
   sel = 1, bossIndex = 1,
-  colScroll = 0, rankScroll = 0, bossScroll = 0,
+  colScroll = 0, rankScroll = 0,
   -- The two filter toggles. `source` is which list the column shows; `filter`
   -- is whether it hides what this character cannot use.
   source = "drops",     -- "drops" | "table"
@@ -615,11 +609,11 @@ local function buildBossTile(parent, i)
   tile.art = tile:CreateTexture(nil, "ARTWORK")
   tile.art:SetSize(BOSS_ICON, BOSS_ICON)
   tile.art:SetPoint("LEFT", BOSS_ICON_X, 0)
-  -- ⚠️ THE MASK IS APPLIED AFTER THE TEXTURE, IN THE RENDERER — not here. Set
-  -- on a texture that has no image yet, it produced the striped noise Jason
-  -- screenshotted rather than a circle. MinimapButton.lua, which has been
-  -- drawing correctly for months, calls SetTexture FIRST and masks second; this
-  -- copied the call without the ordering.
+  -- ⚠️ A MaskTexture, ADDED ONCE AT BUILD — not SetMask in the renderer, which
+  -- was the previous attempt and still did not round anything. A mask object
+  -- persists across SetTexture calls, so it does not care that the image
+  -- arrives later; that was the whole reason the ordering looked load-bearing.
+  if ns.Style then ns.Style.Round(tile, tile.art) end
 
   -- The boss's name, which the portrait strip had no room for — the single
   -- biggest thing the rail buys. Truncation is left to the fontstring's own
@@ -627,6 +621,15 @@ local function buildBossTile(parent, i)
   -- "Tidebound Sorceress's Reliquary" and any count is wrong for one of them.
   tile.name = at(text(tile, "light", "name", "body"), BOSS_NAME_X, BOSS_TEXT_Y,
     BOSS_W - BOSS_NAME_X - 24)
+
+  -- The best-in-slot diamond, right-aligned in the row. Sized and placed from
+  -- the mock's own node (15x12, at the row's right edge).
+  tile.bis = tile:CreateTexture(nil, "OVERLAY")
+  tile.bis:SetSize(15, 12)
+  tile.bis:SetPoint("RIGHT", -10, 0)
+  tile.bis:SetTexture(MARK_BIS_TEX)
+  if S and S.COLOR.bis then tile.bis:SetVertexColor(S.rgb(S.COLOR.bis)) end
+  tile.bis:Hide()
 
   -- The row rule. DROPPED ON THE SELECTED ROW, which is how the mock joins a
   -- boss to the loot listed beneath it — and why its expanded row measures one
@@ -653,9 +656,7 @@ local function buildBossTile(parent, i)
   if S then
     tile.fallback:SetColorTexture(S.COLOR.elevated.r, S.COLOR.elevated.g, S.COLOR.elevated.b, 1)
   end
-  -- Safe to mask at build: it is a solid colour, not a file, so there is no
-  -- image still to arrive.
-  if tile.fallback.SetMask then pcall(tile.fallback.SetMask, tile.fallback, CIRCLE_MASK) end
+  if ns.Style then ns.Style.Round(tile, tile.fallback) end
   tile.initial = text(tile, "titleMed", "head", "textDim", "CENTER")
   tile.initial:SetPoint("CENTER", tile.fallback, "CENTER")
 
@@ -1107,10 +1108,13 @@ local function buildLootControls()
   -- ⚠️ AND ONLY IF THE PAYLOAD KNOWS THE LEVELS. An older payload carries no
   -- vault table; the control stays hidden rather than showing a computed guess,
   -- exactly as the GP price shows nothing without its constants.
-  frame.vault = ns.Style and ns.Style.Check(frame, "Vault/Voidcore", 14)
+  frame.vault = ns.Style and ns.Style.Check(frame, "VAULT/VOIDCORE", VAULT_BOX)
   if frame.vault then
-    -- Above the dropdown, right edges flush, as the Figma frame has it.
-    frame.vault:SetPoint("BOTTOMRIGHT", frame.diff, "TOPRIGHT", 0, VAULT_GAP)
+    -- ⚠️ LEFT edges flush with the dropdown, not right. The mock aligns the two
+    -- controls down their left side at x 577; the label runs off to the right
+    -- and is shorter than the dropdown, so a right-edge anchor put the box in
+    -- the middle of nowhere.
+    frame.vault:SetPoint("TOPLEFT", DIFF_X, -VAULT_Y)
     frame.vault:SetChecked(ns.VaultOn())
     frame.vault:SetScript("OnClick", function(self)
       self:SetChecked(not self:GetChecked())
@@ -1128,8 +1132,8 @@ local function buildLootControls()
   -- 11x11: the design node's own size. The art is drawn into that cell with the
   -- triangle occupying its lower three-quarters, exactly as Figma places it, so
   -- the padding is the design's rather than something added here.
-  frame.diffCaret:SetSize(11, 11)
-  frame.diffCaret:SetPoint("RIGHT", -8, -1)
+  frame.diffCaret:SetSize(DIFF_CARET, DIFF_CARET)
+  frame.diffCaret:SetPoint("RIGHT", -DIFF_CARET_R, 0)
   -- The design's own caret, pointing DOWN as a dropdown affordance should. It was
   -- Blizzard's ChatFrameExpandArrow, which points RIGHT — it reads as "expand
   -- sideways", and it is not the shape in the mock.
@@ -1202,21 +1206,24 @@ local function buildLootControls()
   -- Right-aligned to the window margin, so a raid with fewer bosses than slots
   -- keeps the last tile against the same edge instead of leaving a ragged gap
   -- under the header.
-  frame.strip = CreateFrame("Frame", nil, frame)
-  frame.strip:SetSize(BOSS_W, BOSS_VISIBLE * BOSS_ROW_H)
-  frame.strip:SetPoint("TOPLEFT", BOSS_X, -BOSS_TOP)
-  frame.strip:EnableMouseWheel(true)
-  frame.strip:SetScript("OnMouseWheel", function(_, delta) Panel.ScrollBosses(-delta) end)
+  -- ⚠️ ONE CONTAINER FOR BOTH, because the accordion is ONE list: boss rows and
+  -- the expanded boss's item cards are siblings in the same column under one
+  -- scroll offset. The old split — a rail frame with its own wheel above a
+  -- separate item frame with another — is what produced two independent scrolls
+  -- and a "+5 more bosses" line that belongs to neither design.
+  frame.col = CreateFrame("Frame", nil, frame)
+  frame.col:SetSize(BOSS_W, COL_AREA_H)
+  frame.col:SetPoint("TOPLEFT", BOSS_X, -BOSS_TOP)
+  frame.col:EnableMouseWheel(true)
+  frame.col:SetScript("OnMouseWheel", function(_, delta) Panel.ScrollColumn(-delta) end)
   frame.bossTiles = {}
   for i = 1, BOSS_SLOTS do
-    frame.bossTiles[i] = buildBossTile(frame.strip, i)
+    frame.bossTiles[i] = buildBossTile(frame.col, i)
     frame.bossTiles[i]:Hide()
   end
   -- The overflow note now belongs under the LAST DRAWN ROW, whose position
   -- depends on how many bosses the season has, so it is placed at render time
   -- rather than pinned to a constant that assumed nine.
-  frame.stripMore = at(text(frame, "body", "label", "body"), BOSS_X, BOSS_TOP, BOSS_W)
-  frame.stripMore:Hide()
 
   -- ── The two filter toggles ────────────────────────────────────────────────
   -- ⚠️ TWO SWITCHES, NOT FOUR BUTTONS (Session 257). The mock draws each filter
@@ -1269,14 +1276,8 @@ local function buildLootControls()
     frame.swFilter:SetScript("OnLeave", function() ns.Tip:Hide() end)
   end
 
-  -- ── The item column ───────────────────────────────────────────────────────
-  frame.col = CreateFrame("Frame", nil, frame)
-  -- A starting position only: renderBossStrip re-anchors this beneath the rail
-  -- on every refresh, because the rail's height depends on the boss count.
-  frame.col:SetPoint("TOPLEFT", COL_X, -COL_TOP)
-  frame.col:SetSize(COL_W, COL_ROWS * ITEM_PITCH)
-  frame.col:EnableMouseWheel(true)
-  frame.col:SetScript("OnMouseWheel", function(_, delta) Panel.ScrollColumn(-delta) end)
+  -- ── The item cards ────────────────────────────────────────────────────────
+  -- Same container as the boss rows; see the note where it is created.
   frame.itemRows = {}
   for i = 1, COL_ROWS do
     frame.itemRows[i] = buildItemRow(frame.col, i)
@@ -1440,11 +1441,10 @@ local function buildDetailPane()
   frame.itemIcon:SetSize(DET.icon, DET.icon)
   frame.itemIcon:SetPoint("TOPLEFT", DET.iconX, -DET.iconY)
   -- ⚠️ NO SetTexCoord ALONGSIDE A MASK. The 8% crop exists to trim the border
-  -- baked into every WoW item icon — but a mask samples the texture in its OWN
-  -- coordinate space, so cropping fights it and the two together produced the
-  -- striped noise in Jason's screenshot rather than a circle. The mask already
-  -- hides the border, which is what the crop was for. Applied in the renderer,
-  -- after there is an image to mask.
+  -- baked into every WoW item icon, but a mask samples the texture in its own
+  -- coordinate space and the two fight. The mask hides that border anyway,
+  -- which is what the crop was for.
+  if ns.Style then ns.Style.Round(frame, frame.itemIcon) end
 
   -- ⚠️ THE NAME IS BLUSH AND THE SLOT LINE IS WHITE — the OPPOSITE of the left
   -- rail's cards, and read off the node rather than reasoned about. See the note
@@ -2225,232 +2225,197 @@ local function clearPane()
   setHeaders()
 end
 
-local function renderBossStrip()
+-- ⚠️ DECLARED BEFORE renderColumn CALLS THEM. A `local function` defined later
+-- in the file is not in scope above its own declaration, so the call would
+-- silently resolve to a nil GLOBAL — the same shape as the deleted-constant bug
+-- the window harness now guards against.
+local fillBossTile, fillItemRow
+
+--- The left column: every boss, with the SELECTED boss's loot expanded inline
+--- directly beneath its own row, and the remaining bosses continuing below that.
+--- One list, one scroll.
+---
+--- ⚠️ THIS IS AN ACCORDION, NOT TWO STACKED LISTS, and getting that wrong is
+--- what produced the "+5 more bosses — scroll" line Jason quite rightly called
+--- nonsense. Reading the mock again says so plainly: the row above the item
+--- cards is VASHNIK, the FOURTH boss, and it measures 36 where the three above
+--- it measure 37 — it has dropped its bottom rule because its own loot is
+--- joined to it. Bosses five through nine are not missing; they are below the
+--- cards, off the bottom, reachable by scrolling the whole column.
+---
+--- The consequence for the code is that boss rows and item cards share ONE
+--- ordered list and ONE scroll offset, and a row's y is the sum of everything
+--- above it rather than its index times a pitch.
+local function columnEntries(items)
+  local out = {}
+  local bosses = bossList()
+  for i, b in ipairs(bosses) do
+    out[#out + 1] = { kind = "boss", boss = b, index = i,
+                      expanded = (i == state.bossIndex) }
+    if i == state.bossIndex then
+      for j, e in ipairs(items or {}) do
+        out[#out + 1] = { kind = "item", entry = e, index = j }
+      end
+    end
+  end
+  return out
+end
+
+--- The height one entry occupies, INCLUDING the gap that follows it. An
+--- expanded boss row is one pixel shorter because its rule is not drawn.
+local function entryHeight(en)
+  if en.kind == "boss" then
+    return en.expanded and (BOSS_ROW_H - 1) or BOSS_ROW_H
+  end
+  return ITEM_PITCH
+end
+
+local function renderColumn(items)
+  local list = columnEntries(items)
   local bosses = bossList()
   if state.bossIndex > #bosses then state.bossIndex = 1 end
 
-  -- The strip is fixed at nine slots because the window is fixed. A raid with
-  -- more bosses than that is COUNTED rather than silently cut off — nine has
-  -- covered every tier so far, and the day it does not, the panel says so.
-  -- The rail is a WINDOW onto the boss list, not the whole of it. Clamped here
-  -- rather than where the wheel is read, so a season with fewer bosses than the
-  -- window cannot leave a stale offset scrolling an empty rail.
-  local maxBossScroll = math.max(0, #bosses - BOSS_VISIBLE)
-  if state.bossScroll > maxBossScroll then state.bossScroll = maxBossScroll end
-  local shown = math.min(#bosses - state.bossScroll, BOSS_VISIBLE)
-  for i = 1, BOSS_SLOTS do
-    local b = bosses[i + state.bossScroll]
-    local tile = frame.bossTiles[i]
-    if not b or i > shown then
-      tile:Hide()
+  -- ⚠️ THE SCROLL OFFSET IS AN ENTRY INDEX, and it is clamped by MEASURING from
+  -- the end rather than by counting rows: entries are two different heights, so
+  -- "the last N fit" is not a number that can be worked out from the count.
+  local total = #list
+  local maxScroll, acc = 0, 0
+  for i = total, 1, -1 do
+    acc = acc + entryHeight(list[i])
+    if acc > COL_AREA_H then maxScroll = i; break end
+  end
+  if state.colScroll > maxScroll then state.colScroll = maxScroll end
+  if state.colScroll < 0 then state.colScroll = 0 end
+
+  local nextBoss, nextItem = 1, 1
+  local y = 0
+  for i = state.colScroll + 1, total do
+    local en = list[i]
+    local h = entryHeight(en)
+    if y + h > COL_AREA_H then break end
+
+    if en.kind == "boss" then
+      local tile = frame.bossTiles[nextBoss]
+      if not tile then break end
+      nextBoss = nextBoss + 1
+      fillBossTile(tile, en)
+      tile:ClearAllPoints()
+      tile:SetPoint("TOPLEFT", frame.col, "TOPLEFT", 0, -y)
+      tile:SetHeight(h)
     else
-      -- ⚠️ THE ROW'S INDEX IS NOT THE BOSS'S. With the rail scrolled, row 1 is
-      -- whatever bossScroll points at — storing the row number here would select
-      -- the wrong boss the moment anyone scrolled.
-      tile.bossIndex = i + state.bossScroll
-      tile.bossName, tile.bossBis = b.name, b.bis
-
-      -- ⚠️ BUNDLED SQUARE ART, NOT THE GAME'S CREATURE PORTRAIT. Two wrong
-      -- answers preceded this one. The Encounter Journal's creature icon is WIDE,
-      -- so forcing it into a 32x32 tile squashed every face; asking the client
-      -- for a proper portrait instead fixed the aspect and came back ROUND,
-      -- because that call renders the circular unit-frame portrait.
-      --
-      -- The design's tiles are 56x56 squares, and they are the same files
-      -- Gloom's Build Barn already bundles — that is where the mock's art came
-      -- from. So this addon bundles them too, and the strip is a plain texture
-      -- lookup with nothing to distort and nothing to resolve at runtime.
-      --
-      -- ⚠️ RENAMED TO THE BLIZZARD ENCOUNTER ID. Build Barn keys its copies by
-      -- WCL id; this payload's bosses are keyed by BLIZZARD id, and those are
-      -- different number spaces (Core §1.1). Renaming at bundle time keeps the
-      -- lookup a single index rather than shipping a mapping table that would
-      -- need maintaining alongside the art.
-      --
-      -- ⚠️ NEW TIER = NEW ART, or these draw as initials. Same standing cost
-      -- Build Barn carries; it belongs on the season-rollover checklist.
-      -- ⚠️ TWO FOLDERS, TWO ID SPACES, AND THEY MUST NOT BE MIXED. Raid tiles are
-      -- Blizzard ENCOUNTER ids; dungeon tiles are Blizzard INSTANCE ids. The
-      -- ranges overlap by coincidence, so a single folder would eventually put a
-      -- raid boss's face on a dungeon with nothing erroring.
-      --
-      -- Both sets are Build Barn's, renamed. Its Mythic+ section is keyed by
-      -- DUNGEON rather than by boss — which is the same shape this strip needs,
-      -- since a key drops one chest at the end — so it already ships exactly one
-      -- 56x56 icon per dungeon. Renamed from its WarcraftLogs ids to Blizzard's
-      -- by matching NAMES, which agree one-to-one across the two sources.
-      local folder = (ns.ContentMode() == "mplus") and "dungeons" or "bosses"
-      tile.art:SetTexture(("Interface\\AddOns\\HoDLootAdvisor\\Media\\%s\\%d.png")
-        :format(folder, b.id))
-      local drew = tile.art:GetTexture() ~= nil
-      -- Masked here, with an image already in place. Guarded: a square icon is
-      -- untidy, an error inside the thing that draws the whole rail is not.
-      if drew and tile.art.SetMask then
-        pcall(tile.art.SetMask, tile.art, CIRCLE_MASK)
-      end
-
-      tile.art:SetShown(drew)
-      tile.fallback:SetShown(not drew)
-      tile.initial:SetText(drew and "" or (b.name or "?"):sub(1, 1):upper())
-
-      -- ⚠️ SHOW THE ROW BEFORE WRITING INTO IT, then write the name through a
-      -- forced repaint. Rows are RECYCLED and start hidden, and a fontstring
-      -- painted while hidden never repaints if its string does not change — the
-      -- Session 254 rule, which is exactly what left the Standings tab blank.
-      -- A boss whose name happens to match the one this row last held is the
-      -- case that would fail silently here.
-      tile:Show()
-      tile.name:SetText("")
-      tile.name:SetText(b.name or "")
-
-      local selected = (tile.bossIndex == state.bossIndex)
-      tile.sel:SetShown(selected)
-      -- The rule is DROPPED on the selected row, joining it to the loot listed
-      -- beneath — and on the last row, which has nothing to be separated from.
-      tile.rule:SetShown(not selected and i < shown)
+      local row = frame.itemRows[nextItem]
+      if not row then break end
+      nextItem = nextItem + 1
+      fillItemRow(row, en.entry, en.index)
+      row:ClearAllPoints()
+      row:SetPoint("TOPLEFT", frame.col, "TOPLEFT", 0, -y)
     end
+    y = y + h
   end
 
-  -- ⚠️ THE ITEM CARDS FOLLOW THE LAST BOSS ROW, so their top is computed rather
-  -- than fixed. The old strip was horizontal and the column beneath it started
-  -- at a constant; in one shared column a hardcoded top would either overlap the
-  -- rail or float below it, depending on how many bosses the season has.
-  -- ⚠️ THE OVERFLOW LINE OCCUPIES SPACE, so the cards start below it. It was
-  -- drawn at the rail's bottom edge and the cards began 4px later, so
-  -- "+5 more bosses — scroll" printed straight through the first item's name.
-  local hidden = #bosses - shown - state.bossScroll
-  local moreH = (hidden > 0) and BOSS_MORE_H or 0
-  local railH = math.max(0, shown) * BOSS_ROW_H + moreH
-  frame.col:ClearAllPoints()
-  frame.col:SetPoint("TOPLEFT", COL_X, -(BOSS_TOP + railH + COL_GAP))
+  for i = nextBoss, BOSS_SLOTS do frame.bossTiles[i]:Hide() end
+  for i = nextItem, COL_ROWS do frame.itemRows[i]:Hide() end
 
-  -- ⚠️ THE COUNT IS WHAT IS OFF THE RAIL RIGHT NOW, not the season's total
-  -- minus a constant. Scrolling changes it, and a line that said "+5 more" while
-  -- you were looking at the last five would be worse than no line.
-  local noun = (ns.ContentMode() == "mplus") and "dungeons" or "bosses"
-  frame.stripMore:Hide()
-  if hidden > 0 then
-    frame.stripMore:ClearAllPoints()
-    -- Inside the space railH now reserves for it, not after the rail's rows.
-    frame.stripMore:SetPoint("TOPLEFT", BOSS_X,
-      -(BOSS_TOP + shown * BOSS_ROW_H + 2))
-    frame.stripMore:SetText(("+%d more %s — scroll"):format(hidden, noun))
-    frame.stripMore:Show()
-  end
+  -- ⚠️ NO "+N MORE" LINE ANYWHERE. The mock has none, the column simply
+  -- continues past the bottom edge, and inventing one both cost a card's worth
+  -- of height and printed through the first item's name.
+  frame.colMore:SetText(total > 0 and maxScroll > 0
+    and ("%d of %d · scroll"):format(
+      math.min(total, state.colScroll + 1), total) or "")
 end
 
-local function renderItemColumn(entries)
-  local total = #entries
-  -- ⚠️ HOW MANY CARDS FIT IS DECIDED HERE, NOT AT BUILD. Bosses and item cards
-  -- share one 344-tall column, so the rail's height is the cards' budget: a
-  -- season with four bosses on screen leaves room for three cards, and one with
-  -- fewer leaves room for more. WoW frames do not clip their children, so a row
-  -- count taken from the whole column would draw straight through the footer.
-  local allBosses = bossList()
-  local railRows = math.min(#allBosses, BOSS_VISIBLE)
-  local railMore = (#allBosses > railRows) and BOSS_MORE_H or 0
-  local rows = math.max(0, math.floor(
-    (COL_AREA_H - railRows * BOSS_ROW_H - railMore - COL_GAP) / ITEM_PITCH))
-  if rows > COL_ROWS then rows = COL_ROWS end
-  local maxScroll = math.max(0, total - rows)
-  if state.colScroll > maxScroll then state.colScroll = maxScroll end
-  if state.sel > total then state.sel = 1 end
+--- Fill ONE boss row. Positioning is the column's job; this only writes.
+function fillBossTile(tile, en)
+  local b = en.boss
+  tile.bossIndex, tile.bossName, tile.bossBis = en.index, b.name, b.bis
 
-  frame.colEmpty:SetShown(total == 0)
-  if total == 0 then
-    -- The mock's own words, in its own treatment: uppercase and in the Major
-    -- red, not a grey sentence. It is a STATE, and the design gives states the
-    -- same weight as data.
-    frame.colEmpty:SetText(state.source == "drops"
-      and "NO DROPS CURRENTLY"
-      or "NO ITEMS FOR THIS BOSS")
-    if ns.Style then frame.colEmpty:SetTextColor(ns.Style.rgb(ns.Style.COLOR.major)) end
-    frame.colMore:SetText("")
-    for i = 1, COL_ROWS do frame.itemRows[i]:Hide() end
-    return
-  end
+  -- ⚠️ BUNDLED SQUARE ART, MASKED TO A CIRCLE. Two wrong answers preceded it:
+  -- the Encounter Journal's creature icon is WIDE, so a square tile squashed
+  -- every face, and the client's portrait call returns a ROUND unit-frame
+  -- portrait. These are Gloom's Build Barn's files, renamed from its WCL ids to
+  -- the BLIZZARD encounter ids this payload is keyed by.
+  -- ⚠️ TWO FOLDERS, TWO ID SPACES. Raid tiles are encounter ids, dungeon tiles
+  -- are instance ids, and the ranges overlap by coincidence — one folder would
+  -- eventually put a raid boss's face on a dungeon with nothing erroring.
+  -- ⚠️ A NEW TIER NEEDS THE ART COPIED IN, or these fall back to initials.
+  local folder = (ns.ContentMode() == "mplus") and "dungeons" or "bosses"
+  tile.art:SetTexture(("Interface\\AddOns\\HoDLootAdvisor\\Media\\%s\\%d.png")
+    :format(folder, b.id))
+  local drew = tile.art:GetTexture() ~= nil
+  tile.art:SetShown(drew)
+  tile.fallback:SetShown(not drew)
+  tile.initial:SetText(drew and "" or (b.name or "?"):sub(1, 1):upper())
 
+  -- Shown BEFORE the name is written, then written through a forced repaint:
+  -- a recycled row painted while hidden keeps its first blank forever, and a
+  -- boss whose name matches the row's previous occupant would never redraw.
+  tile:Show()
+  setTextForce(tile.name, b.name or "")
+
+  -- ⚠️ THE DIAMOND IS THE MOCK'S OWN, and it was missing entirely. It marks a
+  -- boss holding something best-in-slot FOR YOU, which is the whole reason to
+  -- scan the list — the count used to live in the retired context line, where
+  -- it told you a number without telling you which boss it belonged to.
+  tile.bis:SetShown((b.bis or 0) > 0)
+
+  -- The rule is DROPPED on the expanded row, which is what joins a boss to the
+  -- loot listed beneath it — and is why the mock's expanded row measures one
+  -- pixel shorter than the others.
+  tile.sel:SetShown(en.expanded)
+  tile.rule:SetShown(not en.expanded)
+end
+
+--- Fill ONE item card. Positioning is the column's job; this only writes.
+function fillItemRow(row, e, idx)
   local S = ns.Style
-  -- The sweep runs over EVERY built row, not just the visible count, so rows
-  -- that fall out of the budget when the rail grows are actually hidden.
-  for i = 1, COL_ROWS do
-    local row, e = frame.itemRows[i], (i <= rows) and entries[i + state.colScroll] or nil
-    if not e then
-      row:Hide()
-    else
-      local idx = i + state.colScroll
-      row.entryIndex, row.itemID, row.itemName, row.link = idx, e.itemID, e.name, e.link
+  row.entryIndex, row.itemID, row.itemName, row.link = idx, e.itemID, e.name, e.link
 
-      -- ⚠️ SHOW THE ROW BEFORE WRITING TO IT (Session 254). It was shown at the
-      -- END of this branch, so on the first draw after a client restart every
-      -- line was written into a row that was still hidden, and that first paint
-      -- did not take.
-      row:Show()
+  -- ⚠️ SHOW THE ROW BEFORE WRITING TO IT (Session 254). Written into a hidden
+  -- row, a first paint does not take, and an unchanged string is never repainted.
+  row:Show()
 
-      -- ⚠️ THE LAST WRITER GUARDS TOO. `e.name or "?"` cannot save a row from
-      -- "", and an invisible row is the one failure nobody reports as a bug —
-      -- they report "the addon is broken". If this ever substitutes, the screen
-      -- says "item:270160", which is a bug report rather than a mystery.
-      local shown = e.name
-      if type(shown) ~= "string" or shown == "" then
-        shown = "item:" .. tostring(e.itemID)
-      end
-      setTextForce(row.name, shown)
+  -- ⚠️ THE LAST WRITER GUARDS TOO. `e.name or "?"` cannot save a row from "",
+  -- and an invisible row is the one failure nobody reports as a bug — they
+  -- report "the addon is broken". If this substitutes, the screen says
+  -- "item:270160", which is a bug report rather than a mystery.
+  local shown = e.name
+  if type(shown) ~= "string" or shown == "" then
+    shown = "item:" .. tostring(e.itemID)
+  end
+  setTextForce(row.name, shown)
+  row.sub:SetText(ns.ItemSlotLine(e))
 
-      -- ⚠️ THE VERDICT IS A CHIP NOW, NOT THE FIRST WORD OF THE SLOT LINE. The
-      -- mock puts the slot line on its own — "Back, Cloth" — and gives the
-      -- verdict its own outlined tag on the row below, beside any filled tags.
-      -- Running them into one string was the old two-line card's compromise for
-      -- want of room; the 61-tall card has the room.
-      --
-      -- "NOT FOR YOU" stays deliberately DISTINCT from "UNSCORED": one is the
-      -- system working, the other is our data falling short.
-      local verdict, vColor
-      if e.ineligible then
-        verdict, vColor = "NOT FOR YOU", S and S.COLOR.grey
-      elseif e.reason then
-        verdict, vColor = "UNSCORED", S and S.COLOR.red
-      elseif e.isUpgrade == false then
-        verdict, vColor = "NO UPGRADE", S and S.COLOR.grey
-      else
-        local label, color = badgeOf(e.badge)
-        verdict, vColor = (label or ""):upper(), color
-      end
-      row.sub:SetText(ns.ItemSlotLine(e))
-
-      row:ClearChips()
-      if verdict ~= "" and row.chips[1] then
-        row.chips[1]:Set(verdict, vColor)
-      end
-      -- BIS and TARGET are FILLED chips: facts about the item, true whoever is
-      -- looking. The old marks were images in a gutter, which said the same
-      -- thing with less room for a word.
-      local q = e.quality
-      local nextChip = 2
-      if q and q.bis and row.chips[nextChip] then
-        row.chips[nextChip]:Set(ns.BIS_SHORT[q.bis] or "BIS")
-        nextChip = nextChip + 1
-      end
-      if e.targeted and row.chips[nextChip] then
-        row.chips[nextChip]:Set("TARGET")
-      end
-      row:LayoutChips()
-
-      -- ⚠️ THE GUTTER MARKS ARE RETIRED WITH THE CHIPS THAT REPLACED THEM. Two
-      -- signals for one fact, on one card, is how a list stops being scannable.
-      row.markTarget:Hide()
-      row.markBis:Hide()
-
-      local selected = (idx == state.sel)
-      row._selected = selected
-      row:PaintGround(false)
-      -- Shown at the TOP of this branch now, before anything is written into it.
-    end
+  -- "NOT FOR YOU" stays deliberately DISTINCT from "UNSCORED": one is the
+  -- system working, the other is our data falling short.
+  local verdict, vColor
+  if e.ineligible then
+    verdict, vColor = "NOT FOR YOU", S and S.COLOR.grey
+  elseif e.reason then
+    verdict, vColor = "UNSCORED", S and S.COLOR.red
+  elseif e.isUpgrade == false then
+    verdict, vColor = "NO UPGRADE", S and S.COLOR.grey
+  else
+    local label, color = badgeOf(e.badge)
+    verdict, vColor = (label or ""):upper(), color
   end
 
-  frame.colMore:SetText(total > rows
-    and ("%d–%d of %d · scroll"):format(state.colScroll + 1,
-      math.min(total, state.colScroll + rows), total) or "")
+  row:ClearChips()
+  if verdict ~= "" and row.chips[1] then row.chips[1]:Set(verdict, vColor) end
+  -- BIS and TARGET are FILLED chips: facts about the item, true whoever is
+  -- looking. The old gutter marks said the same thing with less room for a word.
+  local q, nextChip = e.quality, 2
+  if q and q.bis and row.chips[nextChip] then
+    row.chips[nextChip]:Set(ns.BIS_SHORT[q.bis] or "BIS")
+    nextChip = nextChip + 1
+  end
+  if e.targeted and row.chips[nextChip] then row.chips[nextChip]:Set("TARGET") end
+  row:LayoutChips()
+
+  row.markTarget:Hide()
+  row.markBis:Hide()
+
+  row._selected = (idx == state.sel)
+  row:PaintGround(false)
 end
 
 --- The header's verdict badge: the viewer's own answer for this item.
@@ -2585,9 +2550,6 @@ local function renderItemIdentity(entry)
   local icon = entry.icon
   if not icon and GetItemIcon then icon = GetItemIcon(entry.itemID) end
   frame.itemIcon:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
-  if frame.itemIcon.SetMask then
-    pcall(frame.itemIcon.SetMask, frame.itemIcon, CIRCLE_MASK)
-  end
   frame.itemIcon:Show()
   frame.itemHover.link = entry.link
   frame.itemHover:Show()
@@ -2601,8 +2563,10 @@ local function renderItemIdentity(entry)
   local slotLine = ns.ItemSlotLine(entry)
   if slotLine ~= "" then bits[#bits + 1] = slotLine end
   if entry.candidateTrack then bits[#bits + 1] = entry.candidateTrack end
+  -- "Item Level 305", the mock's wording. The abbreviation belongs in the
+  -- table's column heading, where the space is genuinely tight.
   if (entry.candidateIlvl or 0) > 0 then
-    bits[#bits + 1] = ("ilvl %d"):format(entry.candidateIlvl)
+    bits[#bits + 1] = ("Item Level %d"):format(entry.candidateIlvl)
   end
   -- ⚠️ THE BULLETS ARE #632753, NOT THE TEXT COLOUR. The mock colours the two
   -- separators in this line differently from the words either side of them, and
@@ -2877,7 +2841,6 @@ end
 local function renderLoot()
   local entries = itemEntries()
   Panel._entries = entries
-  renderBossStrip()
 
   -- The boss context: which boss, and how much of its table matters to you.
   local bosses = bossList()
@@ -2894,7 +2857,7 @@ local function renderLoot()
     frame.bossSub:SetText(("For You: %d BIS %s %d Targets"):format(bis, BAR, targets))
   end
 
-  renderItemColumn(entries)
+  renderColumn(entries)
 
   local entry = entries[state.sel]
 
@@ -3293,13 +3256,6 @@ function Panel.Scroll(delta)
   Panel.Refresh()
 end
 
---- Scroll the boss rail. Clamped in the renderer, which is the only place that
---- knows how long the list is.
-function Panel.ScrollBosses(delta)
-  state.bossScroll = math.max(0, state.bossScroll + delta)
-  Panel.Refresh()
-end
-
 function Panel.ScrollColumn(delta)
   state.colScroll = math.max(0, state.colScroll + delta)
   Panel.Refresh()
@@ -3428,14 +3384,11 @@ function Panel.Refresh()
 
   -- The boss strip, the context line and the two filter toggles belong to the
   -- Loot tab: on the others they would offer navigation that changes nothing.
-  frame.strip:SetShown(onLoot)
   -- ⚠️ NOT bossName / bossSub. They are RETIRED — the rail names its own bosses
   -- now — and this line was switching them back on for the Loot tab, so the
   -- boss name and "For You: 1 BIS | 0 Targets" drew straight through the first
   -- rail row. Hiding something at build is not enough if a refresh shows it.
-  -- stripMore manages its own visibility in renderBossStrip, from the count of
-  -- bosses actually off-screen.
-  if not onLoot then frame.stripMore:Hide() end
+
   for _, s in ipairs({ frame.swSource, frame.swFilter }) do
     if s then
       s:SetShown(onLoot)
@@ -3496,7 +3449,13 @@ function Panel.Refresh()
   -- The Vault toggle rides with the difficulty control, but only once a content
   -- choice has actually been made and only if the payload knows the levels.
   if frame.vault then
-    frame.vault:SetShown(onLoot and ns.VaultShown())
+    -- ⚠️ NO LONGER HIDDEN ON AUTO, and that REVERSES the Session 252 gate. That
+    -- rule said "the vault level of whatever this is" was a claim with no
+    -- stated subject — which was true when AUTO showed only the word "Auto".
+    -- It now reads "Auto: Heroic", so the subject IS stated and the reason has
+    -- lapsed. What remains is the honest half: no checkbox if the payload
+    -- carries no vault table, because then there is no number to compute.
+    frame.vault:SetShown(onLoot and ns.VaultLevelsKnown())
     -- Re-read rather than trust the widget: the setting is also reachable from
     -- the Settings window, and the two must never disagree on screen.
     frame.vault:SetChecked(ns.VaultOn())

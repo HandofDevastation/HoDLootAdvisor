@@ -3456,18 +3456,20 @@ header("Dungeons as a content mode — tiles, pooled loot, and scoring")
         "this is the exact pair that read 318 on screen and 311 in the tooltip")
 
   -- ── When the toggle is OFFERED ────────────────────────────────────────────
-  -- ⚠️ NOT ON AUTO. The panel is then following whichever instance you stand in,
-  -- so "the vault level of whatever this is" names no content — and it would
-  -- silently change meaning when you zoned.
+  -- ⚠️ ON AUTO TOO, SINCE SESSION 257, and that REVERSES what this block used to
+  -- assert. The old rule refused the toggle on AUTO because "the vault level of
+  -- whatever this is" named no content. The control now reads "Auto: Heroic" —
+  -- it states the content it resolved to, on screen, and updates when you zone —
+  -- so the reason lapsed, while the cost of a checkbox that is in the design and
+  -- missing from the game did not.
   local savedDiff = ns.Settings.Get("difficulty")
   local savedVault = ns.Settings.Get("vault")
 
   ns.Settings.Set("difficulty", "AUTO")
-  check("the Vault toggle is not offered on AUTO", ns.VaultShown() == false)
+  check("the Vault toggle is offered on AUTO, which names its own content now",
+        ns.VaultShown() == true)
   ns.Settings.Set("vault", "on")
-  check("...and stays off even if the setting was left on",
-        ns.VaultOn() == false,
-        "a setting that persists past the control that sets it is a silent state")
+  check("...and reads the stored setting there", ns.VaultOn() == true)
 
   ns.Settings.Set("difficulty", "HEROIC")
   check("the Vault toggle is offered once a difficulty is chosen", ns.VaultShown() == true)

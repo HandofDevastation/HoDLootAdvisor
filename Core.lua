@@ -1419,16 +1419,27 @@ function ns.ApplyVault(rec, diffKey, ilvl, bonusIDs)
   return ilvl, bonusIDs, reward
 end
 
+--- Does the payload know vault levels at all? The only remaining reason to hide
+--- the toggle: with no table there is no number to compute, so offering the
+--- control would promise something nothing can answer.
+function ns.VaultLevelsKnown()
+  return ns.HasVaultData()
+end
+
 --- Should the Vault toggle be OFFERED?
 ---
---- Only once a CONTENT choice has been made. On AUTO the panel follows whichever
---- instance you are standing in, and "the vault level of whatever this is" is a
---- claim with no stated subject — worse, it would silently change meaning when
---- you zoned. And only if the payload knows the levels at all.
+--- ⚠️ THE AUTO GATE IS GONE (Session 257) and this REVERSES the Session 252
+--- rule rather than quietly dropping it. That rule refused to offer the toggle
+--- on AUTO because "the vault level of whatever this is" was a claim with no
+--- stated subject — correct at the time, when the control read only "Auto". It
+--- now reads "Auto: Heroic": the subject IS stated, it is visible on screen, and
+--- it updates when you zone. The reason lapsed when that label changed.
+---
+--- What was actually costing us was the control VANISHING. A checkbox that is
+--- present in the design and absent in the game reads as a missing feature, and
+--- it took a screenshot from Jason to surface it.
 function ns.VaultShown()
-  local v = ns.Settings and ns.Settings.Get("difficulty") or "AUTO"
-  if v == "AUTO" then return false end
-  return ns.HasVaultData()
+  return ns.VaultLevelsKnown()
 end
 
 --- Is the viewer asking for vault levels right now?

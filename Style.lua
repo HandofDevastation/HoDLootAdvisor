@@ -133,13 +133,12 @@ Style.COLOR = {
   -- once and aliased below rather than as two identical literals, so a retune
   -- cannot move one and leave the other — this file exists to stop exactly that.
   rim       = hex("d9cee2"),   -- hairline, drawn at 0.4 alpha
-  -- The bottom warmth: a vertical wash from transparent to orange over the
-  -- lower 60% of the window. WoW gradients have two stops and no midpoint, so
-  -- the 40% stop in the design becomes the TEXTURE'S HEIGHT rather than a
-  -- third colour — same result, and it cannot drift the way a guessed
-  -- mid-colour would.
+  -- ⚠️ UNUSED SINCE SESSION 257 and kept only so the Session 250 note above
+  -- still parses: the panel's ground is FLAT in the current design. Nothing
+  -- reads these two. Delete them with the next tidy-up, not silently now — a
+  -- token that vanishes mid-redesign is how a dangling read gets shipped.
   glowAlpha = 0.12,
-  glowFrom  = 0.40,            -- fraction of the window height the wash starts at
+  glowFrom  = 0.40,
 
   -- ── Text (Session 251 — READ OUT OF THE FIGMA MOCK, not the website) ──────
   --
@@ -345,25 +344,57 @@ end
 --- WoW has no border-radius and no CSS border, so the site's hairline card edge
 --- becomes four 1px textures. Returns a handle with SetColor so a frame can
 --- recolour its own rim (a selected chip brightens rather than redrawing).
-function Style.Rim(frame, color, alpha, thickness)
+--- A 1px rim around a frame, as four edge textures.
+---
+--- WoW has no border-radius and no CSS border, so the site's hairline card edge
+--- becomes four 1px textures. Returns a handle with SetColor so a frame can
+--- recolour its own rim.
+---
+--- ⚠️ IT CAN BE A GRADIENT, and in this design it IS. Pass `color2` and the rim
+--- runs vertically from `color` at the top to `color2` at the bottom. Figma's
+--- code output FLATTENS a gradient stroke to a single hex — the tab row reads
+--- back as a flat #6f2b57 — so a border that looked solid in the generated CSS
+--- is not solid in the file. That flattening is a known trap and it was walked
+--- into anyway; the mechanism lives here so correcting the stops is one edit.
+---
+--- The two horizontal edges take the gradient's endpoints (a 1px strip has no
+--- room for a ramp), and the two vertical edges carry the ramp itself. That is
+--- the same result a real gradient stroke produces on a rectangle.
+function Style.Rim(frame, color, alpha, thickness, color2)
   local c = color or Style.COLOR.border
   local a = alpha or 1
-  local t = thickness or 1
+  local th = thickness or 1
   local e = {}
   for _, side in ipairs({ "top", "bottom", "left", "right" }) do
     local tex = frame:CreateTexture(nil, "BORDER")
     tex:SetColorTexture(c.r, c.g, c.b, a)
     e[side] = tex
   end
-  e.top:SetPoint("TOPLEFT");     e.top:SetPoint("TOPRIGHT");     e.top:SetHeight(t)
-  e.bottom:SetPoint("BOTTOMLEFT"); e.bottom:SetPoint("BOTTOMRIGHT"); e.bottom:SetHeight(t)
-  e.left:SetPoint("TOPLEFT");    e.left:SetPoint("BOTTOMLEFT");  e.left:SetWidth(t)
-  e.right:SetPoint("TOPRIGHT");  e.right:SetPoint("BOTTOMRIGHT"); e.right:SetWidth(t)
-  function e:SetColor(nc, na)
+  e.top:SetPoint("TOPLEFT");     e.top:SetPoint("TOPRIGHT");     e.top:SetHeight(th)
+  e.bottom:SetPoint("BOTTOMLEFT"); e.bottom:SetPoint("BOTTOMRIGHT"); e.bottom:SetHeight(th)
+  e.left:SetPoint("TOPLEFT");    e.left:SetPoint("BOTTOMLEFT");  e.left:SetWidth(th)
+  e.right:SetPoint("TOPRIGHT");  e.right:SetPoint("BOTTOMRIGHT"); e.right:SetWidth(th)
+
+  --- One colour, or two for a vertical ramp. Guarded: CreateColor and
+  --- SetGradient are modern-client globals, and a missing one must leave a flat
+  --- rim rather than error on the frame that draws everything.
+  function e:SetColor(nc, na, nc2)
+    na = na or 1
     for _, side in ipairs({ "top", "bottom", "left", "right" }) do
-      self[side]:SetColorTexture(nc.r, nc.g, nc.b, na or 1)
+      self[side]:SetColorTexture(nc.r, nc.g, nc.b, na)
+    end
+    if not nc2 then return end
+    if not (CreateColor and self.top.SetGradient) then return end
+    -- VERTICAL puts the FIRST colour at the BOTTOM, so the stops go in reversed.
+    self.top:SetColorTexture(nc.r, nc.g, nc.b, na)
+    self.bottom:SetColorTexture(nc2.r, nc2.g, nc2.b, na)
+    for _, side in ipairs({ "left", "right" }) do
+      pcall(self[side].SetGradient, self[side], "VERTICAL",
+        CreateColor(nc2.r, nc2.g, nc2.b, na), CreateColor(nc.r, nc.g, nc.b, na))
     end
   end
+
+  e:SetColor(c, a, color2)
   return e
 end
 
@@ -450,23 +481,12 @@ function Style.PanelGround(frame, height)
   bg:SetColorTexture(C.ground.r, C.ground.g, C.ground.b, 1)
   frame.bgTex = bg
 
-  local glow = frame:CreateTexture(nil, "BACKGROUND", nil, -7)
-  glow:SetPoint("BOTTOMLEFT", 1, 1)
-  glow:SetPoint("BOTTOMRIGHT", -1, 1)
-  glow:SetHeight(math.floor((height or frame:GetHeight() or 560) * (1 - C.glowFrom)))
-  glow:SetColorTexture(1, 1, 1, 1)
-  -- CreateColor is guarded: it is a modern-client global, and a missing one must
-  -- leave a flat panel rather than error on the frame that draws everything.
-  if CreateColor and glow.SetGradient then
-    -- VERTICAL puts the FIRST colour at the bottom. The warmth belongs at the
-    -- bottom edge, so the opaque end goes first.
-    pcall(glow.SetGradient, glow, "VERTICAL",
-      CreateColor(C.orange.r, C.orange.g, C.orange.b, C.glowAlpha),
-      CreateColor(C.orange.r, C.orange.g, C.orange.b, 0))
-  else
-    glow:SetColorTexture(C.orange.r, C.orange.g, C.orange.b, C.glowAlpha * 0.5)
-  end
-  frame.glowTex = glow
+  -- ⚠️ NO WARM WASH (Session 257). A vertical orange gradient used to rise from
+  -- the bottom 60% of the panel, taken from the Session 250 mock. THE CURRENT
+  -- DESIGN HAS NO GRADIENT IN ITS GROUND — every frame in the Figma file is a
+  -- flat #0c0721 — so the wash was this addon's invention surviving a redesign
+  -- that replaced the surface it was painted on. Removed rather than retuned.
+  frame.glowTex = nil
 
   frame.rim = Style.Rim(frame, C.rim, 0.4)
   return frame
@@ -692,6 +712,43 @@ function Style.LayoutRow(controls, anchorTo, x, y, gap)
   return cursor - gap - (x or 0)
 end
 
+--- Round a texture off to a circle.
+---
+--- ⚠️ SetMask(path) DID NOT WORK and this is the replacement. Applied to the
+--- boss portraits and the detail icon it produced striped noise, then — once
+--- the ordering was fixed so an image was in place first — simply no circle at
+--- all. The supported modern path is a MaskTexture object added to the texture,
+--- not a file path handed to the texture itself.
+---
+--- Two sources for the mask, tried in order: the CircleMaskScalable ATLAS,
+--- which is built to be resized and is what Blizzard's own round frames use,
+--- and the old TempPortraitAlphaMask FILE as a fallback for a client that does
+--- not carry the atlas. Failing both, the icon stays SQUARE — untidy, and far
+--- better than invisible.
+---
+--- The mask must be anchored to the texture rather than to its parent: the
+--- portraits are 28px inside a 200px row, and a mask sized to the row would
+--- round the row.
+function Style.Round(parent, tex)
+  if not parent or not tex or not parent.CreateMaskTexture then return end
+  local ok, mask = pcall(parent.CreateMaskTexture, parent)
+  if not ok or not mask then return end
+
+  local applied = false
+  if mask.SetAtlas then
+    applied = pcall(mask.SetAtlas, mask, "CircleMaskScalable")
+  end
+  if not applied and mask.SetTexture then
+    applied = pcall(mask.SetTexture, mask,
+      "Interface\\CharacterFrame\\TempPortraitAlphaMask")
+  end
+  if not applied then return end
+
+  mask:SetAllPoints(tex)
+  if tex.AddMaskTexture then pcall(tex.AddMaskTexture, tex, mask) end
+  return mask
+end
+
 --- A chip: the small tag that appears beside a raider's row and on an item card.
 ---
 --- ⚠️ TWO KINDS, AND THE KIND CARRIES MEANING. Read off the mock, not invented:
@@ -858,35 +915,40 @@ end
 function Style.Check(parent, label, boxSize)
   local btn = CreateFrame("Button", nil, parent)
   btn._hodStyled = true
-  local s = boxSize or 14
+  local s = boxSize or 16
 
+  -- ⚠️ READ OFF THE NODE (Session 257): a 16px square with a 1px #6f2b57 rim
+  -- and NO fill — the same rim as an inactive tab, which is what makes the two
+  -- controls in that corner read as one pair. It used to be an ORANGE rim over
+  -- the dark surface, a colour this design does not contain.
   btn.box = CreateFrame("Frame", nil, btn)
   btn.box:SetSize(s, s)
   btn.box:SetPoint("LEFT", 0, 0)
-  btn.box.bg = btn.box:CreateTexture(nil, "BACKGROUND")
-  btn.box.bg:SetAllPoints()
-  btn.box.bg:SetColorTexture(Style.rgb(Style.COLOR.bg))
-  btn.box.rim = Style.Rim(btn.box, Style.COLOR.orange, 1)
+  btn.box.rim = Style.Rim(btn.box, Style.COLOR.controlRim, 1)
 
+  -- ⚠️ THE TICK IS THE DESIGN'S OWN PATH, EXPORTED, NOT BLIZZARD'S CHECKMARK.
+  -- It was UI-CheckBox-Check, which is a chunky gold-ish glyph that overhung
+  -- its box. The mock draws a 2px round-capped stroke in #f2bdad, 10x7 inside
+  -- 4px of padding, which is what Media/ui/check.png is.
   btn.tick = btn.box:CreateTexture(nil, "OVERLAY")
-  btn.tick:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-  btn.tick:SetPoint("CENTER", 0, 0)
-  btn.tick:SetSize(s + 6, s + 6)
-  btn.tick:SetVertexColor(Style.rgb(Style.COLOR.orange))
+  btn.tick:SetTexture("Interface\\AddOns\\HoDLootAdvisor\\Media\\ui\\check.png")
+  btn.tick:SetSize(10, 7)
+  btn.tick:SetPoint("CENTER")
   btn.tick:Hide()
 
   btn.text = btn:CreateFontString(nil, "OVERLAY")
-  Style.SetFont(btn.text, Style.FONT.titleMed, Style.SIZE.head)
-  btn.text:SetTextColor(Style.rgb(Style.COLOR.white))
+  Style.SetFont(btn.text, Style.FONT.light, Style.SIZE.label)
+  btn.text:SetTextColor(Style.rgb(Style.COLOR.body))
   btn.text:SetJustifyH("LEFT")
-  btn.text:SetPoint("LEFT", btn.box, "RIGHT", 6, 0)
+  -- 22 from the box's left edge: 16 wide plus the mock's 6px gap.
+  btn.text:SetPoint("LEFT", btn.box, "LEFT", 22, 0)
   btn:SetFontString(btn.text)
   btn.text:SetText(label or "")
 
   btn:SetHeight(math.max(s, 16))
-  -- Width follows the label, so the caller can right-align the control without
-  -- knowing how long the word is.
-  btn:SetWidth(s + 6 + (btn.text:GetStringWidth() or 30))
+  -- Width follows the label, so a caller can place the control without knowing
+  -- how long the word is.
+  btn:SetWidth(22 + (btn.text:GetStringWidth() or 60))
 
   function btn:SetChecked(on)
     self._checked = on and true or false
