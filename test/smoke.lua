@@ -2714,7 +2714,10 @@ header("Today's drops and the winner lookup (what the Loot tab reads)")
   -- fires when the window OPENS and who won arrives minutes later on a rescan.
   local db = _G.HoDLootAdvisorDB
   local saved = db.loot
-  local today = os.date("%Y-%m-%d")
+  -- The STUB's date, not the machine's: "today" has to mean what the addon
+  -- thinks it means, and since Session 256 the harness clock is frozen so that
+  -- generated fixtures stop changing on every run.
+  local today = date("%Y-%m-%d")
 
   db.loot = { sessions = {
     { date = "1999-01-01", items = { { itemID = 111, itemName = "Ancient", winner = "Nobody" } } },

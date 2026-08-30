@@ -1101,7 +1101,10 @@ if hasClaim then
     check("...B has it now", nsA.Comms.RunnerName() == bKey, tostring(nsA.Comms.RunnerName()))
 
     stub.Use(A)
-    A.db.runnerClaim = { who = aKey, at = os.time() - (9 * 3600), explicit = true }
+    -- Aged against the STUB's clock, which is what the addon reads. Using the
+    -- machine's put the two nine hours apart in the wrong direction once the
+    -- harness clock was frozen in Session 256.
+    A.db.runnerClaim = { who = aKey, at = time() - (9 * 3600), explicit = true }
     check("a claim from a previous night is not fresh", nsA.Comms.ClaimIsFresh() == false)
     stub.Fire("GROUP_ROSTER_UPDATE")
     pump(A, 5000); pump(B, 5000)
@@ -1239,7 +1242,8 @@ header("a HELLO is ANSWERED — nobody re-announces on their own")
 local HELLO_REPLY_WINDOW = 60
 
 do
-  -- ⚠️ THE HARNESS CLOCK IS THE REAL ONE (the stub sets _G.time = os.time), so
+  -- ⚠️ THE HARNESS CLOCK DOES NOT MOVE (frozen at stub.epoch since Session 256;
+  -- before that it was the machine's, which barely moved either), so
   -- a reply A sent in an earlier section is still inside HELLO_REPLY_INTERVAL
   -- and the rate limit would swallow this one — the test would then fail for a
   -- reason that has nothing to do with what it is checking. Moved past the

@@ -60,6 +60,19 @@ lua test/parity.lua     # the scorer against the website, 276,480 cases
 committed — 140 MB of cases produced by the real TypeScript engine at
 `/api/loot-advisor/parity-fixtures`.
 
+**Run parity twice — the game runs Lua 5.1 and the full fixture cannot.** Its
+single chunk holds more than 5.1's ceiling of 65,536 constants, so a 5.1 parser
+refuses the file and every parity run before Session 256 was under 5.4 or 5.5.
+The 5.4 run now writes `test/fixtures-sample.lua` — one case per structural
+shape, ~8,600 of them — which 5.1 can compile:
+
+```
+lua5.4 test/parity.lua   # all 276,480 cases, and writes the sample
+luajit test/parity.lua   # the sample, under a 5.1 parser
+```
+
+The other harnesses already run under both and should be run both ways too.
+
 **The website is the oracle.** Nothing here may quietly disagree with
 `app/lib/loot-advisor.ts`. Any change to scoring is a change to both
 implementations, plus a fixture regeneration and a parity re-run.

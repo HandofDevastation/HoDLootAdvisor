@@ -201,8 +201,28 @@ function stub.Install()
     return f
   end
 
-  _G.time = os.time
-  _G.date = os.date
+  -- ⚠️ A FIXED WALL CLOCK, and it is not tidiness (Session 256). These were
+  -- os.time / os.date, so every fixture this harness GENERATES carried the
+  -- moment the suite happened to run. test/export.txt is TRACKED and is written
+  -- by smoke.lua, so it changed on every single run and `git diff` showed churn
+  -- forever — which trains everyone to wave that file through.
+  --
+  -- IT DESTROYS A PROOF THIS SUITE ACTUALLY CITES. smoke.lua's roll-state block
+  -- argues the Session 255 renumbering was faithful BECAUSE the expected export
+  -- did not change. A file that always changes cannot carry that argument, and
+  -- a real change to it would have been indistinguishable from the timestamps
+  -- moving. Frozen, the file is byte-stable and any diff is a behaviour change.
+  --
+  -- UTC rather than local, so the fixture is identical here and in CI. GetTime
+  -- below is the FRAME clock and is a different thing — it still advances,
+  -- because code that measures how long a send took needs it to.
+  stub.epoch = 1788030000   -- 2026-08-29 12:20:00 UTC. Arbitrary, chosen once.
+  _G.time = function() return stub.epoch end
+  _G.date = function(fmt, t)
+    fmt = fmt or "%c"
+    if fmt:sub(1, 1) ~= "!" then fmt = "!" .. fmt end
+    return os.date(fmt, t or stub.epoch)
+  end
 
   -- Timers are QUEUED, not fired. The recorder coalesces its scans behind
   -- C_Timer.After, and a stub that ran callbacks immediately would hide whether

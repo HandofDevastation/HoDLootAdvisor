@@ -16,11 +16,46 @@
 package.path = "./?.lua;" .. package.path
 local Scoring = require("Scoring")
 
+-- ⚠️ THE GAME RUNS LUA 5.1 AND THIS HARNESS COULD NEVER BE RUN UNDER IT
+-- (discovered Session 256). fixtures.lua is ~147 MB and its single main chunk
+-- holds far more than 5.1's ceiling of 65,536 constants, so a 5.1 parser refuses
+-- the file outright — "main function has more than 65536 constants" — and every
+-- parity run this project has ever done was under 5.4 or 5.5.
+--
+-- That is the exact shape of the trap that stopped Panel.lua loading in Session
+-- 250: verifying against a different language from the one that will execute.
+-- The risk here is milder — the scorer contains no string formatting at all, and
+-- its one sensitive construct is math.floor(x + 0.5), whose VALUE is identical
+-- in both and whose type difference (5.3+ returns an integer, 5.1 a float) is
+-- invisible to `==`. Milder is not proven, and this harness exists precisely
+-- because "the numbers are probably the same" is not a category when the addon
+-- and the website disagree in front of the raid.
+--
+-- THE ANSWER IS A SAMPLE, NOT A SMALLER MATRIX. A run under 5.4 writes
+-- fixtures-sample.lua — every Nth case, chosen deterministically so the file is
+-- stable — which is small enough for 5.1 to compile. `luajit test/parity.lua`
+-- then runs that, and the two interpreters have to agree. The full 276k matrix
+-- keeps running under 5.4 exactly as before.
+local SAMPLE_PATH = "test/fixtures-sample.lua"
+local SAMPLE_TARGET = 2000
+
 local ok, fixtures = pcall(dofile, "test/fixtures.lua")
+local sampled = false
+
 if not ok or type(fixtures) ~= "table" then
-  io.stderr:write("could not load test/fixtures.lua — regenerate it first:\n")
-  io.stderr:write("  curl -s localhost:3000/api/loot-advisor/parity-fixtures -o test/fixtures.lua\n")
-  os.exit(2)
+  local sOk, sample = pcall(dofile, SAMPLE_PATH)
+  if sOk and type(sample) == "table" then
+    fixtures, sampled = sample, true
+  else
+    io.stderr:write("could not load test/fixtures.lua.\n\n")
+    io.stderr:write("If this is a Lua 5.1 parser (luajit), that is EXPECTED: the full\n")
+    io.stderr:write("fixture exceeds 5.1's constant limit. Run it once under 5.4 first,\n")
+    io.stderr:write("which writes " .. SAMPLE_PATH .. ", then run this again:\n")
+    io.stderr:write("  lua5.4 test/parity.lua && luajit test/parity.lua\n\n")
+    io.stderr:write("Otherwise the fixture is missing — regenerate it:\n")
+    io.stderr:write("  curl -s localhost:3000/api/loot-advisor/parity-fixtures -o test/fixtures.lua\n")
+    os.exit(2)
+  end
 end
 
 -- Fields compared per case. Every one of them is a real branch in the engine,
@@ -85,7 +120,105 @@ for _, case in ipairs(fixtures) do
   end
 end
 
-print(string.format("parity: %d cases, %d matched, %d differed", total, total - failed, failed))
+-- ── The 5.1 sample ──────────────────────────────────────────────────────────
+--
+-- Written by the FULL run so it can never describe a different matrix from the
+-- one that just passed. Serialised rather than copied out of the source file
+-- because the cases have to be re-emitted as a NEW chunk — the whole problem is
+-- that the original chunk cannot be compiled by the interpreter this is for.
+--
+-- Deterministic stride, not a random draw: a sample that changes every run
+-- cannot be diffed, and a failure that appears once and vanishes is worse than
+-- no test. Same reasoning as freezing the harness clock.
+local function serialize(v)
+  local t = type(v)
+  if t == "string" then return string.format("%q", v) end
+  if t == "number" or t == "boolean" then return tostring(v) end
+  if t ~= "table" then return "nil" end
+
+  local parts = {}
+  -- Array part first, then the named keys sorted — a stable order is what makes
+  -- the file diffable at all.
+  local n = #v
+  for i = 1, n do parts[#parts + 1] = serialize(v[i]) end
+  local keys = {}
+  for k in pairs(v) do
+    if not (type(k) == "number" and k >= 1 and k <= n) then keys[#keys + 1] = k end
+  end
+  table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+  for _, k in ipairs(keys) do
+    parts[#parts + 1] = string.format("[%q]=%s", tostring(k), serialize(v[k]))
+  end
+  return "{" .. table.concat(parts, ",") .. "}"
+end
+
+-- ⚠️ STRATIFIED, NOT A STRIDE, AND THE FIRST VERSION WAS A STRIDE (Session 256).
+-- Every Nth case LOOKED like a fair sample and was not: two thirds of the matrix
+-- carries both stats and a spec, yet a 2,004-case stride reached the stat
+-- alignment branch 13 times. The stride resonated with the order the matrix is
+-- generated in, so it kept landing on the same corner of it.
+--
+-- The tell was a revert-check that would not bite — breaking the rounder changed
+-- nothing, and the instinct to call the guard redundant is exactly what the
+-- standing rule says to distrust. Keying on the SHAPE of a case instead takes
+-- one of each structural combination the matrix contains, so every branch is
+-- represented whatever order the generator emits them in.
+local function shapeKey(i)
+  return table.concat({
+    tostring(i.slot), tostring(i.stat_label), tostring(i.spec_label),
+    tostring(i.ranked_tier), tostring(i.bis), tostring(i.is_tier),
+    tostring(i.equipped_track), tostring(i.candidate_track),
+  }, "|")
+end
+
+if not sampled then
+  local picked, seen = {}, {}
+  for i = 1, total do
+    local key = shapeKey(fixtures[i].input)
+    if not seen[key] then
+      seen[key] = true
+      picked[#picked + 1] = i
+    end
+  end
+
+  -- A stride ON TOP, for numeric variety within each shape — item levels, piece
+  -- counts and owned levels move independently of the shape key. Bounded,
+  -- because 5.1's constant ceiling is the entire reason this file exists.
+  local room = SAMPLE_TARGET - #picked
+  if room > 0 then
+    local stride = math.max(1, math.floor(total / room))
+    for i = 1, total, stride do
+      local key = shapeKey(fixtures[i].input) .. "#" .. tostring(i)
+      if not seen[key] then
+        seen[key] = true
+        picked[#picked + 1] = i
+      end
+    end
+  end
+  table.sort(picked)
+
+  local out = io.open(SAMPLE_PATH, "w")
+  if out then
+    out:write("-- fixtures-sample.lua — GENERATED by test/parity.lua. Do not edit.\n")
+    out:write("--\n")
+    out:write("-- A stratified sample of test/fixtures.lua — one case per structural shape,\n")
+    out:write("-- plus a stride for numeric variety — re-emitted as a chunk a LUA 5.1 parser\n")
+    out:write("-- can actually compile. The full fixture cannot be: it exceeds 5.1's 65,536-\n")
+    out:write("-- constant ceiling, so `luajit test/parity.lua` could never run the matrix\n")
+    out:write("-- that gates every release. WoW runs 5.1.\n")
+    out:write("return {\n")
+    for _, i in ipairs(picked) do
+      out:write("  ", serialize(fixtures[i]), ",\n")
+    end
+    out:write("}\n")
+    out:close()
+    print(string.format("wrote %s — %d of %d cases, for the 5.1 run", SAMPLE_PATH, #picked, total))
+  end
+end
+
+print(string.format("parity: %d cases, %d matched, %d differed%s",
+  total, total - failed, failed,
+  sampled and "  (SAMPLE, under a Lua 5.1 parser)" or ""))
 
 if failed > 0 then
   print("\nmismatches by field:")
@@ -97,5 +230,7 @@ if failed > 0 then
   os.exit(1)
 end
 
-print("PASS — the Lua port agrees with the website on every case.")
+print(sampled
+  and "PASS — the Lua port agrees with the website under a 5.1 parser too."
+  or  "PASS — the Lua port agrees with the website on every case.")
 os.exit(0)
