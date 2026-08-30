@@ -36,6 +36,10 @@ stub.instance = {
 -- Item data for things that are NOT equipped — the drops a test hands to the
 -- recorder. Keyed by itemID: { name, quality, ilvl, itemType }.
 stub.items = {}
+-- itemID -> INVTYPE_*, for the items whose slot the CLIENT is the authority on.
+-- Empty by default: a test that needs a slot stages it, rather than inheriting
+-- whatever the fixtures happen to carry.
+stub.itemEquipLoc = {}
 
 -- What C_LootHistory reports, keyed by encounter id. A test assigns
 -- stub.lootHistory[2849] = { <EncounterLootDropInfo>, ... } and the recorder
@@ -607,7 +611,14 @@ function stub.Install()
       or tonumber(tostring(idOrLink):match("|?H?item:(%d+)"))
     if not itemID then return nil end
     local classID = (stub.itemClass or {})[itemID] or 4
-    return itemID, "Armor", "Mail", "INVTYPE_CHEST", 0, classID, 3
+    -- ⚠️ THE EQUIP LOCATION IS NOW ANSWERABLE PER ITEM (Session 258). It was a
+    -- flat INVTYPE_CHEST for every id, which was harmless while nothing read it
+    -- — and stopped being harmless the moment the Slots page did: 232 BIS items
+    -- are not in our payload, so the CLIENT is what says which slot they belong
+    -- to, and a stub that answers "chest" for all of them files the whole BIS
+    -- list under one row. Unlisted ids keep the old answer.
+    local equipLoc = (stub.itemEquipLoc or {})[itemID] or "INVTYPE_CHEST"
+    return itemID, "Armor", "Mail", equipLoc, 0, classID, 3
   end
 
   _G.GetInstanceInfo = function()

@@ -633,6 +633,283 @@ function ns.BisCountsByInstance()
 end
 
 -- ---------------------------------------------------------------------------
+-- The Slots page (Session 258)
+-- ---------------------------------------------------------------------------
+--
+-- TWO THINGS PER SLOT: the item you want, and where it comes from. Everything
+-- here answers the second half; the first is one lookup.
+--
+-- In Core rather than Panel.lua for the reason every other piece of logic is:
+-- no harness loads a window file, so anything written there ships never having
+-- run. Panel.lua renders the table this returns and decides nothing.
+
+--- The rail, in the MOCK'S OWN ORDER, which is the character sheet's order and
+--- not our payload's.
+---
+--- ⚠️ RINGS AND TRINKETS ARE ONE ROW EACH, NEVER NUMBERED (Jason). They are
+--- interchangeable sockets that happen to number two, so there is no "BIS for
+--- Trinket 1" — `sockets` is what carries the pairing, and it is used for
+--- exactly two things: the one-of-two check state, and not claiming you are
+--- done when one socket is still wrong.
+---
+--- `tex` is the name GetInventorySlotInfo answers to, so the icons come from
+--- the CLIENT and no art has to be copied in at a new tier — unlike the boss
+--- portraits, which do.
+---
+--- ⚠️ BACK ASKS FOR THE CHEST TEXTURE ON PURPOSE. There is no separate cloak
+--- texture in the paperdoll set, and the mock draws Back with the chest icon,
+--- so 13 icons cover the 14 loot-bearing rows. Reading "BACKSLOT" here would
+--- diverge from the design for no gain.
+ns.SLOT_ROWS = {
+  { key = "HEAD",      label = "Head",      tex = "HEADSLOT",          sockets = 1 },
+  { key = "NECK",      label = "Neck",      tex = "NECKSLOT",          sockets = 1 },
+  { key = "SHOULDER",  label = "Shoulder",  tex = "SHOULDERSLOT",      sockets = 1 },
+  { key = "BACK",      label = "Back",      tex = "CHESTSLOT",         sockets = 1 },
+  { key = "CHEST",     label = "Chest",     tex = "CHESTSLOT",         sockets = 1 },
+  { key = "WRIST",     label = "Wrist",     tex = "WRISTSLOT",         sockets = 1 },
+  { key = "HANDS",     label = "Hands",     tex = "HANDSSLOT",         sockets = 1 },
+  { key = "WAIST",     label = "Waist",     tex = "WAISTSLOT",         sockets = 1 },
+  { key = "LEGS",      label = "Legs",      tex = "LEGSSLOT",          sockets = 1 },
+  { key = "FEET",      label = "Feet",      tex = "FEETSLOT",          sockets = 1 },
+  { key = "FINGER",    label = "Finger",    tex = "FINGER0SLOT",       sockets = 2 },
+  { key = "TRINKET",   label = "Trinket",   tex = "TRINKET0SLOT",      sockets = 2 },
+  { key = "MAIN_HAND", label = "Main Hand", tex = "MAINHANDSLOT",      sockets = 1 },
+  { key = "OFF_HAND",  label = "Off Hand",  tex = "SECONDARYHANDSLOT", sockets = 1 },
+}
+
+--- The three views, in the mock's dropdown order. Values match the payload's
+--- own context strings, so no translation table can drift.
+ns.SLOT_VIEWS = {
+  { key = "overall", label = "Overall BIS" },
+  { key = "raid",    label = "Raid BIS" },
+  { key = "mplus",   label = "M+ BIS" },
+}
+
+--- The chip a context is shown as. O / R / M, per the mock.
+ns.BIS_CHIP = { overall = "O-BIS", raid = "R-BIS", mplus = "M-BIS" }
+
+--- Our payload's slot keys folded onto the RAIL's rows.
+---
+--- The weapon keys all compete for the main hand — the same fold
+--- extractSlotState has always done for TWO_HAND — and a rail row that could
+--- never be selected is worse than one that pools a little.
+local SLOT_FOLD = {
+  ONE_HAND = "MAIN_HAND", TWO_HAND = "MAIN_HAND", RANGED = "MAIN_HAND",
+}
+
+--- INVTYPE (what the CLIENT answers) folded onto the same rows.
+---
+--- Needed because 232 BIS items are not in loot_items at all — they do not drop
+--- from a boss — so our payload carries an id and nothing else and the slot has
+--- to come from the client. GetItemInfoInstant is the right call: it reads the
+--- static item database and answers SYNCHRONOUSLY, unlike GetItemInfo, so a
+--- cold cache costs nothing here.
+local INVTYPE_SLOT = {
+  INVTYPE_HEAD = "HEAD", INVTYPE_NECK = "NECK", INVTYPE_SHOULDER = "SHOULDER",
+  INVTYPE_CLOAK = "BACK", INVTYPE_CHEST = "CHEST", INVTYPE_ROBE = "CHEST",
+  INVTYPE_WRIST = "WRIST", INVTYPE_HAND = "HANDS", INVTYPE_WAIST = "WAIST",
+  INVTYPE_LEGS = "LEGS", INVTYPE_FEET = "FEET", INVTYPE_FINGER = "FINGER",
+  INVTYPE_TRINKET = "TRINKET",
+  INVTYPE_WEAPONMAINHAND = "MAIN_HAND", INVTYPE_2HWEAPON = "MAIN_HAND",
+  INVTYPE_WEAPON = "MAIN_HAND", INVTYPE_RANGED = "MAIN_HAND",
+  INVTYPE_RANGEDRIGHT = "MAIN_HAND",
+  INVTYPE_WEAPONOFFHAND = "OFF_HAND", INVTYPE_HOLDABLE = "OFF_HAND",
+  INVTYPE_SHIELD = "OFF_HAND",
+}
+
+--- Which rail row an item belongs to, our payload first and the client second.
+function ns.SlotForItem(itemID, rec)
+  local mine = rec and ns.ItemSlot(rec)
+  if mine then return SLOT_FOLD[mine] or mine end
+  -- ⚠️ THE GLOBAL, NOT THE C_Item MEMBER, and that is not a style choice. Both
+  -- exist on retail, but ns.IsGearItem has been calling the global on a live
+  -- 12.1 client since Session 250 — so this is the form that is PROVEN here,
+  -- and one file reaching for the namespaced spelling is how two call sites
+  -- come to disagree about which one the client has.
+  if type(GetItemInfoInstant) ~= "function" or not itemID then return nil end
+  local ok, _, _, _, equipLoc = pcall(GetItemInfoInstant, itemID)
+  if not ok then return nil end
+  return INVTYPE_SLOT[equipLoc or ""]
+end
+
+--- The empty-slot texture the character sheet itself draws.
+function ns.SlotIcon(row)
+  local fn = GetInventorySlotInfo
+  if not (fn and row and row.tex) then return nil end
+  local ok, _, tex = pcall(fn, row.tex)
+  if not ok then return nil end
+  return tex
+end
+
+--- The instance an encounter belongs to, by NAME.
+---
+--- ⚠️ THE PAYLOAD DOES NOT CARRY THIS. `bosses` holds name / order / enc and no
+--- instance, so the second line of every source ("…, The Venomous Abyss") has
+--- to come from the Encounter Journal, which already indexes it. Returns nil
+--- rather than a guess when the journal has not been walked yet; the caller
+--- prints the boss alone, which is still true.
+function ns.InstanceNameFor(encounterID)
+  local J = ns.Journal
+  if not (J and J.InstanceForEncounter and J.CachedInstances) then return nil end
+  local id = J.InstanceForEncounter(encounterID)
+  if not id then return nil end
+  for _, inst in ipairs(J.CachedInstances()) do
+    if inst.id == id then return ns.NonEmpty(inst.name) end
+  end
+  return nil
+end
+
+--- Where an item comes from, as the two halves the mock prints separately.
+---
+--- ⚠️ A CRAFTED ITEM CANNOT BE DESCRIBED YET and is left blank rather than
+--- guessed at. The mock draws "From Crafted: Inscription", but nothing in the
+--- payload says an item is crafted or which profession makes it — 53 Overall
+--- picks name an item in neither the raid nor the M+ list, which is what
+--- crafted gear looks like from here. An emitter field would close it; until
+--- then a missing line is honest and an invented one is not.
+function ns.ItemSource(itemID, rec)
+  if not (rec and rec.boss) then return nil end
+  local data = ns.Data()
+  local boss = data and data.bosses and data.bosses[rec.boss]
+  local bossName = boss and ns.NonEmpty(boss.name)
+  if not bossName then return nil end
+  return { boss = bossName, instance = ns.InstanceNameFor(rec.boss) }
+end
+
+--- Every way to end up holding one item.
+---
+--- ⚠️ THE TIER TOKEN CARRIES NO BIS ROW and never has, so it cannot be found by
+--- asking which token is BIS. It is DERIVED, exactly as the Session 256 rule
+--- says: the token whose own slot matches this row and whose class gate admits
+--- you. 15 of 40 specs name no catalyse target for hands, so a tier slot
+--- showing only the token is the NORMAL case and not an error state.
+---
+--- The catalyse SOURCE is the other direction: an item carrying `cat` converts
+--- INTO this piece, and it is that item — not the piece — that is chased.
+function ns.ObtainRoutes(itemID, slotKey, char)
+  local out = {}
+  local data = ns.Data()
+  if not (data and data.items and itemID) then return out end
+
+  for tokenID, rec in pairs(data.items) do
+    if rec.slot == "TOKEN" and ns.ItemSlot(rec) == slotKey
+      and (not char or ns.CanUse(rec, char.className, char.specName)) then
+      out[#out + 1] = {
+        itemID = tokenID, name = ns.NonEmpty(rec.name), kind = "TIER TOKEN",
+        source = ns.ItemSource(tokenID, rec),
+      }
+    end
+  end
+
+  if data.rankings and char then
+    for srcID in pairs(data.rankings) do
+      local q = ns.Scoring.resolveQuality(
+        data.rankings, srcID, char.className, char.specName, char.heroTree, nil)
+      if q and q.catalysesInto == itemID then
+        local rec = data.items[srcID]
+        out[#out + 1] = {
+          itemID = srcID, name = rec and ns.NonEmpty(rec.name),
+          kind = "CATALYZE TARGET", source = ns.ItemSource(srcID, rec),
+        }
+      end
+    end
+  end
+
+  table.sort(out, function(a, b)
+    -- The token first, because it is the route that always exists.
+    if (a.kind == "TIER TOKEN") ~= (b.kind == "TIER TOKEN") then
+      return a.kind == "TIER TOKEN"
+    end
+    return (a.name or "") < (b.name or "")
+  end)
+  return out
+end
+
+--- The whole page, for one view.
+---
+--- ⚠️ THE VIEW IS CHOSEN, NEVER DERIVED FROM WHERE YOU STAND. CurrentContentScope
+--- reads the instance you are in, which is right for the Loot tab and wrong for
+--- a planning page browsed in a city — the answer would change as you walked
+--- around. So contentScope is passed as nil here on purpose, and the view
+--- filters the CONTEXTS instead.
+---
+--- ⚠️ OVERALL IS ITS OWN ANSWER, NOT A LABEL ON THE RAID PICK. Raid and M+
+--- differ in 321 of 550 spec-slots, so these are three genuinely different
+--- lists and folding them would be wrong in more than half of all cases.
+function ns.SlotsReport(view)
+  view = view or "overall"
+  local out = { view = view, rows = {}, ready = false }
+
+  local char = ns.ResolveCharacter and ns.ResolveCharacter()
+  if char and char.className and char.specName then
+    out.specLabel = char.specName .. " " .. char.className
+  end
+  local data = ns.Data()
+
+  local bySlot = {}
+  for _, row in ipairs(ns.SLOT_ROWS) do bySlot[row.key] = {} end
+
+  if data and data.rankings and char and char.className and char.specName then
+    out.ready = true
+    for itemID in pairs(data.rankings) do
+      local q = ns.Scoring.resolveQuality(
+        data.rankings, itemID, char.className, char.specName, char.heroTree, nil)
+      -- An item that CONVERTS into a tier piece is a route to that piece, not a
+      -- pick of its own — it surfaces under OBTAINED BY, without a BIS chip,
+      -- because two BIS chips in one slot group say nothing about which to chase.
+      if q and q.bis and q.contexts and not q.catalysesInto then
+        local inView = false
+        for _, c in ipairs(q.contexts) do
+          if c == view then inView = true end
+        end
+        if inView then
+          local rec = data.items and data.items[itemID]
+          local slotKey = ns.SlotForItem(itemID, rec)
+          if slotKey and bySlot[slotKey] then
+            local contexts = {}
+            for _, c in ipairs(q.contexts) do contexts[c] = true end
+            local owned = false
+            if ns.EquippedCopy then owned = ns.EquippedCopy(slotKey, itemID) end
+            bySlot[slotKey][#bySlot[slotKey] + 1] = {
+              itemID = itemID,
+              name = rec and ns.NonEmpty(rec.name),
+              contexts = contexts,
+              source = ns.ItemSource(itemID, rec),
+              owned = owned,
+              -- A piece nothing drops and no token IS is one the catalyst makes.
+              tierPiece = (rec == nil),
+            }
+          end
+        end
+      end
+    end
+  end
+
+  for _, row in ipairs(ns.SLOT_ROWS) do
+    local picks = bySlot[row.key]
+    table.sort(picks, function(a, b)
+      if a.owned ~= b.owned then return a.owned end
+      return (a.name or tostring(a.itemID)) < (b.name or tostring(b.itemID))
+    end)
+    local ownedCount = 0
+    for _, p in ipairs(picks) do if p.owned then ownedCount = ownedCount + 1 end end
+    -- FULL means every socket this row has is already holding one of its picks;
+    -- PARTIAL is the one-of-two case the paired slots exist for, and it is drawn
+    -- dimmed rather than as a second full check.
+    local check = "none"
+    if ownedCount > 0 then
+      check = (ownedCount >= (row.sockets or 1)) and "full" or "partial"
+    end
+    out.rows[#out.rows + 1] = {
+      key = row.key, label = row.label, tex = row.tex,
+      sockets = row.sockets or 1, picks = picks, check = check,
+    }
+  end
+
+  return out
+end
+
+-- ---------------------------------------------------------------------------
 -- Ordering the item column (Session 250)
 -- ---------------------------------------------------------------------------
 --

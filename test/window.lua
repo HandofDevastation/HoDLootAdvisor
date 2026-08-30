@@ -448,6 +448,142 @@ for _, file in ipairs({ "Panel.lua", "LoadWindow.lua", "RecordWindow.lua",
         #missing == 0, #missing > 0 and table.concat(missing, ", ") or nil)
 end
 
+header("The Slots page (Session 258)")
+
+-- Everything here drives the REAL widgets, because the whole reason this
+-- harness exists is that a runtime error inside a renderer reaches the game
+-- otherwise. The pure logic behind it is asserted in smoke.lua instead.
+do
+  local slots = panel and panel.tabs and panel.tabs.Slots
+  if slots then drive("opening Slots", function() slots.scripts.OnClick(slots) end) end
+
+  local rows = panel and panel.slotRows
+  check("the rail has a row for every loot-bearing slot", rows and #rows == 14,
+        rows and #rows or "no rail")
+
+  -- Read off the mock, in its order. A rail that silently reorders itself is
+  -- the kind of thing only a person notices, and only much later.
+  if rows then
+    local want = { "Head", "Neck", "Shoulder", "Back", "Chest", "Wrist", "Hands",
+                   "Waist", "Legs", "Feet", "Finger", "Trinket", "Main Hand", "Off Hand" }
+    local bad
+    for i, label in ipairs(want) do
+      local got = rows[i] and rows[i].label and rows[i].label._text
+      if got ~= label then bad = ("row %d: %s, wanted %s"):format(i, tostring(got), label) end
+    end
+    check("the rail's rows are the mock's, in the mock's order", bad == nil, bad)
+
+    -- ⚠️ THE LAST ROW MEASURES 26 BECAUSE IT DROPS ITS RULE, which is the same
+    -- one-pixel tell the boss rows and the item cards use. Asserting the height
+    -- alone would pass with the rule still drawn.
+    local h = rows[14] and rows[14]:GetHeight()
+    check("the last row is 26 and has no rule", h == 26 and rows[14].rule == nil,
+          ("height %s, rule %s"):format(tostring(h), tostring(rows[14] and rows[14].rule)))
+    check("every other row is 29 with a rule",
+          rows[1]:GetHeight() == 29 and rows[1].rule ~= nil)
+  end
+
+  -- Selecting a row is what the page is FOR, and it is the path that re-renders
+  -- the whole right-hand region — so it is driven through the click handler.
+  drive("clicking every rail row renders that slot", function()
+    for i = 1, #(panel.slotRows or {}) do
+      panel.slotRows[i].scripts.OnClick(panel.slotRows[i])
+    end
+  end)
+
+  check("the selected row is the one that is filled",
+        panel.slotRows and panel.slotRows[14].bg:IsShown()
+          and not panel.slotRows[1].bg:IsShown())
+
+  -- All three views, through the menu items a person actually clicks.
+  drive("switching to each of the three BIS views", function()
+    for i = 1, #(panel.slotMenuItems or {}) do
+      panel.slotMenuItems[i].scripts.OnClick(panel.slotMenuItems[i])
+    end
+  end)
+
+  -- ⚠️ THE SINGLE-ITEM LAYOUT HAS TO BE STAGED, AND FINDING THAT OUT IS WHY
+  -- THIS BLOCK EXISTS (Session 258). The first version of these checks passed
+  -- with the OBTAINED BY panel never once drawn: 232 BIS items are absent from
+  -- our payload, so their slot comes from the client, and the stub answered
+  -- nothing — every tier piece was dropped before it reached a row. The
+  -- "never both layouts" check below was therefore only ever testing the list.
+  --
+  -- So the tier piece is DERIVED from the payload rather than hardcoded: find
+  -- an item that catalyses into something, and that something is a piece which
+  -- does not drop. Staging its equip location is what the real client would
+  -- answer, and is the one thing the harness cannot know on its own.
+  local staged, stagedSlot
+  do
+    local data = ns.Data()
+    local char = ns.ResolveCharacter()
+    if data and data.rankings and char then
+      for srcID in pairs(data.rankings) do
+        local q = ns.Scoring.resolveQuality(data.rankings, srcID,
+          char.className, char.specName, char.heroTree, nil)
+        if q and q.catalysesInto and not staged then
+          staged = q.catalysesInto
+          -- Hands, because that is the slot the mock draws this state for.
+          stagedSlot = "HANDS"
+          stub.itemEquipLoc[staged] = "INVTYPE_HAND"
+        end
+      end
+    end
+  end
+  check("the payload carries a catalyse pointer to stage the tier-piece case",
+        staged ~= nil, "no ranking for this character names a catalyse target")
+
+  if staged then
+    drive("the single-item layout renders", function()
+      ns.Panel.Refresh()
+      for i, r in ipairs(ns.SLOT_ROWS) do
+        if r.key == stagedSlot then
+          panel.slotRows[i].scripts.OnClick(panel.slotRows[i])
+        end
+      end
+    end)
+    check("...and it is the OBTAINED BY panel, not the list",
+          panel.slotPanel:IsShown() and not panel.slotList:IsShown(),
+          ("panel=%s list=%s"):format(tostring(panel.slotPanel:IsShown()),
+                                      tostring(panel.slotList:IsShown())))
+    -- A panel with a heading and no routes is the half-drawn box the whole
+    -- layout choice exists to avoid.
+    check("...with at least one route drawn",
+          panel.slotRoutes and panel.slotRoutes[1]:IsShown())
+    check("...and the panel is as tall as the routes it holds",
+          panel.slotPanel:GetHeight() >= 101,
+          panel.slotPanel:GetHeight())
+  end
+
+  -- ⚠️ EXACTLY ONE LAYOUT IS EVER ON SCREEN. Both being shown would draw the
+  -- OBTAINED BY panel straight through the candidate list, which is precisely
+  -- the class of fault this file was added to catch. Only meaningful now that
+  -- both branches are reachable — see the staging above.
+  local bothOff, bothOn, sawSingle = false, false, false
+  for i = 1, #(panel.slotRows or {}) do
+    panel.slotRows[i].scripts.OnClick(panel.slotRows[i])
+    local single, list = panel.slotPanel:IsShown(), panel.slotList:IsShown()
+    if single and list then bothOn = true end
+    if not single and not list then bothOff = true end
+    if single then sawSingle = true end
+  end
+  check("never both layouts at once, and never neither", not bothOn and not bothOff,
+        ("bothOn=%s bothOff=%s"):format(tostring(bothOn), tostring(bothOff)))
+  -- The guard against this check going quiet again: if no slot takes the single
+  -- branch, the line above proves only half of what it claims.
+  check("...and the sweep actually reached both layouts", sawSingle)
+
+  -- Leaving the tab must take the page's furniture with it.
+  local loot = panel.tabs and panel.tabs.Loot
+  if loot then
+    drive("leaving Slots", function() loot.scripts.OnClick(loot) end)
+    check("the rail does not draw over another tab", not panel.slotRail:IsShown())
+    check("neither Slots layout draws over another tab",
+          not panel.slotPanel:IsShown() and not panel.slotList:IsShown())
+  end
+end
+
+
 -- ── Report ─────────────────────────────────────────────────────────────────
 
 local names = {}

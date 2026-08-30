@@ -808,9 +808,17 @@ function Style.Chip(parent, kind)
     if not label or label == "" then self:Hide() return self end
     self.text:SetText(label)
     if self._filled then
-      self.bg:SetColorTexture(Style.rgb(Style.COLOR.body))
-      self.text:SetTextColor(Style.rgb(Style.COLOR.ground))
-      self.rim:SetColor(Style.COLOR.body, 0)
+      -- ⚠️ A FILLED CHIP HAS TWO GROUNDS, NOT ONE (Session 258, read off the
+      -- Slots mock). The blush ground carries a BIS claim — O-BIS / R-BIS /
+      -- M-BIS — and takes the panel's own violet as its text. A chip naming
+      -- what an item IS (TIER PIECE, TIER TOKEN, CATALYZE TARGET) is filled
+      -- with the heading purple and takes WHITE. Both are facts about the item
+      -- rather than about the viewer, so both are filled rather than outlined;
+      -- the ground is what separates a ranking claim from a classification.
+      local fill = color or Style.COLOR.body
+      self.bg:SetColorTexture(Style.rgb(fill))
+      self.text:SetTextColor(Style.rgb(color and Style.COLOR.white or Style.COLOR.ground))
+      self.rim:SetColor(fill, 0)
     else
       local col = color or Style.COLOR.body
       self.bg:SetColorTexture(0, 0, 0, 0)

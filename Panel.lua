@@ -203,6 +203,51 @@ local VAULT_Y, VAULT_BOX, VAULT_LABEL_X = 56, 16, 22
 -- tab row gains a fourth tab in the mock ("Slots") and would have collided again.
 local VAULT_GAP = 10
 
+-- ── Slots tab (Session 258, from Jason's mocks 591:2198 + 591:2205) ────────
+--
+-- Every number is a node position minus the frame's own origin (1684, 1435 for
+-- the single-item frame; 1684, 2109 for the multi-item one), so any of them can
+-- be checked against Figma by subtracting and nothing else.
+--
+-- ONE TABLE, not thirty file-scope locals, for the reason Session 250 learned
+-- the expensive way: build() closes over every constant it names and Lua 5.1
+-- refuses a function with more than 60 upvalues. The tab's builder is its own
+-- function for the same reason, matching Standings and Runner.
+--
+-- ⚠️ THE TWO MOCKS ARE ONE PAGE IN TWO STATES, not two designs. The rail, the
+-- caption, the dropdown and the footer are identical in both; what differs is
+-- only what fills the right-hand region.
+local SL = {
+  -- The rail. 14 rows, 29 tall, and the LAST is 26 because it drops its bottom
+  -- rule — the same one-pixel tell the boss rows and the item cards use.
+  railX = 40, railY = 129, railW = 150, rowH = 29, lastRowH = 26,
+  -- Right-aligned label, then the client's empty-slot icon, then the check.
+  labelR = 91, iconX = 100, iconSize = 20,
+  checkX = 130, checkW = 10, checkH = 7,
+
+  -- The caption and the view dropdown, both on the tab row's band.
+  capR = 700, capY = 48,
+  viewX = 586, viewY = 82, viewW = 111, viewH = 27,
+  caret = 6, caretR = 14,
+
+  -- The right-hand region, shared origin, two layouts.
+  paneX = 230, paneW = 470,
+
+  -- SINGLE-ITEM: an identity block, then the OBTAINED BY panel beneath it.
+  headY = 141, headNameH = 18, headSlotY = 159, chipY = 142,
+  panelY = 186,
+  -- The panel's own box: 14 above the heading, 20 below the last route, and 20
+  -- of gap between blocks. A 2-route panel measures 151, which is the mock's.
+  panelPadT = 14, panelPadB = 20, panelPadX = 20,
+  headingH = 17, blockGap = 20, blockH = 30, routeLineY = 16,
+
+  -- MULTI-ITEM: a flat list of candidates, each 55 tall with a 10px top inset.
+  listY = 129, listPitch = 55, listNameY = 10, listSourceY = 28,
+  listRows = 7, routeRows = 4,
+
+  chipH = 15, chipGap = 6,
+}
+
 -- ── Runner tab (Session 252, from Jason's mock) ─────────────────────────────
 -- Panel-relative, read off the Figma frame rather than eyeballed: the mock's
 -- origin is (2383, 779) and every number below is a node position minus that.
@@ -346,6 +391,11 @@ local C_GAIN_R, C_PRIORITY_R = 616, 690
 -- themselves, so the shapes are the designed ones rather than an approximation.
 -- Drawn WHITE so the existing per-mark tint still applies; the design's colours
 -- (target #20BA56, BIS #FFF468) already live in Style.COLOR and are unchanged.
+-- Shared with the difficulty control, which had this path inline. One string,
+-- because two copies of an asset path is one of them going stale at a rename.
+local CARET_TEX       = "Interface\\AddOns\\HoDLootAdvisor\\Media\\ui\\caret.png"
+-- The Slots rail's tick, and the same file Style.Check already draws.
+local SLOT_CHECK_TEX  = "Interface\\AddOns\\HoDLootAdvisor\\Media\\ui\\check.png"
 local MARK_TARGET_TEX = "Interface\\AddOns\\HoDLootAdvisor\\Media\\ui\\mark-target.png"
 local MARK_BIS_TEX    = "Interface\\AddOns\\HoDLootAdvisor\\Media\\ui\\mark-bis.png"
 local MARK_SIZE = 12
@@ -397,6 +447,15 @@ local state = {
   filter = "usable",    -- "usable" | "all"
   -- The Standings tab's provisional sub-view. See renderStandingsTab.
   instIndex = 1, encIndex = 1, targetMode = "browse",
+  -- ── Slots tab (Session 258) ───────────────────────────────────────────────
+  -- Which rail row is open, and which of the three BIS lists is being read.
+  --
+  -- ⚠️ SESSION-SCOPED, NOT A SETTING, and this is a decision rather than an
+  -- oversight: the mock draws the dropdown and says nothing about whether the
+  -- choice survives a reload. It sits beside `source` and `filter`, which are
+  -- the other two view controls on this window and are session-scoped for the
+  -- same reason. Promote it to Settings if Jason wants it remembered.
+  slotIndex = 1, slotsView = "overall",
 }
 
 -- ---------------------------------------------------------------------------
@@ -1437,6 +1496,224 @@ local function buildStandingsTab()
 
 end
 
+--- A right-aligned chip row: chips are laid out from the RIGHT edge inwards,
+--- which is how the mock places them on both the identity header and every list
+--- row. Shared by the two so they cannot drift apart.
+local function layoutChipsRight(chips, owner, rightX, y)
+  local x = rightX
+  for i = #chips, 1, -1 do
+    local ch = chips[i]
+    if ch and ch:IsShown() then
+      ch:ClearAllPoints()
+      ch:SetPoint("TOPRIGHT", owner, "TOPLEFT", x, -y)
+      x = x - ch:GetWidth() - SL.chipGap
+    end
+  end
+end
+
+--- One candidate row on the multi-item layout: a name that may carry a check,
+--- a right-aligned chip row, and a source line beneath.
+local function buildSlotListRow(parent, i)
+  local row = CreateFrame("Frame", nil, parent)
+  row:SetSize(SL.paneW, SL.listPitch)
+  row:SetPoint("TOPLEFT", 0, -(i - 1) * SL.listPitch)
+
+  -- 13 Regular in the blush, exactly as the detail header's item name is — this
+  -- IS that surface, one row per candidate instead of one item.
+  row.name = at(text(row, "regular", "detail", "body"), 0, SL.listNameY, 300)
+
+  -- ⚠️ THE CHECK FOLLOWS THE NAME, IT IS NOT RIGHT-ALIGNED. The mock puts it 6px
+  -- past the end of the string (name w134, check at x140), so it reads as part
+  -- of the name rather than as a column.
+  row.check = row:CreateTexture(nil, "OVERLAY")
+  row.check:SetSize(SL.checkW, SL.checkH)
+  row.check:SetTexture(SLOT_CHECK_TEX)
+  row.check:Hide()
+
+  row.chips = {}
+  for ci = 1, 3 do
+    row.chips[ci] = ns.Style and ns.Style.Chip(row, "filled")
+  end
+
+  -- 10px, with the BOSS in bold white inside an otherwise blush line. Two
+  -- fontstrings would let the bold half drift, so this is one string coloured
+  -- inline — the weight difference the mock draws cannot survive in a single
+  -- fontstring, and colour is the half that carries the meaning.
+  row.source = at(text(row, "light", "label", "body"), 0, SL.listSourceY, SL.paneW)
+
+  row.rule = divider(row, 0, SL.listPitch - 1, SL.paneW)
+
+  row:Hide()
+  return row
+end
+
+--- One route inside the OBTAINED BY panel.
+local function buildSlotRoute(parent, i)
+  local r = CreateFrame("Frame", nil, parent)
+  r:SetSize(SL.paneW - SL.panelPadX * 2, SL.blockH)
+
+  r.name = at(text(r, "regular", "row", "body"), 0, 0, 300)
+  r.chip = ns.Style and ns.Style.Chip(r, "filled")
+  r.source = at(text(r, "light", "label", "body"), 0, SL.routeLineY,
+    SL.paneW - SL.panelPadX * 2)
+
+  r:Hide()
+  return r
+end
+
+local function buildSlotsTab()
+  -- ── The rail ──────────────────────────────────────────────────────────────
+  -- Fourteen rows, built once. The icons come from the CLIENT rather than from
+  -- bundled art, so unlike the boss portraits this never needs anything copied
+  -- in at a new tier.
+  frame.slotRail = CreateFrame("Frame", nil, frame)
+  frame.slotRail:SetPoint("TOPLEFT", SL.railX, -SL.railY)
+  frame.slotRail:SetSize(SL.railW, SL.rowH * 13 + SL.lastRowH)
+
+  frame.slotRows = {}
+  local y = 0
+  for i, def in ipairs(ns.SLOT_ROWS or {}) do
+    local last = (i == #ns.SLOT_ROWS)
+    local h = last and SL.lastRowH or SL.rowH
+    local row = CreateFrame("Button", nil, frame.slotRail)
+    row:SetSize(SL.railW, h)
+    row:SetPoint("TOPLEFT", 0, -y)
+    row._index = i
+
+    -- Only the SELECTED row is filled, at the rule blush's 10%. Every other
+    -- state is bare — the rail carries no hover ground in the mock.
+    row.bg = row:CreateTexture(nil, "BACKGROUND")
+    row.bg:SetAllPoints()
+    if ns.Style then
+      row.bg:SetColorTexture(ns.Style.COLOR.rule.r, ns.Style.COLOR.rule.g,
+        ns.Style.COLOR.rule.b, 0.1)
+    end
+    row.bg:Hide()
+
+    row.label = atRight(text(row, "light", "head", "body"), SL.labelR, 1, 80)
+
+    row.icon = row:CreateTexture(nil, "ARTWORK")
+    row.icon:SetSize(SL.iconSize, SL.iconSize)
+    row.icon:SetPoint("TOPLEFT", SL.iconX, -4)
+    local tex = ns.SlotIcon and ns.SlotIcon(def)
+    if tex then row.icon:SetTexture(tex) end
+
+    row.check = row:CreateTexture(nil, "OVERLAY")
+    row.check:SetSize(SL.checkW, SL.checkH)
+    row.check:SetPoint("TOPLEFT", SL.checkX, -((h - SL.checkH) / 2))
+    row.check:SetTexture(SLOT_CHECK_TEX)
+    row.check:Hide()
+
+    -- The last row drops its rule, which is the whole of why it measures 26.
+    if not last then row.rule = divider(row, 0, h - 1, SL.railW) end
+
+    row:SetScript("OnClick", function(self)
+      state.slotIndex = self._index
+      Panel.Refresh()
+    end)
+
+    frame.slotRows[i] = row
+    y = y + h
+  end
+
+  -- ── The caption ───────────────────────────────────────────────────────────
+  -- "Destruction Warlock BIS": the spec in Bold blush, the word BIS in Light
+  -- white. Two fontstrings because one cannot carry two weights, anchored to
+  -- each other so the pair stays glued as the spec name changes length.
+  frame.slotBis = text(frame, "light", "rank", "white", "RIGHT")
+  frame.slotBis:ClearAllPoints()
+  frame.slotBis:SetPoint("TOPRIGHT", frame, "TOPLEFT", SL.capR, -SL.capY)
+  frame.slotBis:SetText("BIS")
+
+  frame.slotSpec = text(frame, "bold", "rank", "body", "RIGHT")
+  frame.slotSpec:ClearAllPoints()
+  frame.slotSpec:SetPoint("RIGHT", frame.slotBis, "LEFT", -4, 0)
+
+  -- ── The view dropdown ─────────────────────────────────────────────────────
+  frame.slotView = ns.Style and ns.Style.Control(frame, "Overall BIS")
+  if frame.slotView then
+    frame.slotView:SetSize(SL.viewW, SL.viewH)
+    frame.slotView:SetPoint("TOPLEFT", SL.viewX, -SL.viewY)
+    frame.slotView:SetActive(true)
+    frame.slotView.caret = frame.slotView:CreateTexture(nil, "OVERLAY")
+    frame.slotView.caret:SetSize(SL.caret, SL.caret)
+    frame.slotView.caret:SetPoint("RIGHT", -SL.caretR + SL.caret, 0)
+    frame.slotView.caret:SetTexture(CARET_TEX)
+    if ns.Style then
+      frame.slotView.caret:SetVertexColor(ns.Style.rgb(ns.Style.COLOR.controlText))
+    end
+    frame.slotView:SetScript("OnClick", function()
+      frame.slotMenu:SetShown(not frame.slotMenu:IsShown())
+    end)
+  end
+
+  frame.slotMenu = CreateFrame("Frame", nil, frame)
+  frame.slotMenu:SetFrameStrata("TOOLTIP")
+  frame.slotMenu:SetSize(SL.viewW, #(ns.SLOT_VIEWS or {}) * SL.viewH)
+  frame.slotMenu:SetPoint("TOPLEFT", SL.viewX, -(SL.viewY + SL.viewH))
+  if ns.Style then ns.Style.Surface(frame.slotMenu, ns.Style.COLOR.control, 1) end
+  frame.slotMenuItems = {}
+  for i, choice in ipairs(ns.SLOT_VIEWS or {}) do
+    local item = CreateFrame("Button", nil, frame.slotMenu)
+    item:SetSize(SL.viewW, SL.viewH)
+    item:SetPoint("TOPLEFT", 0, -(i - 1) * SL.viewH)
+    item.label = at(text(item, "light", "head", "controlText"), 10, 6, SL.viewW - 20)
+    item.label:SetText(choice.label)
+    item:SetScript("OnClick", function()
+      state.slotsView = choice.key
+      state.slotIndex = state.slotIndex or 1
+      frame.slotMenu:Hide()
+      Panel.Refresh()
+    end)
+    frame.slotMenuItems[i] = item
+  end
+  frame.slotMenu:Hide()
+
+  -- ── The single-item layout ────────────────────────────────────────────────
+  frame.slotHead = CreateFrame("Frame", nil, frame)
+  frame.slotHead:SetPoint("TOPLEFT", SL.paneX, -SL.headY)
+  frame.slotHead:SetSize(SL.paneW, SL.headNameH)
+  frame.slotHead.name = at(text(frame.slotHead, "regular", "detail", "body"),
+    0, 0, 300)
+  frame.slotHead.chips = {}
+  for ci = 1, 3 do
+    frame.slotHead.chips[ci] = ns.Style and ns.Style.Chip(frame.slotHead, "filled")
+  end
+  -- ⚠️ WHITE OVER BLUSH HERE, the opposite way round from the rail's cards. Read
+  -- off the node rather than from a rule about which kind of thing it is.
+  frame.slotHead.slot = at(text(frame, "light", "head", "white"),
+    SL.paneX, SL.headSlotY, SL.paneW)
+
+  frame.slotPanel = CreateFrame("Frame", nil, frame)
+  frame.slotPanel:SetPoint("TOPLEFT", SL.paneX, -SL.panelY)
+  frame.slotPanel:SetSize(SL.paneW, 151)
+  if ns.Style then
+    ns.Style.Surface(frame.slotPanel, ns.Style.COLOR.rule, 0.1)
+  end
+  frame.slotPanel.heading = at(text(frame.slotPanel, "bold", "head", "accent"),
+    SL.panelPadX, SL.panelPadT, SL.paneW - SL.panelPadX * 2)
+  frame.slotPanel.heading:SetText("OBTAINED BY:")
+  frame.slotRoutes = {}
+  for i = 1, SL.routeRows do
+    frame.slotRoutes[i] = buildSlotRoute(frame.slotPanel, i)
+  end
+
+  -- ── The multi-item layout ─────────────────────────────────────────────────
+  frame.slotList = CreateFrame("Frame", nil, frame)
+  frame.slotList:SetPoint("TOPLEFT", SL.paneX, -SL.listY)
+  frame.slotList:SetSize(SL.paneW, SL.listRows * SL.listPitch)
+  frame.slotListRows = {}
+  for i = 1, SL.listRows do
+    frame.slotListRows[i] = buildSlotListRow(frame.slotList, i)
+  end
+
+  -- The one line that says why a slot is empty. Kept distinct from the shared
+  -- tabEmpty, which is a whole-tab message rather than a per-slot one.
+  frame.slotNote = at(text(frame, "light", "head", "textDim"),
+    SL.paneX, SL.listY + SL.listNameY, SL.paneW)
+  frame.slotNote:Hide()
+end
+
 local function buildDetailPane()
   -- ── The detail pane ───────────────────────────────────────────────────────
   frame.pane = CreateFrame("Frame", nil, frame)
@@ -1799,6 +2076,7 @@ local function build()
   buildChrome()
   buildLootControls()
   buildStandingsTab()
+  buildSlotsTab()
   buildRunnerTab()
   buildDetailPane()
   buildFooter()
@@ -3126,6 +3404,170 @@ local function renderTargetsView()
       state.rankScroll + 1, math.min(total, state.rankScroll + RANK_ROWS), total) or "")
 end
 
+--- "From <boss>, <instance>", with the boss carrying the emphasis.
+---
+--- ⚠️ THE MOCK BOLDS THE BOSS AND A FONTSTRING CANNOT CHANGE WEIGHT MID-STRING,
+--- so the emphasis is carried in COLOUR instead: the boss goes white against an
+--- otherwise blush line. That is a deliberate substitution, not an oversight —
+--- of the two signals the design uses, colour is the one this widget has.
+local function sourceLine(src)
+  if not src or not src.boss then return "" end
+  local S = ns.Style
+  local boss = S and (S.code(S.COLOR.white) .. src.boss .. "|r") or src.boss
+  if src.instance then return "From " .. boss .. ", " .. src.instance end
+  return "From " .. boss
+end
+
+--- The chips one pick carries, in the mock's order: the BIS contexts first,
+--- then what the item IS.
+local function fillPickChips(chips, pick)
+  local S = ns.Style
+  for _, ch in ipairs(chips) do if ch then ch:Hide() end end
+  local n = 0
+  for _, view in ipairs(ns.SLOT_VIEWS or {}) do
+    if pick.contexts and pick.contexts[view.key] then
+      n = n + 1
+      if chips[n] then chips[n]:Set(ns.BIS_CHIP[view.key]) end
+    end
+  end
+  -- The classification chip takes the heading purple; a BIS chip stays blush.
+  if pick.tierPiece and chips[n + 1] then
+    chips[n + 1]:Set("TIER PIECE", S and S.COLOR.accent)
+  end
+end
+
+local function renderSlots()
+  local report = ns.SlotsReport and ns.SlotsReport(state.slotsView)
+  if not report then return end
+
+  frame.slotSpec:SetText(report.specLabel or "")
+  for _, v in ipairs(ns.SLOT_VIEWS or {}) do
+    if v.key == state.slotsView and frame.slotView then
+      setLabel(frame.slotView, v.label)
+    end
+  end
+
+  -- Clamp rather than reset: a slot index left over from a previous view is
+  -- still a valid row, and snapping back to Head every time the list changes
+  -- would lose the reader's place for no reason.
+  local nRows = #report.rows
+  if nRows > 0 then
+    if not state.slotIndex or state.slotIndex > nRows then state.slotIndex = 1 end
+  end
+
+  for i, row in ipairs(frame.slotRows) do
+    local data = report.rows[i]
+    row.bg:SetShown(i == state.slotIndex)
+    row.label:SetText(data and data.label or "")
+    if data and data.check ~= "none" then
+      row.check:Show()
+      -- PARTIAL is the one-of-two case, drawn at the same hue and half the
+      -- alpha rather than as a second icon.
+      row.check:SetAlpha(data.check == "full" and 1 or 0.4)
+      if ns.Style then
+        row.check:SetVertexColor(ns.Style.rgb(ns.Style.COLOR.accent))
+      end
+    else
+      row.check:Hide()
+    end
+  end
+
+  local sel = report.rows[state.slotIndex]
+  local picks = sel and sel.picks or {}
+
+  -- Names arrive asynchronously for the 232 BIS items that are not in our loot
+  -- table, so ask for them and come back — both halves, per the standing rule.
+  ns.FillItemNames(picks)
+  ns.WarmItemNames(picks)
+
+  -- ⚠️ ROUTES DECIDE THE LAYOUT, NOT THE COUNT. A tier piece is the one thing
+  -- that cannot simply be listed with a source line, because it does not drop —
+  -- it is made, by a token or by the catalyst — so it gets the identity header
+  -- and the OBTAINED BY panel the mock draws for it. Everything else is a list,
+  -- including a slot with exactly one ordinary pick.
+  local single = picks[1]
+  local routes = {}
+  if single and single.tierPiece and #picks == 1 then
+    local char = ns.ResolveCharacter and ns.ResolveCharacter()
+    routes = ns.ObtainRoutes(single.itemID, sel.key, char) or {}
+  end
+  local useSingle = (#routes > 0)
+
+  frame.slotHead:SetShown(useSingle)
+  frame.slotHead.slot:SetShown(useSingle)
+  frame.slotPanel:SetShown(useSingle)
+  frame.slotList:SetShown(not useSingle)
+
+  if useSingle then
+    frame.slotHead.name:SetText(single.name or "")
+    fillPickChips(frame.slotHead.chips, single)
+    layoutChipsRight(frame.slotHead.chips, frame.slotHead, SL.paneW, SL.chipY - SL.headY)
+    frame.slotHead.slot:SetText(sel.label .. (single.tierPiece and ", Tier Piece" or ""))
+
+    local shown = 0
+    for i, r in ipairs(frame.slotRoutes) do
+      local route = routes[i]
+      if route then
+        shown = shown + 1
+        r:ClearAllPoints()
+        r:SetPoint("TOPLEFT", SL.panelPadX,
+          -(SL.panelPadT + SL.headingH + SL.blockGap
+            + (i - 1) * (SL.blockH + SL.blockGap)))
+        r.name:SetText(route.name or ("item:" .. tostring(route.itemID)))
+        if r.chip then
+          r.chip:Set(route.kind, ns.Style and ns.Style.COLOR.accent)
+          r.chip:ClearAllPoints()
+          r.chip:SetPoint("TOPRIGHT", r, "TOPRIGHT", 0, -1)
+        end
+        r.source:SetText(sourceLine(route.source))
+        r:Show()
+      else
+        r:Hide()
+      end
+    end
+    -- The panel is exactly as tall as the routes it holds, which is what makes
+    -- a one-route slot read as finished rather than as a half-filled box.
+    frame.slotPanel:SetHeight(SL.panelPadT + SL.headingH + SL.blockGap
+      + shown * SL.blockH + math.max(0, shown - 1) * SL.blockGap + SL.panelPadB)
+    frame.slotNote:Hide()
+  else
+    for i, row in ipairs(frame.slotListRows) do
+      local pick = picks[i]
+      if pick then
+        row.name:SetText(pick.name or "")
+        row.check:SetShown(pick.owned)
+        if pick.owned then
+          row.check:ClearAllPoints()
+          -- 6px past the end of the string, so it travels with the name.
+          row.check:SetPoint("LEFT", row.name, "LEFT",
+            (row.name:GetStringWidth() or 0) + 6, 0)
+          if ns.Style then
+            row.check:SetVertexColor(ns.Style.rgb(ns.Style.COLOR.accent))
+          end
+        end
+        fillPickChips(row.chips, pick)
+        layoutChipsRight(row.chips, row, SL.paneW, SL.listNameY + 1)
+        row.source:SetText(sourceLine(pick.source))
+        -- Last visible row drops its rule, the same tell the rail uses.
+        if row.rule then row.rule:SetShown(picks[i + 1] ~= nil) end
+        row:Show()
+      else
+        row:Hide()
+      end
+    end
+
+    if #picks == 0 then
+      frame.slotNote:Show()
+      frame.slotNote:SetText(report.ready
+        and ("No " .. (ns.BIS_CHIP[state.slotsView] or "BIS")
+             .. " pick for " .. (sel and sel.label or "this slot") .. ".")
+        or "No BIS data yet.")
+    else
+      frame.slotNote:Hide()
+    end
+  end
+end
+
 local function renderStandingsTab()
   -- ⚠️ NO PANE ON THIS TAB. The design puts the table straight on the window
   -- ground; the purple surface belongs to the Loot tab's detail pane and drawing
@@ -3426,11 +3868,22 @@ function Panel.Refresh()
   local onStandings = state.tab == "Standings"
   local onSlots = state.tab == "Slots"
 
-  if frame.tabEmpty then
-    frame.tabEmpty:SetShown(onSlots)
-    if onSlots then
-      frame.tabEmpty:SetText("Slots is being built.")
-    end
+  -- Nothing needs the whole-tab message any more: every tab renders.
+  if frame.tabEmpty then frame.tabEmpty:Hide() end
+
+  -- The Slots tab's own furniture, hidden as a group so nothing it owns can
+  -- draw through another tab.
+  frame.slotRail:SetShown(onSlots)
+  frame.slotSpec:SetShown(onSlots)
+  frame.slotBis:SetShown(onSlots)
+  if frame.slotView then frame.slotView:SetShown(onSlots) end
+  if not onSlots then
+    frame.slotMenu:Hide()
+    frame.slotHead:Hide()
+    frame.slotHead.slot:Hide()
+    frame.slotPanel:Hide()
+    frame.slotList:Hide()
+    frame.slotNote:Hide()
   end
 
   -- The boss strip, the context line and the two filter toggles belong to the
@@ -3540,6 +3993,8 @@ function Panel.Refresh()
     renderLoot()
   elseif onRunner then
     renderRunner()
+  elseif onSlots then
+    renderSlots()
   else
     renderStandingsTab()
   end
