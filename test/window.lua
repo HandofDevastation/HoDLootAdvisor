@@ -584,6 +584,47 @@ do
 end
 
 
+header("The Standings page, re-read from its node (Session 258)")
+
+-- ⚠️ THESE ARE GEOMETRY ASSERTIONS AND THAT IS DELIBERATE. This tab was built
+-- against the pre-redesign window and never re-read when the frame grew, so
+-- every position was quietly wrong while the tab "worked". Pinning the node's
+-- own numbers is what turns that from something only a screenshot can catch
+-- into something the suite catches.
+do
+  local st = panel and panel.tabs and panel.tabs.Standings
+  if st then drive("opening Standings", function() st.scripts.OnClick(st) end) end
+
+  check("the rail has four blocks", panel.rail and #panel.rail == 4)
+  if panel.rail then
+    -- Each block is a FILLED surface now, not four loose lines on the ground.
+    local box = panel.rail[1].box
+    check("a rail block is a 150-wide surface at the window's own margin",
+          box and box:GetWidth() == 150, box and box:GetWidth())
+    check("the blocks are 86 / 78 / 86 / 86 tall",
+          panel.rail[1].box:GetHeight() == 86 and panel.rail[2].box:GetHeight() == 78
+            and panel.rail[3].box:GetHeight() == 86 and panel.rail[4].box:GetHeight() == 86)
+    -- The whole block hides as one, which is what stops a stray line drawing
+    -- over another tab when someone adds a fifth fontstring.
+    check("hiding the rail is one call per block", panel.rail[1].box.SetShown ~= nil)
+  end
+
+  -- The vertical hairline is gone; the filled blocks are the separator.
+  check("there is no rail divider any more", panel.stDiv == nil)
+
+  check("the table shows more rows than the mock's twelve sample rows",
+        panel.stRows and #panel.stRows >= 17, panel.stRows and #panel.stRows)
+
+  drive("the standings table renders", function() ns.Panel.Refresh() end)
+
+  local loot = panel.tabs and panel.tabs.Loot
+  if loot then
+    drive("leaving Standings", function() loot.scripts.OnClick(loot) end)
+    check("no rail block draws over another tab",
+          panel.rail and not panel.rail[1].box:IsShown())
+  end
+end
+
 -- ── Report ─────────────────────────────────────────────────────────────────
 
 local names = {}

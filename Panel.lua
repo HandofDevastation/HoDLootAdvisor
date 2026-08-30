@@ -297,25 +297,52 @@ local DIFF_LABEL = {
   MYTHIC = "Raid: Mythic", MPLUS = "Dungeons",
 }
 
-local SEASON_R = 583                 -- season label, right-aligned, on the tab row
-local RAIL_X = 20                    -- the personal rail down the left
-local RAIL_BLOCK_Y = { 117, 213, 299, 395 }   -- Priority · Earned/Spent · Attendance · Last item
--- Which of those carry the big orange figure. Earned/Spent and Last Item Won
+-- ── Standings tab — RE-READ FROM NODE 588:1668 (Session 258) ───────────────
+--
+-- ⚠️ EVERY NUMBER BELOW MOVED. The tab was built against the pre-redesign
+-- window and then never re-read when the frame grew to 740x600, so the rail sat
+-- at x20 against the mock's 40, the table began at 203 against 231, and the row
+-- pitch was 16 against 20. Restyling it from memory would have kept all of
+-- that; these are node positions minus the frame's origin (2558, 1435).
+--
+-- ⚠️ THE VERTICAL DIVIDER IS GONE. The redesign separates the rail from the
+-- table by making the rail's four blocks FILLED SURFACES — the same rule blush
+-- at 10% the Slots page uses — so a hairline between them is a second
+-- separator doing the first one's job.
+local SEASON_R, SEASON_Y = 700, 89   -- season label, right-aligned, on the tab row
+local RAIL_X, RAIL_W = 40, 150
+-- Four blocks, 18 apart, each as tall as its own content. Earned/Spent is 78
+-- because it has no 34px figure; the other three are 86.
+local RAIL_BLOCK_Y = { 129, 233, 329, 433 }   -- Priority · Earned/Spent · Attendance · Last item
+local RAIL_BLOCK_H = { 86, 78, 86, 86 }
+-- Which of those carry the big 34px figure. Earned/Spent and Last Item Won
 -- do NOT, so their text lines start straight under the heading — see
 -- buildRailBlock. Keep this in step with renderRail: a block that sets `big`
 -- must be false here, or its figure and its first line collide.
 local RAIL_BLOCK_COMPACT = { false, true, false, true }
-local ST_DIV_X, ST_DIV_Y, ST_DIV_H = 151, 114, 373
-local ST_HEAD_Y = 117
-local ST_TOP, ST_PITCH = 141, 16
--- Derived from the space the divider encloses, never picked: WoW frames do not
--- clip their children, so a row count larger than the space draws through the
--- footer instead of scrolling.
-local ST_ROWS = math.floor(((ST_DIV_Y + ST_DIV_H) - ST_TOP) / ST_PITCH)
+-- ⚠️ THE TWO BIG FIGURES ARE DIFFERENT COLOURS, which is easy to miss and is
+-- read straight off the node: "#6" inherits the block's white, while the
+-- attendance "2" sits inside a blush run that also carries its "of 3" suffix.
+local RAIL_BLOCK_BIG_COLOR = { "white", nil, "body", nil }
+-- Earned/Spent's two lines are 14px, not the 11px the other blocks use — they
+-- are figures rather than captions.
+local RAIL_BLOCK_LINE_SIZE = { nil, 14, nil, nil }
+local RAIL_PAD = 10
+local ST_HEAD_Y = 132
+local ST_TOP, ST_PITCH = 157, 20
+-- ⚠️ THE MOCK DRAWS 12 ROWS AND THAT IS ILLUSTRATION, NOT A CAP — a real ladder
+-- is 17 to 24 people, and stopping at 12 would leave 120px of empty window and
+-- force scrolling past a screen that had room. Derived from the space the RAIL
+-- occupies instead, so the table and the rail end together: WoW frames do not
+-- clip their children, so a count larger than the space draws through the
+-- footer rather than scrolling. FLAGGED for Jason — if 12 was deliberate, this
+-- is the line to change.
+local ST_BOTTOM = RAIL_BLOCK_Y[4] + RAIL_BLOCK_H[4]
+local ST_ROWS = math.floor((ST_BOTTOM - ST_TOP) / ST_PITCH)
 -- Name is left-aligned; every number column is right-aligned to its own edge,
 -- which is also where the design puts each heading's right edge.
-local ST_RANK_R, ST_NAME = 190, 203
-local ST_EP_R, ST_GP_R, ST_PR_R, ST_LAST_R = 335, 410, 488, 583
+local ST_RANK_R, ST_NAME = 247, 271
+local ST_EP_R, ST_GP_R, ST_PR_R, ST_LAST_R = 415, 489, 595, 700
 
 -- The MOST item rows the column could ever need — when the rail is empty and
 -- the cards have the whole area. How many actually DRAW is decided per refresh
@@ -992,14 +1019,18 @@ local function buildStandingsRow(parent, i)
   row.hl:Hide()
 
   -- Positions are relative to the row, which starts at the rank column's left.
+  -- ⚠️ THE RANK IS THE ONLY BOLD CELL AND THE ONLY BLUSH ONE (node 587:1650):
+  -- 14 Bold in #f2bdad against every other column's 11 Light white. It is the
+  -- column you scan down, so it is the one the design gives weight to.
   local o = ST_RANK_R - 24
-  row.rank = atRight(text(row, "label", "small", "text"), ST_RANK_R - o, 1, 24)
-  -- Regular weight, matching the ranking table — see the note in buildRankRow.
-  row.name = at(text(row, "body", "small", "text"), ST_NAME - o, 1, 110)
-  row.ep   = atRight(text(row, "body", "small", "text"), ST_EP_R - o, 1, 60)
-  row.gp   = atRight(text(row, "body", "small", "text"), ST_GP_R - o, 1, 50)
-  row.pr   = atRight(text(row, "body", "small", "text"), ST_PR_R - o, 1, 50)
-  row.last = atRight(text(row, "body", "small", "text"), ST_LAST_R - o, 1, 60)
+  row.rank = atRight(text(row, "bold", "rank", "body"), ST_RANK_R - o, 1, 24)
+  -- The name is the one cell that takes a colour from the DATA rather than from
+  -- the design — the mock's six sample rows are six real class colours.
+  row.name = at(text(row, "light", "name", "white"), ST_NAME - o, 3, 110)
+  row.ep   = atRight(text(row, "light", "name", "white"), ST_EP_R - o, 3, 60)
+  row.gp   = atRight(text(row, "light", "name", "white"), ST_GP_R - o, 3, 50)
+  row.pr   = atRight(text(row, "light", "name", "white"), ST_PR_R - o, 3, 50)
+  row.last = atRight(text(row, "light", "name", "white"), ST_LAST_R - o, 3, 60)
   return row
 end
 
@@ -1016,21 +1047,42 @@ end
 --- figure's height below its own heading with nothing in between — a gap
 --- Jason marked on both blocks against the Figma frame, where the value sits
 --- immediately under its label.
-local function buildRailBlock(parent, y, compact)
+--- One block of the personal rail, from node 588:1666.
+---
+--- ⚠️ A FILLED SURFACE, NOT FOUR LOOSE LINES. The redesign gives each block the
+--- rule blush at 10% with 10px of padding — the same ground the Slots page's
+--- OBTAINED BY panel and its selected rail row use, which is what makes the two
+--- tabs read as one window.
+---
+--- THE HEADING IS THE HEADING PURPLE (#9f50d4), NOT `railHead` (#936bff). Those
+--- are neighbours and easy to mistake for each other; the mock names the first,
+--- which is the same purple the table's column headers take.
+local function buildRailBlock(parent, y, compact, h)
   local b = {}
-  b.head = at(text(parent, "titleMed", "head", "railHead"), RAIL_X, y, 130)
-  if ns.Style then ns.Style.SetFont(b.head, ns.Style.FONT.titleMed, 16) end
-  b.big = at(text(parent, "titleMed", "title", "orange"), RAIL_X, y + 18, 130)
-  if ns.Style then ns.Style.SetFont(b.big, ns.Style.FONT.titleMed, 34) end
-  -- Sits on the big figure's baseline, for the "/3" in "2/3".
-  b.bigSuffix = at(text(parent, "title", "title", "text"), RAIL_X, y + 26, 130)
-  if ns.Style then ns.Style.SetFont(b.bigSuffix, ns.Style.FONT.title, 21) end
-  -- 20 clears the 16px heading with a hair of breathing room; 54 clears the
+
+  b.box = CreateFrame("Frame", nil, parent)
+  b.box:SetSize(RAIL_W, h or 86)
+  b.box:SetPoint("TOPLEFT", RAIL_X, -y)
+  if ns.Style then ns.Style.Surface(b.box, ns.Style.COLOR.rule, 0.1) end
+
+  local innerW = RAIL_W - RAIL_PAD * 2
+  b.head = at(text(b.box, "bold", "head", "accent"), RAIL_PAD, RAIL_PAD, innerW)
+
+  -- 34px, and there is no token for it: it appears twice on this one tab and
+  -- nowhere else, so it is fed per instance rather than added to the scale.
+  b.big = at(text(b.box, "bold", "title", "white"), RAIL_PAD, RAIL_PAD + 14, innerW)
+  if ns.Style then ns.Style.SetFont(b.big, ns.Style.FONT.bold, 34) end
+  -- Sits on the big figure's baseline, for the "of 3" in "2 of 3".
+  b.bigSuffix = at(text(b.box, "light", "rank", "body"), RAIL_PAD, RAIL_PAD + 36, innerW)
+
+  -- 20 clears the 12px heading with a hair of breathing room; 52 clears the
   -- heading AND the 34px figure. Line pitch is 16 either way.
-  local lineY = compact and 20 or 54
-  b.line1 = at(text(parent, "body", "row", "text"), RAIL_X, y + lineY, 130)
-  b.line2 = at(text(parent, "body", "row", "text"), RAIL_X, y + lineY + 16, 130)
-  b.line3 = at(text(parent, "body", "row", "textMuted"), RAIL_X, y + lineY + 32, 130)
+  local lineY = compact and 20 or 52
+  b.line1 = at(text(b.box, "light", "name", "white"), RAIL_PAD, lineY, innerW)
+  b.line2 = at(text(b.box, "light", "name", "white"), RAIL_PAD, lineY + 16, innerW)
+  -- The age line is the flat grey the mock names, not the white ramp: it is the
+  -- least important line on the tab and the only one given its own hue.
+  b.line3 = at(text(b.box, "light", "name", "grey"), RAIL_PAD, lineY + 32, innerW)
   return b
 end
 
@@ -1449,30 +1501,36 @@ local function buildStandingsTab()
   -- The season, on the tab row's right. Only this tab shows it: the Loot design
   -- leaves that space empty, and a label that appears on one tab and not another
   -- is the design's choice to make, not this file's.
-  frame.season = text(frame, "titleMed", "title", "orange", "RIGHT")
-  if ns.Style then ns.Style.SetFont(frame.season, ns.Style.FONT.titleMed, 16) end
-  frame.season:SetPoint("TOPRIGHT", -(FRAME_W - SEASON_R), -62)
+  -- 14 Bold in the blush, right-aligned to the window's own margin (node
+  -- 588:1667) — not the 16px orange it was, which predates the redesign.
+  frame.season = text(frame, "bold", "rank", "body", "RIGHT")
+  frame.season:ClearAllPoints()
+  frame.season:SetPoint("TOPRIGHT", frame, "TOPLEFT", SEASON_R, -SEASON_Y)
   frame.season:SetWidth(220)
 
   frame.rail = {}
   for i, y in ipairs(RAIL_BLOCK_Y) do
-    frame.rail[i] = buildRailBlock(frame, y, RAIL_BLOCK_COMPACT[i])
+    local b = buildRailBlock(frame, y, RAIL_BLOCK_COMPACT[i], RAIL_BLOCK_H[i])
+    local S = ns.Style
+    if S and RAIL_BLOCK_BIG_COLOR[i] then
+      b.big:SetTextColor(S.rgb(S.COLOR[RAIL_BLOCK_BIG_COLOR[i]]))
+    end
+    if S and RAIL_BLOCK_LINE_SIZE[i] then
+      S.SetFont(b.line1, S.FONT.light, RAIL_BLOCK_LINE_SIZE[i])
+      S.SetFont(b.line2, S.FONT.light, RAIL_BLOCK_LINE_SIZE[i])
+    end
+    frame.rail[i] = b
   end
 
-  frame.stDiv = frame:CreateTexture(nil, "ARTWORK")
-  frame.stDiv:SetSize(1, ST_DIV_H)
-  frame.stDiv:SetPoint("TOPLEFT", ST_DIV_X, -ST_DIV_Y)
-  if ns.Style then
-    frame.stDiv:SetColorTexture(ns.Style.COLOR.rim.r, ns.Style.COLOR.rim.g,
-      ns.Style.COLOR.rim.b, 0.25)
-  end
-
+  -- The column headers are the SAME purple, weight and size as the rail's block
+  -- headings — one heading treatment across the tab, which is what the mock
+  -- draws and what the old 10px white version did not.
   frame.stHead = {
-    at(text(frame, "label", "tiny", "text"), ST_NAME, ST_HEAD_Y, 80),
-    atRight(text(frame, "label", "tiny", "text"), ST_EP_R, ST_HEAD_Y, 40),
-    atRight(text(frame, "label", "tiny", "text"), ST_GP_R, ST_HEAD_Y, 40),
-    atRight(text(frame, "label", "tiny", "text"), ST_PR_R, ST_HEAD_Y, 60),
-    atRight(text(frame, "label", "tiny", "text"), ST_LAST_R, ST_HEAD_Y, 60),
+    at(text(frame, "bold", "head", "accent"), ST_NAME, ST_HEAD_Y, 80),
+    atRight(text(frame, "bold", "head", "accent"), ST_EP_R, ST_HEAD_Y, 40),
+    atRight(text(frame, "bold", "head", "accent"), ST_GP_R, ST_HEAD_Y, 40),
+    atRight(text(frame, "bold", "head", "accent"), ST_PR_R, ST_HEAD_Y, 60),
+    atRight(text(frame, "bold", "head", "accent"), ST_LAST_R, ST_HEAD_Y, 60),
   }
   frame.stHead[1]:SetText("RAIDER")
   frame.stHead[2]:SetText("EP")
@@ -3251,9 +3309,13 @@ local function renderRail(total)
     blocks[1].line1:SetText("No standing yet this season")
   end
 
+  -- ⚠️ THE FIGURES ARE WHITE, NOT GREEN AND RED, and the LABEL is the blush one
+  -- (node 587:1658). The old green-EP / red-GP pair was inventing a good/bad
+  -- reading the design does not make: GP is what you have spent, not a warning.
   if S then
-    blocks[2].line1:SetText("EP " .. S.code(S.COLOR.target) .. ns.Commify(me.ep) .. "|r")
-    blocks[2].line2:SetText("GP " .. S.code(S.COLOR.major) .. ns.Commify(me.gp) .. "|r")
+    local lbl = S.code(S.COLOR.body)
+    blocks[2].line1:SetText(lbl .. "EP |r" .. ns.Commify(me.ep))
+    blocks[2].line2:SetText(lbl .. "GP |r" .. ns.Commify(me.gp))
   else
     blocks[2].line1:SetText("EP " .. ns.Commify(me.ep))
     blocks[2].line2:SetText("GP " .. ns.Commify(me.gp))
@@ -3269,7 +3331,8 @@ local function renderRail(total)
     blocks[3].bigSuffix:ClearAllPoints()
     blocks[3].bigSuffix:SetPoint("BOTTOMLEFT", blocks[3].big, "BOTTOMLEFT",
       blocks[3].big:GetStringWidth() + 1, 3)
-    blocks[3].bigSuffix:SetText("/" .. tostring(me.nightsOf))
+    -- "of 3", which is what the node says. "/3" was the pre-redesign wording.
+    blocks[3].bigSuffix:SetText("of " .. tostring(me.nightsOf))
     -- The first mock's caption here was the PRIORITY block's, duplicated and not
     -- updated ("of 17 • PR 3.9"). Flagged in #250, confirmed an oversight, and
     -- the design now reads "nights present" — which is also exactly what the
@@ -3970,15 +4033,13 @@ function Panel.Refresh()
   -- the season in the same top-right slot; only the Loot design leaves it empty,
   -- because that is where its content control sits.
   frame.season:SetShown(onStandings or onRunner)
-  frame.stDiv:SetShown(onStandings)
   frame.stList:SetShown(onStandings)
   frame.stNote:SetShown(onStandings)
   for _, h in ipairs(frame.stHead) do h:SetShown(onStandings) end
-  for _, b in ipairs(frame.rail) do
-    for _, key in ipairs({ "head", "big", "bigSuffix", "line1", "line2", "line3" }) do
-      b[key]:SetShown(onStandings)
-    end
-  end
+  -- The block's BOX carries every line now, so showing and hiding the group is
+  -- one call rather than six per block — and a line can no longer be left
+  -- visible over another tab because its key was missed off the list.
+  for _, b in ipairs(frame.rail) do b.box:SetShown(onStandings) end
   if not onStandings then
     for i = 1, ST_ROWS do frame.stRows[i]:Hide() end
   end
