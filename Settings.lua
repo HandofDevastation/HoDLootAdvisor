@@ -31,12 +31,12 @@ Settings.SPEC = {
     help = "AUTO picks raid, then party, then say — whatever you are actually in.",
   },
   {
-    key = "showGap", label = "Include Gap From Leader", default = true,
+    key = "showGap", label = "Include Scoring Gap From Leader", default = true,
     kind = "toggle",
     help = "Adds the -4 / -7 margin after each badge.",
   },
   {
-    key = "difficulty", label = "Content", default = "AUTO",
+    key = "difficulty", label = "Announcement Content", default = "AUTO",
     -- MPLUS selects CONTENT, not a difficulty: it swaps the Loot tab to the
     -- season's dungeons. Kept on this one setting because it is one control in
     -- the panel — the design has a single dropdown reading "Raid: Heroic".
