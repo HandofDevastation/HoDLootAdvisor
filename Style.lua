@@ -32,35 +32,44 @@ ns.Style = Style
 local FONT_DIR = "Interface\\AddOns\\HoDLootAdvisor\\Media\\fonts\\"
 
 -- ⚠️ ONE FAMILY NOW, NOT TWO (Session 257). The redesign is set entirely in
--- EXCON, so the old Khand-for-display / General-Sans-for-prose split is gone.
+-- MANROPE, so the old Khand-for-display / General-Sans-for-prose split is gone.
 -- Only two weights are used and both were read out of the mock rather than
 -- chosen: LIGHT carries every label, name and heading, and REGULAR appears in
 -- exactly one place — the text inside a FILLED chip, where dark type on a light
 -- ground needs the extra weight to hold at 9px.
 --
--- ⚠️ THE MOCK IS SET IN THE VARIABLE FONT ("Excon Variable: Light") AND WoW
--- CANNOT READ ONE. The static instances are the same design at fixed weights,
--- which is why the download's own TTF folder is not the one to take: it holds
--- only the variable file. The static weights live under Fonts/WEB/fonts/.
+-- ⚠️ MANROPE BECAUSE OF ITS LICENCE, NOT ONLY ITS SHAPES. The redesign was
+-- drawn in Excon, which is free to USE and — under Fontshare's terms of
+-- 17 Aug 2026 — not free to REDISTRIBUTE in a form anyone can extract, which is
+-- exactly what a .ttf loose in an addon zip on a public repo is. Manrope is
+-- under the SIL Open Font Licence, which permits bundling outright, and its
+-- copyright line names NO Reserved Font Name — so the family may keep its name
+-- even in a modified build. Jason changed the Figma file to match.
 --
--- ⚠️ THESE TWO FILES ARE UNTRACKED PENDING A LICENCE ANSWER — see the note in
--- .gitignore. Style.SetFont falls back to the game font when a file is missing,
--- so a clone without them draws stock rather than not at all.
+-- ⚠️ WoW CANNOT READ A VARIABLE FONT, and Manrope ships as one. These two files
+-- are STATIC INSTANCES cut from it at wght 300 and 400 with fontTools — a
+-- Modified Version in the OFL's sense, which the licence permits and which
+-- carries the same licence onward (Media/fonts/Manrope-OFL.txt). Regenerating
+-- them is a two-line script; the recipe is in FONT-LICENSES.md so nobody has to
+-- rediscover which weights or how.
+--
+-- Style.SetFont falls back to the game font when a file is missing, so a clone
+-- without them draws stock rather than not at all.
 --
 -- The old role NAMES are kept and repointed rather than renamed, because every
 -- other file in the addon asks for a role by name; renaming them would be a
 -- sweep across seventeen files to say the same thing.
 Style.FONT = {
-  title    = FONT_DIR .. "Excon-Light.ttf",
-  titleMed = FONT_DIR .. "Excon-Light.ttf",
-  body     = FONT_DIR .. "Excon-Light.ttf",
-  bodyMed  = FONT_DIR .. "Excon-Light.ttf",
+  title    = FONT_DIR .. "Manrope-Light.ttf",
+  titleMed = FONT_DIR .. "Manrope-Light.ttf",
+  body     = FONT_DIR .. "Manrope-Light.ttf",
+  bodyMed  = FONT_DIR .. "Manrope-Light.ttf",
   -- The filled chip, and nothing else.
-  label    = FONT_DIR .. "Excon-Regular.ttf",
+  label    = FONT_DIR .. "Manrope-Regular.ttf",
   -- The two true weights, for call sites written after the redesign that should
   -- say what they mean rather than inherit a role name from the old pairing.
-  light    = FONT_DIR .. "Excon-Light.ttf",
-  regular  = FONT_DIR .. "Excon-Regular.ttf",
+  light    = FONT_DIR .. "Manrope-Light.ttf",
+  regular  = FONT_DIR .. "Manrope-Regular.ttf",
 }
 
 -- Type scale — every value read off the mock, all whole numbers.
@@ -480,7 +489,13 @@ function Style.Pill(parent, width, height, label, size)
   -- for the standard Button method gets a label that never changes.
   btn.text = btn:CreateFontString(nil, "OVERLAY")
   Style.SetFont(btn.text, Style.FONT.titleMed, Style.SIZE[size or "head"])
-  btn.text:SetTextColor(Style.rgb(Style.COLOR.white))
+  -- ⚠️ REPOINTED TO THE REDESIGN'S PALETTE (Session 257). This primitive still
+  -- draws the filter toggles and the difficulty control, which have no rebuilt
+  -- version yet — and left on the old bright purple they sat beside the new
+  -- controls looking like a different addon had been pasted into the window.
+  -- Moving the COLOURS is not moving the shape: these keep their pill behaviour
+  -- until each is rebuilt from its own mock, they just stop clashing meanwhile.
+  btn.text:SetTextColor(Style.rgb(Style.COLOR.controlText))
   btn.text:SetJustifyH("CENTER")
   btn.text:SetPoint("CENTER")
   btn:SetFontString(btn.text)
@@ -527,7 +542,7 @@ function Style.Pill(parent, width, height, label, size)
     self.fill:SetAlpha(self._alpha or 1)
   end
 
-  btn.fill:SetColorTexture(Style.COLOR.purple.r, Style.COLOR.purple.g, Style.COLOR.purple.b, 1)
+  btn.fill:SetColorTexture(Style.rgb(Style.COLOR.control))
   btn:SetPillState(false)
 
   btn:HookScript("OnEnter", function(s)
@@ -586,7 +601,22 @@ function Style.Control(parent, label, size)
   btn.text:SetJustifyH("CENTER")
   btn.text:SetPoint("CENTER")
   btn:SetFontString(btn.text)
-  btn.text:SetText(label or "")
+  btn._label = label or ""
+  btn.text:SetText(btn._label)
+
+  --- ⚠️ FORCE THE STRING TO REDRAW. Handing a fontstring the value it already
+  --- holds does not repaint it, so a control whose FIRST paint happened while it
+  --- was HIDDEN stays blank for the rest of the session — its string never
+  --- changes, so nothing ever redraws it. That is the Session 254 rule, and the
+  --- tab row is the second family of widget to hit it: Standings is hidden until
+  --- a raid night is imported, so it was built, painted blank, and then shown as
+  --- an empty box that had measured its own label correctly all along.
+  --- Writing a different string first is what makes the second write a change.
+  function btn:Repaint()
+    self.text:SetText("")
+    self.text:SetText(self._label or "")
+    return self
+  end
 
   --- Re-measure and resize to the current label. Safe to call repeatedly.
   function btn:FitToLabel()
@@ -615,7 +645,8 @@ function Style.Control(parent, label, size)
   end
 
   function btn:SetLabel(s)
-    self.text:SetText(s or "")
+    self._label = s or ""
+    self.text:SetText(self._label)
     return self:FitToLabel()
   end
 
