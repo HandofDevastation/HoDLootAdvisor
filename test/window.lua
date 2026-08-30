@@ -100,6 +100,14 @@ function real.GetObjectType(self) return self._kind end
 function real.GetRegions(self) return table.unpack(self._children) end
 function real.GetChildren(self) return table.unpack(self._children) end
 function real.GetTexture(self) return self._texture end
+-- Recorded rather than invented, so a test can actually READ what a rim was
+-- painted. Colour is the one property here worth observing: a gradient with its
+-- stops the wrong way round is invisible to every other check and costs a
+-- screenshot round-trip to find.
+function real.SetColorTexture(self, r, g, b, a) self._color = { r, g, b, a or 1 } end
+function real.SetGradient(self, orientation, c1, c2)
+  self._gradient = { orientation = orientation, from = c1, to = c2 }
+end
 function real.SetTexture(self, t) self._texture = t end
 function real.GetName(self) return self._name end
 
@@ -136,6 +144,9 @@ _G.ChatFontNormal = newWidget("Font", "ChatFontNormal")
 _G.NORMAL_FONT_COLOR = { r = 1, g = 0.82, b = 0 }
 _G.GameTooltip = newWidget("Frame", "GameTooltip")
 _G.GameFontNormal = newWidget("Font", "GameFontNormal")
+-- CreateColor returns the table SetGradient is handed, so a test can compare
+-- the stops it was actually given.
+_G.CreateColor = function(r, g, b, a) return { r = r, g = g, b = b, a = a or 1 } end
 
 -- ── Load everything, windows included ──────────────────────────────────────
 
@@ -208,6 +219,39 @@ drive("selecting each boss in turn expands its loot without erroring", function(
     if tile.scripts.OnClick and tile.bossIndex then tile.scripts.OnClick(tile) end
   end
 end)
+
+header("The control rim is the gradient the design asks for")
+
+-- ⚠️ ORIENTATION IS THE WHOLE RISK HERE. WoW's SetGradient puts its FIRST
+-- colour at the BOTTOM, which is the opposite of how the design reads
+-- ("#6f2b57 on top, #ac7666 on bottom") — so a faithful-looking call can be
+-- upside down and nothing but a screenshot would say so.
+do
+  local S = ns.Style
+  local host = _G.CreateFrame("Frame")
+  local rim = S.Rim(host, S.COLOR.controlRim, 1, 1, S.COLOR.rule)
+
+  local function near(c, want)
+    return c and math.abs(c[1] - want.r) < 0.01 and math.abs(c[2] - want.g) < 0.01
+  end
+  check("the top edge takes the TOP stop", near(rim.top._color, S.COLOR.controlRim),
+        rim.top._color and table.concat(rim.top._color, ","))
+  check("the bottom edge takes the BOTTOM stop", near(rim.bottom._color, S.COLOR.rule),
+        rim.bottom._color and table.concat(rim.bottom._color, ","))
+
+  local g = rim.left._gradient
+  check("the side edges carry a vertical ramp", g ~= nil and g.orientation == "VERTICAL")
+  check("...whose first stop is the BOTTOM colour, as WoW orders them",
+        g and g.from and math.abs(g.from.r - S.COLOR.rule.r) < 0.01,
+        g and g.from and ("%.2f"):format(g.from.r))
+  check("...and whose second is the TOP colour",
+        g and g.to and math.abs(g.to.r - S.COLOR.controlRim.r) < 0.01)
+
+  -- A flat rim must stay flat: an ACTIVE tab is filled and borderless in the
+  -- mock, and a gradient left on it would outline the one control that has none.
+  local flat = S.Rim(_G.CreateFrame("Frame"), S.COLOR.control, 1)
+  check("a rim asked for one colour draws no ramp", flat.left._gradient == nil)
+end
 
 header("No window file reads a constant that was deleted")
 

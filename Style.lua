@@ -626,7 +626,13 @@ function Style.Control(parent, label, size)
   btn.fill:SetColorTexture(Style.rgb(Style.COLOR.control))
   btn.fill:Hide()
 
-  btn.rim = Style.Rim(btn, Style.COLOR.controlRim, 1)
+  -- ⚠️ A VERTICAL GRADIENT, #6f2b57 AT THE TOP TO #ac7666 AT THE BOTTOM (Jason,
+  -- read out of Figma's Inspect panel — the code output flattens a gradient
+  -- stroke to its first stop, which is why this looked like a solid #6f2b57 for
+  -- three rounds). Both stops are already tokens: the rim's own colour, and the
+  -- SAME #ac7666 the row rules and the MINOR badge are drawn in, which is the
+  -- title lockup's far end. One warm colour running through the whole panel.
+  btn.rim = Style.Rim(btn, Style.COLOR.controlRim, 1, 1, Style.COLOR.rule)
 
   -- Built the way Style.Pill is, for the reason recorded there: a fixed width on
   -- the fontstring plus no SetFontString wiring shipped a row of blank controls
@@ -670,12 +676,15 @@ function Style.Control(parent, label, size)
   function btn:SetActive(on)
     self._on = on and true or false
     if self._on then
+      -- An ACTIVE control is filled and has no visible border in the mock, so
+      -- its rim takes the fill's own colour rather than being hidden — four
+      -- edges hidden and re-shown is more state than a repaint.
       self.fill:Show()
       self.rim:SetColor(Style.COLOR.control, 1)
       self.text:SetAlpha(1)
     else
       self.fill:Hide()
-      self.rim:SetColor(Style.COLOR.controlRim, 1)
+      self.rim:SetColor(Style.COLOR.controlRim, 1, Style.COLOR.rule)
       self.text:SetAlpha(0.5)
     end
   end
@@ -924,7 +933,10 @@ function Style.Check(parent, label, boxSize)
   btn.box = CreateFrame("Frame", nil, btn)
   btn.box:SetSize(s, s)
   btn.box:SetPoint("LEFT", 0, 0)
-  btn.box.rim = Style.Rim(btn.box, Style.COLOR.controlRim, 1)
+  -- The same gradient as a control's rim. Its node reported the same flattened
+  -- #6f2b57, and it sits directly above the difficulty control — two borders in
+  -- one corner that did not match would be the tell that one of them is wrong.
+  btn.box.rim = Style.Rim(btn.box, Style.COLOR.controlRim, 1, 1, Style.COLOR.rule)
 
   -- ⚠️ THE TICK IS THE DESIGN'S OWN PATH, EXPORTED, NOT BLIZZARD'S CHECKMARK.
   -- It was UI-CheckBox-Check, which is a chunky gold-ish glyph that overhung
