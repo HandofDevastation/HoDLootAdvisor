@@ -47,11 +47,21 @@ local ROLL_COLOR = {
 -- holds several characters' runs and "which of mine was that" is a question the
 -- list has to answer at a glance.
 local FRAME_W, FRAME_H = 760, 560
-local LIST_TOP, LIST_BOTTOM = 92, 76
+-- The window's own margin, matching Import and Settings.
+local LOG_X = 40
+-- Filters on the first content line, column headings beneath, lists under those
+-- — the same three bands the Standings tab has.
+local LOG_FILTER_Y, LOG_HEAD_Y = 128, 168
+local LIST_TOP, LIST_BOTTOM = 190, 90
 local LIST_H = FRAME_H - LIST_TOP - LIST_BOTTOM
+-- The run rail keeps its width: SavedVariables are account-wide, so the column
+-- carries the recording CHARACTER too and "which of mine was that" has to be
+-- answerable at a glance.
 local SESSION_W = 272
-local ITEMS_X = 292
-local SESSION_ROW_H, ITEM_ROW_H = 34, 18
+local ITEMS_X = LOG_X + SESSION_W + 20
+-- 20 is the Standings row pitch, and the item list IS that table with different
+-- columns. The run rows stay taller because each carries two lines.
+local SESSION_ROW_H, ITEM_ROW_H = 34, 20
 local SESSION_ROWS = math.floor(LIST_H / SESSION_ROW_H)
 local ITEM_ROWS    = math.floor(LIST_H / ITEM_ROW_H)
 
@@ -74,11 +84,37 @@ local state = {
 -- Small builders
 -- ---------------------------------------------------------------------------
 
+-- ⚠️ ONE SEAM RESTYLES THE WHOLE WINDOW (Session 258). Every fontstring in this
+-- file already went through fs(), so mapping the Blizzard template names it is
+-- called with onto the redesign's roles restyles the Loot Log without touching
+-- ninety call sites — and without inventing a second vocabulary for the same
+-- three text weights. The template name stays as the CALLER'S way of saying
+-- "normal / small / muted", which is what it always meant here.
+--
+-- THIS WINDOW HAS NO MOCK. Jason asked for a first pass drawn from the pages
+-- that do (#257): the Runner's rail-and-detail shape for the list, Standings'
+-- column treatment for the rows, the Import window's chrome for the buttons.
+-- Anything here that reads as a decision is one of those three, applied.
+local FS_ROLE = {
+  GameFontNormal        = { "light",   "head", "white" },
+  GameFontNormalSmall   = { "light",   "name", "white" },
+  GameFontHighlightSmall= { "light",   "name", "white" },
+  GameFontDisableSmall  = { "light",   "name", "textDim" },
+}
+
 local function fs(parent, template, x, y, width, justify)
-  local t = parent:CreateFontString(nil, "OVERLAY", template or "GameFontNormal")
+  local S = ns.Style
+  local role = FS_ROLE[template or "GameFontNormal"]
+  local t
+  if S and role then
+    t = S.Text(parent, role[1], role[2], S.COLOR[role[3]], justify or "LEFT")
+  else
+    t = parent:CreateFontString(nil, "OVERLAY", template or "GameFontNormal")
+    t:SetJustifyH(justify or "LEFT")
+  end
+  t:ClearAllPoints()
   if x then t:SetPoint("TOPLEFT", x, y) end
   if width then t:SetWidth(width) end
-  t:SetJustifyH(justify or "LEFT")
   t:SetWordWrap(false)
   return t
 end
@@ -100,9 +136,16 @@ local function buildSessionRow(parent, i)
   row:SetPoint("TOPLEFT", 0, -(i - 1) * SESSION_ROW_H)
   row:SetPoint("TOPRIGHT", 0, -(i - 1) * SESSION_ROW_H)
 
+  -- The Slots rail's selected ground: the rule blush at 10%. The old gold wash
+  -- is the pre-redesign accent.
   row.hl = row:CreateTexture(nil, "BACKGROUND")
   row.hl:SetAllPoints()
-  row.hl:SetColorTexture(0.95, 0.77, 0.42, 0.16)
+  if ns.Style then
+    row.hl:SetColorTexture(ns.Style.COLOR.rule.r, ns.Style.COLOR.rule.g,
+      ns.Style.COLOR.rule.b, 0.1)
+  else
+    row.hl:SetColorTexture(0.95, 0.77, 0.42, 0.16)
+  end
   row.hl:Hide()
 
   row.title = fs(row, "GameFontNormalSmall", 4, -3, SESSION_W - 10)
@@ -144,9 +187,15 @@ local function buildItemRow(parent, i)
   row:SetPoint("TOPLEFT", 0, -(i - 1) * ITEM_ROW_H)
   row:SetPoint("TOPRIGHT", 0, -(i - 1) * ITEM_ROW_H)
 
+  -- A HOVER, not a selection, so it is the lighter of the two grounds.
   row.hl = row:CreateTexture(nil, "BACKGROUND")
   row.hl:SetAllPoints()
-  row.hl:SetColorTexture(1, 1, 1, 0.06)
+  if ns.Style then
+    row.hl:SetColorTexture(ns.Style.COLOR.rule.r, ns.Style.COLOR.rule.g,
+      ns.Style.COLOR.rule.b, 0.06)
+  else
+    row.hl:SetColorTexture(1, 1, 1, 0.06)
+  end
   row.hl:Hide()
 
   -- Leaving a CHILD of the row is not leaving the row. Every OnLeave in here
@@ -185,6 +234,9 @@ local function buildItemRow(parent, i)
     self:GetParent().hl:Show()
     local link = self:GetParent().link
     if not link then return end
+    -- ⚠️ THE GAME'S OWN ITEM CARD, DELIBERATELY. Stats, sockets, set bonuses
+    -- and the upgrade track are Blizzard's to draw; Tip.lua is for the addon's
+    -- own explanatory tooltips. The S254 rule names both halves.
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:SetHyperlink(link)
     GameTooltip:Show()
@@ -215,14 +267,14 @@ local function buildItemRow(parent, i)
 
   row.del:SetScript("OnEnter", function(self)
     self.x:SetTextColor(unpack(RED))
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:SetText("Remove This Drop", 1, 1, 1)
-    GameTooltip:AddLine("Deletes only this item. The rest of the run is kept.", 0.8, 0.8, 0.8, true)
-    GameTooltip:Show()
+    ns.Tip:SetOwner(self, "ANCHOR_RIGHT")
+    ns.Tip:SetText("Remove This Drop", 1, 1, 1)
+    ns.Tip:AddLine("Deletes only this item. The rest of the run is kept.", 0.8, 0.8, 0.8, true)
+    ns.Tip:Show()
   end)
   row.del:SetScript("OnLeave", function(self)
     self.x:SetTextColor(unpack(MUTED))
-    GameTooltip:Hide()
+    ns.Tip:Hide()
     hoverOff(self)
   end)
   row.del:SetScript("OnClick", function(self)
@@ -300,15 +352,39 @@ local function build()
   frame:SetFrameStrata("DIALOG")
   ns.MakeWindow(frame)
   frame:Hide()
-  frame.TitleText:SetText("Loot Advisor — Loot Log")
 
-  -- Filter
+  local S = ns.Style
+  -- The secondary windows' lighter violet, over what MakeWindow put down.
+  if S then
+    if frame.bgTex then frame.bgTex:Hide() end
+    if frame.headTex then frame.headTex:Hide() end
+    if frame.headLine then frame.headLine:Hide() end
+    S.Surface(frame, S.COLOR.windowGround, 1)
+    S.Rim(frame, S.COLOR.rim, 0.4)
+    S.Lockup(frame, LOG_X, 30)
+  end
+
+  frame.heading = S and S.Text(frame, "light", "title", S.COLOR.white, "LEFT")
+    or frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  if S then S.SetFont(frame.heading, S.FONT.light, 18) end
+  frame.heading:ClearAllPoints()
+  frame.heading:SetPoint("TOPLEFT", LOG_X, -86)
+  frame.heading:SetText("LOOT LOG")
+
+  -- ── Filters ───────────────────────────────────────────────────────────────
+  -- The panel's tab treatment: one primitive, the selected one FILLED and the
+  -- rest outlined at half strength. These behave as tabs, so they should look
+  -- like the ones on the panel rather than like stock buttons.
   frame.filters = {}
+  local fx = LOG_X
   for i, f in ipairs(FILTERS) do
-    local b = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    b:SetSize(70, 22)
-    b:SetPoint("TOPLEFT", 14 + (i - 1) * 72, -30)
-    b:SetText(f.label)
+    local b = S and S.Control(frame, f.label) or
+      CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    b:SetHeight(27)
+    if b.FitToLabel then b:Repaint():FitToLabel() else b:SetSize(70, 22) end
+    b:SetPoint("TOPLEFT", fx, -LOG_FILTER_Y)
+    fx = fx + (b:GetWidth() or 70) + 10
+    if not S then b:SetText(f.label) end
     b:SetScript("OnClick", function()
       state.filter     = f.key
       state.selected   = nil
@@ -319,19 +395,27 @@ local function build()
     frame.filters[i] = b
   end
 
-  frame.summary = fs(frame, "GameFontNormalSmall", ITEMS_X, -34, FRAME_W - ITEMS_X - 16, "RIGHT")
-  frame.summary:SetTextColor(unpack(MUTED))
+  -- Right-aligned on the heading line, where Standings puts its season.
+  frame.summary = fs(frame, "GameFontNormalSmall", ITEMS_X, -92,
+    FRAME_W - ITEMS_X - LOG_X, "RIGHT")
 
-  frame.sessHead = fs(frame, "GameFontNormalSmall", 16, -70, SESSION_W)
-  frame.sessHead:SetTextColor(unpack(GOLD))
-  frame.sessHead:SetText("Instance Runs")
-
-  frame.itemHead = fs(frame, "GameFontNormalSmall", ITEMS_X + 2, -70, FRAME_W - ITEMS_X - 20)
-  frame.itemHead:SetTextColor(unpack(GOLD))
+  -- ⚠️ COLUMN HEADINGS TAKE THE HEADING PURPLE, not the old gold — the same
+  -- treatment the Standings table and the Settings rows use. Gold is the
+  -- pre-redesign accent and appears nowhere in the new palette.
+  frame.sessHead = fs(frame, "GameFontNormal", LOG_X, -LOG_HEAD_Y, SESSION_W)
+  frame.itemHead = fs(frame, "GameFontNormal", ITEMS_X, -LOG_HEAD_Y,
+    FRAME_W - ITEMS_X - LOG_X)
+  if S then
+    for _, h in ipairs({ frame.sessHead, frame.itemHead }) do
+      S.SetFont(h, S.FONT.bold, S.SIZE.head)
+      h:SetTextColor(S.rgb(S.COLOR.accent))
+    end
+  end
+  frame.sessHead:SetText("INSTANCE RUNS")
 
   -- Session list
   frame.sessList = CreateFrame("Frame", nil, frame)
-  frame.sessList:SetPoint("TOPLEFT", 14, -LIST_TOP)
+  frame.sessList:SetPoint("TOPLEFT", LOG_X, -LIST_TOP)
   frame.sessList:SetWidth(SESSION_W)
   frame.sessList:SetHeight(LIST_H)
   frame.sessList:EnableMouseWheel(true)
@@ -366,65 +450,80 @@ local function build()
 
   frame.more = fs(frame, "GameFontDisableSmall", nil, nil, 300)
   frame.more:ClearAllPoints()
-  frame.more:SetPoint("BOTTOMLEFT", 16, 56)
+  frame.more:SetPoint("BOTTOMLEFT", LOG_X, 62)
 
   -- Footer controls
-  frame.tag = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.tag:SetSize(120, 22)
-  frame.tag:SetPoint("BOTTOMLEFT", 14, 12)
+  -- ⚠️ THE IMPORT WINDOW'S CHROME, per Jason's brief for this page: the
+  -- redesign's Control primitive at 26 tall on the window's own 40px margins,
+  -- rather than four stock buttons at 22 on a 14px inset.
+  frame.tag = S and S.Control(frame, "GUILD / PERSONAL")
+    or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  frame.tag:SetSize(150, 26)
+  frame.tag:SetPoint("BOTTOMLEFT", LOG_X, 27)
+  if frame.tag.SetActive then frame.tag:SetActive(false) end
+  if frame.tag.Repaint then frame.tag:Repaint() end
   frame.tag:SetScript("OnClick", function() RecordWindow.ToggleKind() end)
   frame.tag:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:SetText("Guild or Personal", 1, 1, 1)
-    GameTooltip:AddLine("Guild runs are what the website's loot history is for. Personal runs stay here, in the addon, and are left out of the bulk export.", 0.8, 0.8, 0.8, true)
-    GameTooltip:AddLine("Set automatically — raid group means guild — and always yours to change.", 0.8, 0.8, 0.8, true)
-    GameTooltip:Show()
+    ns.Tip:SetOwner(self, "ANCHOR_RIGHT")
+    ns.Tip:SetText("Guild or Personal", 1, 1, 1)
+    ns.Tip:AddLine("Guild runs are what the website's loot history is for. Personal runs stay here, in the addon, and are left out of the bulk export.", 0.8, 0.8, 0.8, true)
+    ns.Tip:AddLine("Set automatically — raid group means guild — and always yours to change.", 0.8, 0.8, 0.8, true)
+    ns.Tip:Show()
   end)
-  frame.tag:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  frame.tag:SetScript("OnLeave", function() ns.Tip:Hide() end)
 
-  frame.del = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.del:SetSize(110, 22)
-  frame.del:SetPoint("LEFT", frame.tag, "RIGHT", 8, 0)
-  frame.del:SetText("Delete Run")
+  frame.del = S and S.Control(frame, "DELETE RUN")
+    or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  frame.del:SetSize(110, 26)
+  frame.del:SetPoint("LEFT", frame.tag, "RIGHT", 10, 0)
+  if frame.del.SetActive then frame.del:SetActive(false) end
+  if frame.del.Repaint then frame.del:Repaint() end
+  if not S then frame.del:SetText("Delete Run") end
   frame.del:SetScript("OnClick", function() RecordWindow.ConfirmDelete() end)
   frame.del:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:SetText("Delete Run", 1, 1, 1)
-    GameTooltip:AddLine("Removes only the selected instance run. Everything else is kept.", 0.8, 0.8, 0.8, true)
-    GameTooltip:Show()
+    ns.Tip:SetOwner(self, "ANCHOR_RIGHT")
+    ns.Tip:SetText("Delete Run", 1, 1, 1)
+    ns.Tip:AddLine("Removes only the selected instance run. Everything else is kept.", 0.8, 0.8, 0.8, true)
+    ns.Tip:Show()
   end)
-  frame.del:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  frame.del:SetScript("OnLeave", function() ns.Tip:Hide() end)
 
-  frame.expSel = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.expSel:SetSize(120, 22)
-  frame.expSel:SetPoint("BOTTOMRIGHT", -144, 12)
-  frame.expSel:SetText("Export This Run")
+  frame.expSel = S and S.Control(frame, "EXPORT THIS RUN")
+    or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  frame.expSel:SetSize(140, 26)
+  frame.expSel:SetPoint("BOTTOMRIGHT", -(LOG_X + 160), 27)
+  if frame.expSel.SetActive then frame.expSel:SetActive(false) end
+  if frame.expSel.Repaint then frame.expSel:Repaint() end
+  if not S then frame.expSel:SetText("Export This Run") end
   frame.expSel:SetScript("OnClick", function()
     if state.selected then RecordWindow.ShowExport({ index = state.selected }) end
   end)
   frame.expSel:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-    GameTooltip:SetText("Export This Run", 1, 1, 1)
-    GameTooltip:AddLine("Just the selected run — a few KB, and the only way a Personal run ever leaves the addon.", 0.8, 0.8, 0.8, true)
-    GameTooltip:Show()
+    ns.Tip:SetOwner(self, "ANCHOR_LEFT")
+    ns.Tip:SetText("Export This Run", 1, 1, 1)
+    ns.Tip:AddLine("Just the selected run — a few KB, and the only way a Personal run ever leaves the addon.", 0.8, 0.8, 0.8, true)
+    ns.Tip:Show()
   end)
-  frame.expSel:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  frame.expSel:SetScript("OnLeave", function() ns.Tip:Hide() end)
 
-  frame.expAll = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.expAll:SetSize(126, 22)
-  frame.expAll:SetPoint("BOTTOMRIGHT", -14, 12)
-  frame.expAll:SetText("Export Guild Loot")
+  frame.expAll = S and S.Control(frame, "EXPORT GUILD LOOT")
+    or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  frame.expAll:SetSize(150, 26)
+  frame.expAll:SetPoint("BOTTOMRIGHT", -LOG_X, 27)
+  if frame.expAll.SetActive then frame.expAll:SetActive(false) end
+  if frame.expAll.Repaint then frame.expAll:Repaint() end
+  if not S then frame.expAll:SetText("Export Guild Loot") end
   frame.expAll:SetScript("OnClick", function()
     RecordWindow.ShowExport({ kind = ns.Record.GUILD })
   end)
   frame.expAll:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-    GameTooltip:SetText("Export Guild Loot", 1, 1, 1)
-    GameTooltip:AddLine("Every Guild run, for pasting into the website's loot import. Personal runs are never included here.", 0.8, 0.8, 0.8, true)
-    GameTooltip:AddLine("The site de-duplicates, so importing this alongside HoDLootTracker's export is harmless.", 0.8, 0.8, 0.8, true)
-    GameTooltip:Show()
+    ns.Tip:SetOwner(self, "ANCHOR_LEFT")
+    ns.Tip:SetText("Export Guild Loot", 1, 1, 1)
+    ns.Tip:AddLine("Every Guild run, for pasting into the website's loot import. Personal runs are never included here.", 0.8, 0.8, 0.8, true)
+    ns.Tip:AddLine("The site de-duplicates, so importing this alongside HoDLootTracker's export is harmless.", 0.8, 0.8, 0.8, true)
+    ns.Tip:Show()
   end)
-  frame.expAll:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  frame.expAll:SetScript("OnLeave", function() ns.Tip:Hide() end)
 end
 
 -- ---------------------------------------------------------------------------
@@ -817,8 +916,15 @@ function RecordWindow.Refresh()
   frame.tag:SetEnabled(s ~= nil)
   frame.del:SetEnabled(s ~= nil)
   frame.expSel:SetEnabled(s ~= nil)
-  frame.tag:SetText(s and (s.kind == ns.Record.PERSONAL and "Mark Guild" or "Mark Personal")
-    or "Mark Personal")
+  -- ⚠️ SET _label, NOT JUST THE STRING. Style.Control remembers its own label
+  -- and Repaint() rewrites the fontstring FROM it — so a SetText alone is
+  -- undone the next time anything repaints this button, and the label silently
+  -- reverts to whatever it was built with. FitToLabel because the two words are
+  -- different lengths.
+  local tagLabel = (s and s.kind == ns.Record.PERSONAL) and "MARK GUILD" or "MARK PERSONAL"
+  frame.tag._label = tagLabel
+  frame.tag:SetText(tagLabel)
+  if frame.tag.FitToLabel then frame.tag:FitToLabel() end
 end
 
 function RecordWindow.Toggle()

@@ -677,6 +677,40 @@ do
   check("...and turning it off restores the footer", panel.load:IsShown())
 end
 
+header("The three secondary windows (Session 258)")
+
+-- ⚠️ NOTHING BUILT THESE BEFORE. This file drove the PANEL and left Import,
+-- Settings and the Loot Log to a static scan that only reads them — so all
+-- three could be rewritten, pass every check, and error on first open. They
+-- were rewritten in this session, which is exactly when that gap matters.
+do
+  drive("the Import window builds and opens", function() ns.LoadWindow.Toggle() end)
+  drive("...and closes", function() ns.LoadWindow.Toggle() end)
+
+  drive("the Settings window builds and opens", function() ns.Settings.Toggle() end)
+  drive("...and refreshes", function() ns.Settings.Refresh() end)
+  drive("...and closes", function() ns.Settings.Toggle() end)
+
+  drive("the Loot Log builds and opens", function() ns.RecordWindow.Toggle() end)
+  drive("...and refreshes", function() ns.RecordWindow.Refresh() end)
+  drive("...and closes", function() ns.RecordWindow.Toggle() end)
+
+  -- Settings is SPEC-driven, so a row that gained a control kind nothing
+  -- renders would leave a labelled gap rather than erroring.
+  local cfg = _G.HoDLootAdvisorConfigFrame
+  check("every setting drew a control",
+        cfg and cfg.rows and #cfg.rows == #ns.Settings.SPEC,
+        cfg and cfg.rows and ("%d rows for %d settings"):format(#cfg.rows, #ns.Settings.SPEC))
+  if cfg and cfg.rows then
+    local missing = {}
+    for _, row in ipairs(cfg.rows) do
+      if not row.control then missing[#missing + 1] = row.spec.key end
+    end
+    check("...and none of them is a label with nothing beside it",
+          #missing == 0, table.concat(missing, ", "))
+  end
+end
+
 -- ── Report ─────────────────────────────────────────────────────────────────
 
 local names = {}
