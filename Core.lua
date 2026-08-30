@@ -632,6 +632,21 @@ function ns.BisCountsByInstance()
   return out
 end
 
+--- A section heading in two tones: the label in the heading purple, the value
+--- in white, as ONE string for a single fontstring.
+---
+--- ⚠️ IN CORE FOR TWO REASONS, and the second one bit immediately. It is
+--- display logic Panel.lua could hold, but Panel.lua is the file no harness
+--- loads — and adding it there as a file-scope local pushed the chunk past Lua
+--- 5.1's ceiling of 200 top-level locals, so the game would have refused the
+--- whole file while lua5.4 compiled it happily. Core §1.1's S250/S254 box: the
+--- limits differ at each layer, and luajit is the only check that sees them.
+function ns.HeadingTwoTone(label, value)
+  local S = ns.Style
+  if not S then return (label or "") .. (value or "") end
+  return S.code(S.COLOR.accent) .. (label or "") .. "|r" .. (value or "")
+end
+
 -- ---------------------------------------------------------------------------
 -- The Slots page (Session 258)
 -- ---------------------------------------------------------------------------

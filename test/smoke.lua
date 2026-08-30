@@ -4139,6 +4139,39 @@ header("Every file compiles under Lua 5.1 — the version the game runs")
     check(("%s compiles under 5.1"):format(path), err == "",
           err ~= "" and (err:gsub("%s+$", "")) or nil)
   end
+
+  -- ── Headroom against the 200-local ceiling ────────────────────────────────
+  --
+  -- ⚠️ "IT COMPILES" IS NOT THE SAME AS "THERE IS ROOM TO ADD A LINE", and the
+  -- difference is a whole file the game refuses. Panel.lua reached EXACTLY 200
+  -- top-level locals in Session 258: it compiled, every 5.4 test passed, and the
+  -- next constant anyone declared would have failed the file in game with no
+  -- syntax error to point at — the S250 failure mode, where a file that never
+  -- compiles reports as a MISSING MODULE.
+  --
+  -- So this measures the margin rather than the pass. It probes by prepending
+  -- throwaway locals and asking luajit, which is the only parser here that
+  -- counts the way the client does.
+  local MARGIN = 5
+  local function headroom(path, want)
+    local src = io.open(path):read("a")
+    local probe = ("local __hr%d = %d\n"):rep(want):format(
+      table.unpack((function() local t = {} for i = 1, want * 2 do t[i] = i end return t end)()))
+    local tmp = os.tmpname() .. ".lua"
+    local fh = io.open(tmp, "w"); fh:write(probe .. src); fh:close()
+    local pipe = io.popen(("luajit -bl %q 2>&1 >/dev/null"):format(tmp))
+    local err = pipe and pipe:read("*a") or ""
+    if pipe then pipe:close() end
+    os.remove(tmp)
+    return not err:match("200 local variables")
+  end
+
+  for _, path in ipairs(FILES) do
+    check(("%s has room for %d more top-level locals"):format(path, MARGIN),
+          headroom(path, MARGIN),
+          "at the Lua 5.1 ceiling — group new constants into a table "
+            .. "(see SL / RAIL / FOOT in Panel.lua) rather than adding names")
+  end
 end)()
 
 -- ── Every helper the window files call actually exists ──────────────────────

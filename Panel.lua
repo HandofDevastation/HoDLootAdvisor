@@ -248,49 +248,67 @@ local SL = {
   chipH = 15, chipGap = 6,
 }
 
--- ── Runner tab (Session 252, from Jason's mock) ─────────────────────────────
--- Panel-relative, read off the Figma frame rather than eyeballed: the mock's
--- origin is (2383, 779) and every number below is a node position minus that.
+-- ── Runner tab — RE-READ FROM NODE 589:1735 (Session 258) ──────────────────
 --
--- A left RAIL of state (are you running it, what is loaded, the two controls)
--- and a right COLUMN of detail, split by a full-height hairline — the same
--- shape the Standings tab uses, which is what makes the two read as one design.
-local RN_RAIL_X      = 20
-local RN_RAIL_W      = 120
-local RN_STATUS_Y    = 117    -- "YOU ARE RUNNING LOOT", wraps to two lines
-local RN_SINCE_Y     = 158
-local RN_DATA_Y      = 233    -- "TONIGHT'S DATA"
-local RN_RAIDERS_Y   = 252
-local RN_RANKED_Y    = 272
-local RN_IMPORTED_Y  = 296
-local RN_SYNCED_Y    = 309
-local RN_AUTO_Y      = 428    -- the two rail controls, 119x24 in the mock
-local RN_TOGGLE_Y    = 462
-local RN_BTN_X, RN_BTN_W, RN_BTN_H = 16, 119, 24
+-- ⚠️ EVERY NUMBER MOVED, for the same reason Standings did: this was built
+-- against the pre-redesign window and never re-read when the frame grew. The
+-- rail was 120 wide at x20 against the mock's 180 at x40, and the column began
+-- at 178 against 260. Numbers are node positions minus the frame's origin
+-- (2558, 2109).
+--
+-- ⚠️ THE FULL-HEIGHT HAIRLINE IS GONE, exactly as on Standings: the rail's two
+-- blocks are FILLED SURFACES now, so a vertical rule beside them is a second
+-- separator doing the first one's job. Its three HORIZONTAL rules stay — those
+-- separate sections within the column, which is a different job.
+local RN_RAIL_X      = 40
+local RN_RAIL_W      = 180
+local RN_PAD         = 10
+-- Two blocks, 10 apart. The first is 73 and the second 93 — each as tall as its
+-- own content, like the Standings rail.
+local RN_STATUS_BLOCK_Y, RN_STATUS_BLOCK_H = 129, 73
+local RN_DATA_BLOCK_Y,   RN_DATA_BLOCK_H   = 212, 93
+-- Inside the status block: two 16px lines of Bold 14, then the "since" line.
+local RN_STATUS_Y    = 139    -- "YOU ARE RUNNING LOOT", wraps to two lines
+local RN_SINCE_Y     = 171
+-- Inside the data block. The two age lines are 9px, which is smaller than
+-- anything else in the panel and is what the node says.
+local RN_DATA_Y      = 222    -- "TONIGHT'S DATA"
+local RN_RAIDERS_Y   = 236
+local RN_RANKED_Y    = 254
+local RN_IMPORTED_Y  = 270
+local RN_SYNCED_Y    = 282
+-- The two rail controls are the rail's OWN width now, not an inset 119.
+local RN_AUTO_Y      = 456
+local RN_TOGGLE_Y    = 493
+local RN_BTN_X, RN_BTN_W, RN_BTN_H = RN_RAIL_X, RN_RAIL_W, 26
 
-local RN_DIV_X, RN_DIV_Y, RN_DIV_H = 151, 113, 373
-
-local RN_COL_X       = 178
-local RN_COL_W       = 406    -- the mock's divider width; the column matches it
-local RN_LEAD_Y      = 115
-local RN_LEAD_SUB_Y  = 133
-local RN_LEAD_SUB_W  = 259    -- narrower on purpose: it is what makes the mock
-                              -- wrap this sentence onto two lines
-local RN_D1_Y        = 191
-local RN_PEERS_Y     = 211
-local RN_PEER_TOP    = 237
+local RN_COL_X       = 260
+local RN_COL_W       = 440
+local RN_LEAD_Y      = 133
+local RN_LEAD_SUB_Y  = 158
+-- ⚠️ THE SUB-LINE IS THE COLUMN'S FULL WIDTH NOW. It used to be deliberately
+-- narrowed to 259 to force a two-line wrap; the redesign gives it all 440 and
+-- lets it wrap on its own, so narrowing it would break the mock's line breaks
+-- rather than reproduce them.
+local RN_LEAD_SUB_W  = RN_COL_W
+local RN_D1_Y        = 214
+local RN_PEERS_Y     = 224
+local RN_PEER_TOP    = 253
 local RN_PEER_PITCH  = 16
 local RN_PEER_ROWS   = 4
--- Name / version / gear state, as three columns off the mock's text nodes.
+-- Name / version / gear state. ⚠️ THE LAST TWO ARE RIGHT-ALIGNED — read off the
+-- mock, where a shorter version string and a wider "older build" both end flush
+-- with the rows above them. Left-aligning them puts a ragged edge down the
+-- middle of the column.
 local RN_PEER_NAME_X = 0
-local RN_PEER_VER_X  = 79     -- 2640 - 2561
-local RN_PEER_GEAR_X = 186    -- 2747 - 2561
-local RN_D2_Y        = 303
-local RN_MISS_Y      = 322
-local RN_MISS_BODY_Y = 341
-local RN_D3_Y        = 377
-local RN_SPEC_Y      = 394
-local RN_SPEC_BODY_Y = 413
+local RN_PEER_VER_R  = 191    -- 2451 - 2260
+local RN_PEER_GEAR_R = 317    -- 2577 - 2260
+local RN_D2_Y        = 316
+local RN_MISS_Y      = 327
+local RN_MISS_BODY_Y = 351
+local RN_D3_Y        = 386
+local RN_SPEC_Y      = 396
+local RN_SPEC_BODY_Y = 420
 local DIFF_CHOICES = { "AUTO", "NORMAL", "HEROIC", "MYTHIC", "MPLUS" }
 local DIFF_LABEL = {
   AUTO = "Auto", NORMAL = "Raid: Normal", HEROIC = "Raid: Heroic",
@@ -310,24 +328,30 @@ local DIFF_LABEL = {
 -- at 10% the Slots page uses — so a hairline between them is a second
 -- separator doing the first one's job.
 local SEASON_R, SEASON_Y = 700, 89   -- season label, right-aligned, on the tab row
-local RAIL_X, RAIL_W = 40, 150
--- Four blocks, 18 apart, each as tall as its own content. Earned/Spent is 78
--- because it has no 34px figure; the other three are 86.
-local RAIL_BLOCK_Y = { 129, 233, 329, 433 }   -- Priority · Earned/Spent · Attendance · Last item
-local RAIL_BLOCK_H = { 86, 78, 86, 86 }
--- Which of those carry the big 34px figure. Earned/Spent and Last Item Won
--- do NOT, so their text lines start straight under the heading — see
--- buildRailBlock. Keep this in step with renderRail: a block that sets `big`
--- must be false here, or its figure and its first line collide.
-local RAIL_BLOCK_COMPACT = { false, true, false, true }
--- ⚠️ THE TWO BIG FIGURES ARE DIFFERENT COLOURS, which is easy to miss and is
--- read straight off the node: "#6" inherits the block's white, while the
--- attendance "2" sits inside a blush run that also carries its "of 3" suffix.
-local RAIL_BLOCK_BIG_COLOR = { "white", nil, "body", nil }
--- Earned/Spent's two lines are 14px, not the 11px the other blocks use — they
--- are figures rather than captions.
-local RAIL_BLOCK_LINE_SIZE = { nil, 14, nil, nil }
-local RAIL_PAD = 10
+-- ⚠️ ONE TABLE, NOT EIGHT LOCALS, AND THIS IS LOAD-BEARING RATHER THAN TIDY.
+-- Panel.lua sits at Lua 5.1's ceiling of 200 top-level locals — measured, with
+-- luajit, at ZERO headroom — and every file-scope name added here is one the
+-- GAME counts while lua5.4 does not. Grouping is how the geometry blocks below
+-- (SL, TOG, CARD, FOOT) already stay affordable. Core §1.1's S250/S254 box.
+local RAIL = {
+  x = 40, w = 150, pad = 10,
+  -- Four blocks, 18 apart, each as tall as its own content. Earned/Spent is 78
+  -- because it has no 34px figure; the other three are 86.
+  y = { 129, 233, 329, 433 },   -- Priority · Earned/Spent · Attendance · Last item
+  h = { 86, 78, 86, 86 },
+  -- Which of those carry the big 34px figure. Earned/Spent and Last Item Won
+  -- do NOT, so their text lines start straight under the heading — see
+  -- buildRailBlock. Keep this in step with renderRail: a block that sets `big`
+  -- must be false here, or its figure and its first line collide.
+  compact = { false, true, false, true },
+  -- ⚠️ THE TWO BIG FIGURES ARE DIFFERENT COLOURS, easy to miss and read straight
+  -- off the node: "#6" inherits the block's white, while the attendance "2" sits
+  -- inside a blush run that also carries its "of 3" suffix.
+  bigColor = { "white", nil, "body", nil },
+  -- Earned/Spent's two lines are 14px, not the 11px the other blocks use — they
+  -- are figures rather than captions.
+  lineSize = { nil, 14, nil, nil },
+}
 local ST_HEAD_Y = 132
 local ST_TOP, ST_PITCH = 157, 20
 -- ⚠️ THE MOCK DRAWS 12 ROWS AND THAT IS ILLUSTRATION, NOT A CAP — a real ladder
@@ -337,8 +361,7 @@ local ST_TOP, ST_PITCH = 157, 20
 -- clip their children, so a count larger than the space draws through the
 -- footer rather than scrolling. FLAGGED for Jason — if 12 was deliberate, this
 -- is the line to change.
-local ST_BOTTOM = RAIL_BLOCK_Y[4] + RAIL_BLOCK_H[4]
-local ST_ROWS = math.floor((ST_BOTTOM - ST_TOP) / ST_PITCH)
+local ST_ROWS = math.floor(((RAIL.y[4] + RAIL.h[4]) - ST_TOP) / ST_PITCH)
 -- Name is left-aligned; every number column is right-aligned to its own edge,
 -- which is also where the design puts each heading's right edge.
 local ST_RANK_R, ST_NAME = 247, 271
@@ -1061,28 +1084,28 @@ local function buildRailBlock(parent, y, compact, h)
   local b = {}
 
   b.box = CreateFrame("Frame", nil, parent)
-  b.box:SetSize(RAIL_W, h or 86)
-  b.box:SetPoint("TOPLEFT", RAIL_X, -y)
+  b.box:SetSize(RAIL.w, h or 86)
+  b.box:SetPoint("TOPLEFT", RAIL.x, -y)
   if ns.Style then ns.Style.Surface(b.box, ns.Style.COLOR.rule, 0.1) end
 
-  local innerW = RAIL_W - RAIL_PAD * 2
-  b.head = at(text(b.box, "bold", "head", "accent"), RAIL_PAD, RAIL_PAD, innerW)
+  local innerW = RAIL.w - RAIL.pad * 2
+  b.head = at(text(b.box, "bold", "head", "accent"), RAIL.pad, RAIL.pad, innerW)
 
   -- 34px, and there is no token for it: it appears twice on this one tab and
   -- nowhere else, so it is fed per instance rather than added to the scale.
-  b.big = at(text(b.box, "bold", "title", "white"), RAIL_PAD, RAIL_PAD + 14, innerW)
+  b.big = at(text(b.box, "bold", "title", "white"), RAIL.pad, RAIL.pad + 14, innerW)
   if ns.Style then ns.Style.SetFont(b.big, ns.Style.FONT.bold, 34) end
   -- Sits on the big figure's baseline, for the "of 3" in "2 of 3".
-  b.bigSuffix = at(text(b.box, "light", "rank", "body"), RAIL_PAD, RAIL_PAD + 36, innerW)
+  b.bigSuffix = at(text(b.box, "light", "rank", "body"), RAIL.pad, RAIL.pad + 36, innerW)
 
   -- 20 clears the 12px heading with a hair of breathing room; 52 clears the
   -- heading AND the 34px figure. Line pitch is 16 either way.
   local lineY = compact and 20 or 52
-  b.line1 = at(text(b.box, "light", "name", "white"), RAIL_PAD, lineY, innerW)
-  b.line2 = at(text(b.box, "light", "name", "white"), RAIL_PAD, lineY + 16, innerW)
+  b.line1 = at(text(b.box, "light", "name", "white"), RAIL.pad, lineY, innerW)
+  b.line2 = at(text(b.box, "light", "name", "white"), RAIL.pad, lineY + 16, innerW)
   -- The age line is the flat grey the mock names, not the white ramp: it is the
   -- least important line on the tab and the only one given its own hue.
-  b.line3 = at(text(b.box, "light", "name", "grey"), RAIL_PAD, lineY + 32, innerW)
+  b.line3 = at(text(b.box, "light", "name", "grey"), RAIL.pad, lineY + 32, innerW)
   return b
 end
 
@@ -1427,29 +1450,41 @@ local function buildRunnerTab()
   frame.rn = R
 
   -- ── Left rail: state, and the two controls that change it ─────────────────
-  R.status = at(text(frame, "title", "title", "green"), RN_RAIL_X, RN_STATUS_Y, RN_RAIL_W)
-  R.status:SetWordWrap(true)
-  R.since  = at(text(frame, "body", "small", "textDim"), RN_RAIL_X, RN_SINCE_Y, RN_RAIL_W)
-
-  R.dataHead = at(text(frame, "label", "tiny", "railHead"), RN_RAIL_X, RN_DATA_Y, RN_RAIL_W)
-  R.dataHead:SetText("TONIGHT'S DATA")
-  R.raiders  = at(text(frame, "titleMed", "title", "text"), RN_RAIL_X, RN_RAIDERS_Y, RN_RAIL_W)
-  R.ranked   = at(text(frame, "titleMed", "title", "text"), RN_RAIL_X, RN_RANKED_Y, RN_RAIL_W)
-  R.imported = at(text(frame, "body", "tiny", "textMuted"), RN_RAIL_X, RN_IMPORTED_Y, RN_RAIL_W)
-  R.synced   = at(text(frame, "body", "tiny", "textMuted"), RN_RAIL_X, RN_SYNCED_Y, RN_RAIL_W)
-
-  -- ── The hairline between rail and column ──────────────────────────────────
-  R.div = frame:CreateTexture(nil, "ARTWORK")
-  R.div:SetSize(1, RN_DIV_H)
-  R.div:SetPoint("TOPLEFT", RN_DIV_X, -RN_DIV_Y)
-  if ns.Style then
-    R.div:SetColorTexture(ns.Style.COLOR.rim.r, ns.Style.COLOR.rim.g,
-      ns.Style.COLOR.rim.b, 0.25)
+  -- Two filled blocks on the rule blush at 10%, matching Standings. The
+  -- fontstrings are parented to the WINDOW rather than to the boxes so every
+  -- existing position stays panel-relative; the boxes sit behind them.
+  local function railBox(y, h)
+    local box = CreateFrame("Frame", nil, frame)
+    box:SetSize(RN_RAIL_W, h)
+    box:SetPoint("TOPLEFT", RN_RAIL_X, -y)
+    if ns.Style then ns.Style.Surface(box, ns.Style.COLOR.rule, 0.1) end
+    return box
   end
+  R.statusBox = railBox(RN_STATUS_BLOCK_Y, RN_STATUS_BLOCK_H)
+  R.dataBox   = railBox(RN_DATA_BLOCK_Y, RN_DATA_BLOCK_H)
+
+  local innerX, innerW = RN_RAIL_X + RN_PAD, RN_RAIL_W - RN_PAD * 2
+  -- Bold 14 in the green, wrapping to two lines — not the 20px title it was.
+  R.status = at(text(frame, "bold", "rank", "green"), innerX, RN_STATUS_Y, innerW)
+  R.status:SetWordWrap(true)
+  R.since  = at(text(frame, "light", "name", "white"), innerX, RN_SINCE_Y, innerW)
+
+  -- The heading purple, same as every other block heading in the redesign.
+  R.dataHead = at(text(frame, "bold", "head", "accent"), innerX, RN_DATA_Y, innerW)
+  R.dataHead:SetText("TONIGHT'S DATA")
+  R.raiders  = at(text(frame, "light", "head", "white"), innerX, RN_RAIDERS_Y, innerW)
+  R.ranked   = at(text(frame, "light", "head", "white"), innerX, RN_RANKED_Y, innerW)
+  -- ⚠️ 9px, AND IN THE HEADING PURPLE — the smallest type in the panel and the
+  -- only place it appears. Read off the node; these were muted white at 10.
+  R.imported = at(text(frame, "light", "chip", "accent"), innerX, RN_IMPORTED_Y, innerW)
+  R.synced   = at(text(frame, "light", "chip", "accent"), innerX, RN_SYNCED_Y, innerW)
 
   -- ── Right column ──────────────────────────────────────────────────────────
-  R.lead    = at(text(frame, "bodyMed", "small", "green"), RN_COL_X, RN_LEAD_Y, RN_COL_W)
-  R.leadSub = at(text(frame, "body", "small", "mutedGrey"), RN_COL_X, RN_LEAD_SUB_Y, RN_LEAD_SUB_W)
+  -- ⚠️ THE LEAD IS WHITE AT 16, NOT GREEN AT 11. Green is the status block's
+  -- colour and means "you are running loot"; reusing it on a sentence that
+  -- merely describes what that implies spends the signal twice.
+  R.lead    = at(text(frame, "regular", "badge", "white"), RN_COL_X, RN_LEAD_Y, RN_COL_W)
+  R.leadSub = at(text(frame, "light", "name", "white"), RN_COL_X, RN_LEAD_SUB_Y, RN_LEAD_SUB_W)
   R.leadSub:SetWordWrap(true)
 
   local function hairline(y)
@@ -1464,32 +1499,36 @@ local function buildRunnerTab()
   end
   R.d1, R.d2, R.d3 = hairline(RN_D1_Y), hairline(RN_D2_Y), hairline(RN_D3_Y)
 
-  R.peersHead = at(text(frame, "body", "small", "text"), RN_COL_X, RN_PEERS_Y, RN_COL_W)
+  -- Every section heading on this column is 16 Regular; what varies is only
+  -- which half is the heading purple. See renderRunner.
+  R.peersHead = at(text(frame, "regular", "badge", "white"), RN_COL_X, RN_PEERS_Y, RN_COL_W)
   R.peers = {}
   for i = 1, RN_PEER_ROWS do
     local y = RN_PEER_TOP + (i - 1) * RN_PEER_PITCH
     R.peers[i] = {
-      name = at(text(frame, "body", "small", "text"),
-                RN_COL_X + RN_PEER_NAME_X, y, RN_PEER_VER_X - 4),
-      ver  = at(text(frame, "body", "small", "textDim"),
-                RN_COL_X + RN_PEER_VER_X, y, RN_PEER_GEAR_X - RN_PEER_VER_X - 4),
-      gear = at(text(frame, "body", "small", "textDim"),
-                RN_COL_X + RN_PEER_GEAR_X, y, 120),
+      name = at(text(frame, "light", "name", "white"),
+                RN_COL_X + RN_PEER_NAME_X, y, 90),
+      ver  = atRight(text(frame, "light", "name", "white"),
+                RN_COL_X + RN_PEER_VER_R, y, 110),
+      gear = atRight(text(frame, "light", "name", "white"),
+                RN_COL_X + RN_PEER_GEAR_R, y, 110),
     }
   end
 
-  R.missHead = at(text(frame, "body", "small", "darkOrange"), RN_COL_X, RN_MISS_Y, RN_COL_W)
-  R.missBody = at(text(frame, "body", "small", "mutedGrey"), RN_COL_X, RN_MISS_BODY_Y, RN_COL_W)
+  R.missHead = at(text(frame, "regular", "badge", "white"), RN_COL_X, RN_MISS_Y, RN_COL_W)
+  R.missBody = at(text(frame, "light", "name", "white"), RN_COL_X, RN_MISS_BODY_Y, RN_COL_W)
   R.missBody:SetWordWrap(true)
 
-  R.specHead = at(text(frame, "body", "small", "text"), RN_COL_X, RN_SPEC_Y, RN_COL_W)
-  R.specBody = at(text(frame, "body", "small", "mutedGrey"), RN_COL_X, RN_SPEC_BODY_Y, RN_COL_W)
+  R.specHead = at(text(frame, "regular", "badge", "white"), RN_COL_X, RN_SPEC_Y, RN_COL_W)
+  R.specBody = at(text(frame, "light", "name", "white"), RN_COL_X, RN_SPEC_BODY_Y, RN_COL_W)
   R.specBody:SetWordWrap(true)
 
   -- Everything above is hidden until the tab is on screen.
+  -- R.div is gone with the redesign — the filled rail blocks are the separator.
   R.all = { R.status, R.since, R.dataHead, R.raiders, R.ranked, R.imported,
             R.synced, R.lead, R.leadSub, R.peersHead, R.missHead, R.missBody,
-            R.specHead, R.specBody, R.div, R.d1, R.d2, R.d3 }
+            R.specHead, R.specBody, R.d1, R.d2, R.d3,
+            R.statusBox, R.dataBox }
   for _, p in ipairs(R.peers) do
     R.all[#R.all + 1] = p.name; R.all[#R.all + 1] = p.ver; R.all[#R.all + 1] = p.gear
   end
@@ -1509,15 +1548,15 @@ local function buildStandingsTab()
   frame.season:SetWidth(220)
 
   frame.rail = {}
-  for i, y in ipairs(RAIL_BLOCK_Y) do
-    local b = buildRailBlock(frame, y, RAIL_BLOCK_COMPACT[i], RAIL_BLOCK_H[i])
+  for i, y in ipairs(RAIL.y) do
+    local b = buildRailBlock(frame, y, RAIL.compact[i], RAIL.h[i])
     local S = ns.Style
-    if S and RAIL_BLOCK_BIG_COLOR[i] then
-      b.big:SetTextColor(S.rgb(S.COLOR[RAIL_BLOCK_BIG_COLOR[i]]))
+    if S and RAIL.bigColor[i] then
+      b.big:SetTextColor(S.rgb(S.COLOR[RAIL.bigColor[i]]))
     end
-    if S and RAIL_BLOCK_LINE_SIZE[i] then
-      S.SetFont(b.line1, S.FONT.light, RAIL_BLOCK_LINE_SIZE[i])
-      S.SetFont(b.line2, S.FONT.light, RAIL_BLOCK_LINE_SIZE[i])
+    if S and RAIL.lineSize[i] then
+      S.SetFont(b.line1, S.FONT.light, RAIL.lineSize[i])
+      S.SetFont(b.line2, S.FONT.light, RAIL.lineSize[i])
     end
     frame.rail[i] = b
   end
@@ -3716,12 +3755,14 @@ local function renderRunner()
   -- ── Column: what being the runner means ───────────────────────────────────
   if r.runnerIsMe then
     R.lead:SetText("The raid follows your rankings.")
-    if S then R.lead:SetTextColor(S.rgb(S.COLOR.green)) end
+    -- WHITE, not green: the green belongs to the status block, which has
+    -- already said you are running loot. See buildRunnerTab.
+    if S then R.lead:SetTextColor(S.rgb(S.COLOR.white)) end
     R.leadSub:SetText("Late joiners get the roster from you. To hand over, another "
       .. "officer imports a newer export.")
   elseif r.runner then
     R.lead:SetText(("%s is ranking tonight's loot."):format(r.runner))
-    if S then R.lead:SetTextColor(S.rgb(S.COLOR.text)) end
+    if S then R.lead:SetTextColor(S.rgb(S.COLOR.white)) end
     R.leadSub:SetText("Everyone shows their ranking, so the raid sees one list. Import "
       .. "a newer export to take over.")
   else
@@ -3775,7 +3816,11 @@ local function renderRunner()
   -- ── Column: who is NOT reporting ──────────────────────────────────────────
   local missing = r.notReporting or {}
   if #missing > 0 then
-    R.missHead:SetText(("Not Reporting: %d of %d"):format(#missing, r.totalGear or #missing))
+    -- ⚠️ TWO-TONE, per node 589:1732: the LABEL is the heading purple and the
+    -- FIGURE is white. Every section heading on this column works this way, so
+    -- the fontstring is white and the label carries an inline colour.
+    R.missHead:SetText(ns.HeadingTwoTone("Not Reporting: ",
+      ("%d of %d"):format(#missing, r.totalGear or #missing)))
     local names = {}
     for i = 1, math.min(5, #missing) do names[#names + 1] = missing[i] end
     local text2 = table.concat(names, ", ")
@@ -3791,7 +3836,8 @@ local function renderRunner()
   -- that rule exists because a live observation once mis-scored a healer as DPS.
   local mism = r.specMismatches or {}
   if #mism > 0 then
-    R.specHead:SetText(("Spec Differs from the Roster: %d"):format(#mism))
+    R.specHead:SetText(ns.HeadingTwoTone("Spec Differs from the Roster: ",
+      tostring(#mism)))
     local m = mism[1]
     local line = ("%s — Roster says %s, seen as %s."):format(
       m.name or "?", tostring(m.roster), tostring(m.observed))
