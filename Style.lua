@@ -128,6 +128,13 @@ Style.COLOR = {
   -- filled chip — so it is one token doing two jobs on purpose, the same way
   -- `rim` and `mutedGrey` are aliased below.
   ground    = hex("0c0721"),   -- panel + footer fill; also filled-chip text
+  -- ⚠️ THE SECONDARY WINDOWS SIT ON A LIGHTER VIOLET THAN THE PANEL (Session
+  -- 258, from the Import mock 591:2308). Import and Settings are #1c1228 while
+  -- the panel is #0c0721 — and the panel's darker ground then reappears INSIDE
+  -- them as the fill of the paste box, which is what makes an input read as
+  -- recessed rather than as another panel. Two grounds on purpose, not a
+  -- mismatch to reconcile.
+  windowGround = hex("1c1228"),
   -- ⚠️ THE SAME FIGMA VARIABLE AS `mutedGrey` BELOW ("Muted Grey"), which the
   -- mock uses for BOTH the hairlines and the Runner tab's body copy. Written
   -- once and aliased below rather than as two identical literals, so a retune

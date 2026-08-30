@@ -625,6 +625,58 @@ do
   end
 end
 
+header("Disable Roster Import / EPGP System (Session 258)")
+
+-- The one row the Settings mock draws that the code did not have. Everything it
+-- switches off is EPGP machinery; the scoring half must be untouched, which is
+-- what the last check here is for.
+do
+  check("the setting exists", ns.Settings.Get("noRoster") == false)
+
+  -- ⚠️ A PAYLOAD HAS TO BE LOADED FOR THE STANDINGS HALF TO MEAN ANYTHING, and
+  -- finding that out is why this staging exists. Standings already hides when
+  -- nothing is imported (the S254 rule), so without a payload the check
+  -- "Standings is hidden" passes whether the new gate is there or not — it did,
+  -- on the first revert-check, while the footer half correctly went red.
+  local loaded = false
+  do
+    local fh = io.open("test/payload.txt", "r")
+    if fh then
+      local encoded = (fh:read("a") or ""):gsub("%s+$", "")
+      fh:close()
+      local data = ns.Payload.Decode(encoded)
+      if data then
+        ns.Payload.Store(data, encoded, "test")
+        loaded = ns.Payload.Current() ~= nil
+      end
+    end
+  end
+  check("a raid payload is loaded, so the Standings gate is testable", loaded,
+        "without one, Standings hides anyway and the gate below proves nothing")
+
+  -- With it OFF, the Import button is part of the footer.
+  ns.Settings.Set("noRoster", "off")
+  ns.Panel.Refresh()
+  check("Import Roster Data is shown by default", panel.load:IsShown())
+  check("...and Standings is available with a payload loaded",
+        panel.tabs.Standings:IsShown())
+
+  ns.Settings.Set("noRoster", "on")
+  ns.Panel.Refresh()
+  check("...and hidden once the box is checked", not panel.load:IsShown())
+  check("...as is the Standings tab", not panel.tabs.Standings:IsShown())
+
+  -- ⚠️ THE POINT OF THE SETTING IS THAT SCORING SURVIVES IT. If this ever goes
+  -- red, the switch has grown past what it was for.
+  local rep = ns.SlotsReport("overall")
+  check("...but BIS scoring still answers", rep.ready == true)
+
+  -- Put it back, so nothing downstream inherits a switched-off addon.
+  ns.Settings.Set("noRoster", "off")
+  ns.Panel.Refresh()
+  check("...and turning it off restores the footer", panel.load:IsShown())
+end
+
 -- ── Report ─────────────────────────────────────────────────────────────────
 
 local names = {}

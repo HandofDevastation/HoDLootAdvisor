@@ -24,15 +24,43 @@ local MUTED = { 0.533, 0.533, 0.600 }
 
 local frame
 
+--- ⚠️ A NIL COLOUR MEANS "THE STRING COLOURS ITSELF" and is not the same as
+--- omitting one. The loaded-summary line carries its own inline escapes, and a
+--- fontstring tinted muted grey underneath them would drag every uncoloured run
+--- towards grey. White is the neutral the escapes are drawn against.
 local function setStatus(text, color)
   if not frame then return end
   frame.status:SetText(text or "")
-  frame.status:SetTextColor(unpack(color or MUTED))
+  if color then
+    frame.status:SetTextColor(unpack(color))
+  elseif ns.Style then
+    frame.status:SetTextColor(ns.Style.rgb(ns.Style.COLOR.white))
+  end
 end
 
+-- ── Geometry, read off node 591:2308 (600x400) ─────────────────────────────
+--
+-- ONE TABLE for the same reason Panel.lua groups its constants: file-scope
+-- names are what Lua 5.1 counts against its 200-local ceiling, and the smoke
+-- harness now measures the margin.
+local IW = {
+  w = 600, h = 400,
+  logoX = 40, logoY = 30,
+  titleX = 40, titleY = 86,
+  boxX = 40, boxY = 131, boxW = 520, boxH = 120,
+  boxPad = 16,
+  statusX = 40, statusY = 262,
+  -- ⚠️ 40 ON THE LEFT AND 43 ON THE RIGHT. That asymmetry is the mock's, not a
+  -- rounding slip on the way in — the button row's right edge lands at 557.
+  btnY = 343, btnH = 26,
+  discardX = 40, discardW = 180,
+  clearX = 369, clearW = 103,
+  loadX = 485, loadW = 72,
+}
+
 local function build()
-  frame = CreateFrame("Frame", "HoDLootAdvisorLoadFrame", UIParent, "BasicFrameTemplateWithInset")
-  frame:SetSize(560, 340)
+  frame = CreateFrame("Frame", "HoDLootAdvisorLoadFrame", UIParent)
+  frame:SetSize(IW.w, IW.h)
   frame:SetPoint("CENTER")
   frame:SetMovable(true)
   frame:EnableMouse(true)
@@ -43,27 +71,54 @@ local function build()
   ns.MakeWindow(frame)
   frame:Hide()
 
-  frame.TitleText:SetText("Loot Advisor — Import Raid Night")
+  local S = ns.Style
 
-  local help = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  help:SetPoint("TOPLEFT", 16, -34)
-  help:SetPoint("TOPRIGHT", -16, -34)
-  help:SetJustifyH("LEFT")
-  help:SetText("Export from the Loot Advisor page on the website, then paste here (Ctrl-V) and press Load.")
-  help:SetTextColor(unpack(MUTED))
+  -- ⚠️ THE WINDOW'S OWN GROUND IS #1c1228, LIGHTER THAN THE PANEL'S. Painted
+  -- over whatever MakeWindow put down rather than layered on top of it, which
+  -- is the mistake Style.PanelGround's own comment records.
+  if S then
+    if frame.bgTex then frame.bgTex:Hide() end
+    if frame.headTex then frame.headTex:Hide() end
+    if frame.headLine then frame.headLine:Hide() end
+    S.Surface(frame, S.COLOR.windowGround, 1)
+    S.Rim(frame, S.COLOR.rim, 0.4)
+    S.Lockup(frame, IW.logoX, IW.logoY)
+  end
+
+  -- The window's own heading. 18 Light white — not a title bar, because the
+  -- redesign has no title bars: the lockup is the identity and this names the
+  -- task beneath it.
+  frame.heading = S and S.Text(frame, "light", "title", S.COLOR.white, "LEFT")
+    or frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  if S then S.SetFont(frame.heading, S.FONT.light, 18) end
+  frame.heading:ClearAllPoints()
+  frame.heading:SetPoint("TOPLEFT", IW.titleX, -IW.titleY)
+  frame.heading:SetText("IMPORT ROSTER DATA")
+
+  -- ── The paste box ─────────────────────────────────────────────────────────
+  -- The PANEL's darker ground inside the lighter window, with the rule blush at
+  -- 30% as its border — the same hairline the Slots rail draws.
+  local box = CreateFrame("Frame", nil, frame)
+  box:SetSize(IW.boxW, IW.boxH)
+  box:SetPoint("TOPLEFT", IW.boxX, -IW.boxY)
+  if S then
+    S.Surface(box, S.COLOR.ground, 1)
+    S.Rim(box, S.COLOR.rule, 0.3)
+  end
+  frame.box = box
 
   -- A multiline EditBox inside a scroll frame. The box is given an EXPLICIT
   -- width: GetWidth() on the scroll frame returns 0 before the frame has been
   -- shown, which silently produces a zero-size box you cannot type into. That
   -- one has bitten HODLootTracker before.
-  local scroll = CreateFrame("ScrollFrame", "$parentScroll", frame, "UIPanelScrollFrameTemplate")
-  scroll:SetPoint("TOPLEFT", 18, -66)
-  scroll:SetPoint("BOTTOMRIGHT", -36, 66)
+  local scroll = CreateFrame("ScrollFrame", "$parentScroll", box, "UIPanelScrollFrameTemplate")
+  scroll:SetPoint("TOPLEFT", IW.boxPad, -IW.boxPad)
+  scroll:SetPoint("BOTTOMRIGHT", -IW.boxPad, IW.boxPad)
 
   local edit = CreateFrame("EditBox", nil, scroll)
   edit:SetMultiLine(true)
   edit:SetFontObject(ChatFontNormal)
-  edit:SetWidth(500)
+  edit:SetWidth(IW.boxW - IW.boxPad * 2)
   edit:SetAutoFocus(false)
   -- Explicitly UNCAPPED. A fresh EditBox carries a default limit, and the
   -- failure mode of hitting it is SILENT TRUNCATION — the payload would decode
@@ -76,9 +131,23 @@ local function build()
     if n > 0 then
       setStatus(("%d characters in the box"):format(n), MUTED)
     end
+    -- The prompt is what an empty box says; it must go the moment there is text
+    -- in it, or it draws underneath what is being pasted.
+    if frame.prompt then frame.prompt:SetShown(n == 0) end
   end)
   scroll:SetScrollChild(edit)
   frame.edit = edit
+
+  -- The placeholder. A real fontstring rather than text in the EditBox, because
+  -- text in the box would be SUBMITTED — and the whole window exists to submit
+  -- exactly what is in the box.
+  frame.prompt = S and S.Text(box, "light", "head", { r = 0.949, g = 0.741, b = 0.678, a = 0.5 }, "LEFT")
+    or box:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  frame.prompt:ClearAllPoints()
+  frame.prompt:SetPoint("TOPLEFT", IW.boxPad, -(IW.boxPad - 1))
+  frame.prompt:SetWidth(IW.boxW - IW.boxPad * 2)
+  frame.prompt:SetText(
+    "Export from the Loot Advisor page on the website, then paste here and press LOAD.")
 
   -- ⚠️ A MULTILINE EditBox IS ONLY AS TALL AS ITS TEXT. Empty, it is ONE LINE
   -- tall, so the only spot in this large window that would take a click was the
@@ -92,27 +161,35 @@ local function build()
   scroll:EnableMouse(true)
   scroll:SetScript("OnMouseDown", function() edit:SetFocus() end)
 
-  frame.status = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  frame.status:SetPoint("BOTTOMLEFT", 18, 40)
-  frame.status:SetPoint("BOTTOMRIGHT", -18, 40)
-  frame.status:SetJustifyH("LEFT")
+  frame.status = S and S.Text(frame, "light", "head", S.COLOR.white, "LEFT")
+    or frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  frame.status:ClearAllPoints()
+  frame.status:SetPoint("TOPLEFT", IW.statusX, -IW.statusY)
+  frame.status:SetWidth(IW.w - IW.statusX * 2)
   frame.status:SetWordWrap(true)
 
-  local load = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  load:SetSize(110, 24)
-  load:SetPoint("BOTTOMRIGHT", -18, 12)
-  load:SetText("Load")
-  load:SetScript("OnClick", function() LoadWindow.Submit() end)
+  -- ── The three controls ────────────────────────────────────────────────────
+  -- One primitive, three instances, matching every other button in the
+  -- redesign: a 1px gradient rim with the label at half strength.
+  local function button(label, x, w, onClick)
+    local b = S and S.Control(frame, label) or CreateFrame("Button", nil, frame,
+      "UIPanelButtonTemplate")
+    b:SetSize(w, IW.btnH)
+    b:SetPoint("TOPLEFT", x, -IW.btnY)
+    if b.SetActive then b:SetActive(false) end
+    if b.Repaint then b:Repaint() end
+    if not S then b:SetText(label) end
+    b:SetScript("OnClick", onClick)
+    return b
+  end
+
+  frame.load = button("LOAD", IW.loadX, IW.loadW, function() LoadWindow.Submit() end)
 
   -- ⚠️ "Clear" WAS THE WRONG NAME. Sat beside Load, under a status line reading
   -- "Currently loaded: 17 raiders… Pasting replaces it", it read as "clear the
   -- loaded roster" — which is not what it does and not what anyone wants it to
-  -- do by accident. It empties the BOX. The label now says which.
-  local clear = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  clear:SetSize(110, 24)
-  clear:SetPoint("RIGHT", load, "LEFT", -8, 0)
-  clear:SetText("Clear Box")
-  clear:SetScript("OnClick", function()
+  -- do by accident. It empties the BOX. The label says which.
+  frame.clear = button("CLEAR BOX", IW.clearX, IW.clearW, function()
     frame.edit:SetText("")
     setStatus("", MUTED)
   end)
@@ -120,11 +197,8 @@ local function build()
   -- Discarding the LOADED roster — the thing Clear was mistaken for. Anchored
   -- far left, away from Load and Clear Box, because it is the one destructive
   -- control in this window and should not sit in the row you press by habit.
-  frame.discard = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.discard:SetSize(160, 24)
-  frame.discard:SetPoint("BOTTOMLEFT", 18, 12)
-  frame.discard:SetText("Discard Loaded Data")
-  frame.discard:SetScript("OnClick", function() LoadWindow.ConfirmDiscard() end)
+  frame.discard = button("DISCARD LOADED DATA", IW.discardX, IW.discardW,
+    function() LoadWindow.ConfirmDiscard() end)
 
   return frame
 end
@@ -254,10 +328,21 @@ function LoadWindow.Toggle()
   frame.edit:SetText("")
   frame.edit:SetFocus()
 
+  -- ⚠️ THREE LABELLED FACTS SEPARATED BY BULLETS, per node 591:2306 — labels in
+  -- the blush, values in white, the separator in the heading purple. The old
+  -- single muted sentence carried the same information and read as a paragraph;
+  -- the design makes each fact scannable on its own.
   local s = ns.Payload.Summary()
   if s then
-    setStatus(("Currently loaded: %d raiders, %s · exported %s, gear synced %s. Pasting replaces it.")
-      :format(s.raiders, s.seasonName or "?", ns.Payload.AgeText(), ns.Payload.GearAgeText()), MUTED)
+    local S = ns.Style
+    local lbl = S and S.code(S.COLOR.body) or ""
+    local sep = S and (" " .. S.code(S.COLOR.accent) .. "\226\128\162|r ") or " \226\128\162 "
+    local stop = S and "|r" or ""
+    setStatus(table.concat({
+      lbl .. "Currently Loaded: " .. stop .. ("%d Raiders"):format(s.raiders),
+      lbl .. "Previous Import: " .. stop .. ns.Payload.AgeText(),
+      lbl .. "Gear Sync: " .. stop .. ns.Payload.GearAgeText(),
+    }, sep), nil)
   else
     setStatus("Nothing loaded yet.", MUTED)
   end

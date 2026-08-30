@@ -3879,11 +3879,18 @@ local function layoutTabs()
   -- outside this guild, where the whole EPGP half is meaningless while the
   -- scoring half works in full. Same reason the standing block hides in the
   -- header; the two must agree or one of them is lying about the other.
-  local standings = ns.Payload.Current() and true or false
+  --
+  -- ⚠️ AND THE SAME IS TRUE BY CHOICE (Session 258). "Disable Roster Import/EPGP
+  -- System" is the mock's own row for somebody outside this guild who will never
+  -- have an export: it turns the EPGP half off permanently rather than leaving
+  -- them to notice it never populates. Scoring is untouched — that runs off the
+  -- baked payload and their own gear and is exactly as useful to them.
+  local noRoster = ns.Settings and ns.Settings.Get("noRoster") or false
+  local standings = (not noRoster) and (ns.Payload.Current() and true or false)
   local visible = {}
   for _, name in ipairs(TABS) do
     local show = true
-    if name == "Runner" then show = runner
+    if name == "Runner" then show = runner and not noRoster
     elseif name == "Standings" then show = standings end
     if show then visible[#visible + 1] = name else frame.tabs[name]:Hide() end
   end
@@ -4078,6 +4085,26 @@ function Panel.Refresh()
   -- ⚠️ SHOWN ON RUNNER AS WELL AS STANDINGS (Session 252). The Runner mock puts
   -- the season in the same top-right slot; only the Loot design leaves it empty,
   -- because that is where its content control sits.
+  -- ⚠️ THE IMPORT BUTTON GOES WITH THE REST OF THE EPGP MACHINERY, and the row
+  -- is RE-LAID rather than left with a hole in it — LayoutRow places from the
+  -- right, so hiding a button without re-running it leaves a gap where the
+  -- button was rather than closing up.
+  if frame.load then
+    local hideLoad = ns.Settings and ns.Settings.Get("noRoster") or false
+    frame.load:SetShown(not hideLoad)
+    local btns, total = {}, 0
+    for _, b in ipairs({ frame.load, frame.log, frame.cfg }) do
+      if b:IsShown() then
+        btns[#btns + 1] = b
+        total = total + (b:GetWidth() or 0) + (#btns > 1 and FOOT.gap or 0)
+      end
+    end
+    if ns.Style then
+      ns.Style.LayoutRow(btns, frame.foot,
+        FRAME_W - FOOT.right - total, -FOOT.btnY, FOOT.gap)
+    end
+  end
+
   frame.season:SetShown(onStandings or onRunner)
   frame.stList:SetShown(onStandings)
   frame.stNote:SetShown(onStandings)

@@ -112,6 +112,31 @@ Settings.SPEC = {
     help = "4 = Epic, which is all raid loot. Lower to 3 to record blues — how "
         .. "you test the recorder in a follower dungeon.",
   },
+  {
+    -- ⚠️ THE ONE ROW THE MOCK DRAWS THAT THE CODE DID NOT HAVE (Session 258).
+    -- The other three the backlog claimed were missing were already here; Jason
+    -- caught that. This is the genuine one, and it is the question left open at
+    -- the end of Session 256 — apparently settled by being drawn.
+    --
+    -- WHAT IT DOES, decided here and FLAGGED for Jason rather than stalled on,
+    -- per the standing instruction. The roster import and everything downstream
+    -- of it is guild machinery: EPGP priority arrives only in the raid-night
+    -- export, so for anyone outside this guild the Standings tab, the priority
+    -- column and the Import button are all furniture for a thing they will
+    -- never have. This turns them off in one press.
+    --
+    -- ⚠️ IT DOES NOT TOUCH SCORING. The whole upgrade heuristic runs off the
+    -- baked payload and the player's own gear, and is exactly as useful to a
+    -- stranger as to us — the S256 rule that the ranking needs no export. So
+    -- this hides the EPGP half and nothing else.
+    key = "noRoster", label = "Disable Roster Import/EPGP System", default = false,
+    kind = "toggle",
+    help = "Roster data import is only used by HoD guild members. Others should "
+        .. "check this box.",
+    apply = function()
+      if ns.Panel and ns.Panel.Refresh then pcall(ns.Panel.Refresh) end
+    end,
+  },
 }
 
 -- Looked up CASE-INSENSITIVELY, and the canonical key is taken from the SPEC
@@ -259,9 +284,25 @@ local frame
 -- ROW_H allows TWO lines of help. At 460 wide most help fits on one, but the
 -- longest wraps, and a row sized for one line lets the second collide with the
 -- next row's control.
-local FRAME_W  = 460
-local HEADER_H = 40
-local ROW_H    = 54
+-- ── Geometry, read off node 591:2403 (600x760) ─────────────────────────────
+--
+-- ⚠️ THE ROW PITCH IS NOT CONSTANT. The mock's rows sit at 0, 50, 100, 150,
+-- 214, 264, 314, 364, 428 and 478 — a 50 pitch for a row whose help fits one
+-- line, and 64 where it wraps to two. A single pitch would either crush the
+-- long rows or leave a gap under every short one, so the layout MEASURES which
+-- it is rather than assuming.
+local FRAME_W  = 600
+local HEADER_H = 128            -- the first row's top; lockup and title sit above
+local ROW_H    = 30             -- a one-line row; a wrapping one is ROW_H_TALL
+local ROW_H_TALL = 44
+local ROW_GAP  = 20
+local SET_X    = 40             -- the window's own margin, both sides
+local SET_LABEL_Y = 0           -- label at the row's top, help 16 beneath it
+local SET_HELP_Y  = 16
+-- The controls, each right-aligned to its own edge as the mock places them.
+local SET_CHECK_X, SET_CHECK_SZ = 496, 24
+local SET_INPUT_X, SET_INPUT_W, SET_INPUT_H = 440, 80, 30
+local SET_DROP_W = 131
 local FOOTER_H = 48
 -- ⚠️ THE READOUT NEEDS ITS OWN BAND IN THE HEIGHT, and adding it without one is
 -- exactly the mistake the note above describes — it drew over the last row's
@@ -275,8 +316,21 @@ local READOUT_H = 58
 --- does not error and does not look broken — WoW frames do not clip children, so
 --- it silently draws over whatever was already there. That is how the display
 --- readout landed on top of the last setting's help text.
+--- How tall a row is: two lines of help wrap, one does not.
+---
+--- ⚠️ MEASURED FROM THE HELP STRING, not from a per-key table. A table would be
+--- a second place to update every time a sentence changes, and the failure is
+--- silent — the row simply overlaps the one beneath it.
+function Settings.RowHeight(spec)
+  return (#(spec.help or "") > 90) and ROW_H_TALL or ROW_H
+end
+
 function Settings.WindowHeight()
-  return HEADER_H + (#Settings.SPEC * ROW_H) + READOUT_H + FOOTER_H
+  local h = HEADER_H
+  for _, spec in ipairs(Settings.SPEC) do
+    h = h + Settings.RowHeight(spec) + ROW_GAP
+  end
+  return h + READOUT_H + FOOTER_H
 end
 
 local function build()
@@ -293,19 +347,46 @@ local function build()
   frame:SetFrameStrata("DIALOG")
   ns.MakeWindow(frame)
   frame:Hide()
-  frame.TitleText:SetText("Loot Advisor — Settings")
+
+  local S = ns.Style
+  -- The secondary windows' lighter violet, painted OVER what MakeWindow put
+  -- down rather than layered on it — Style.PanelGround's own comment records
+  -- what happens otherwise.
+  if S then
+    if frame.bgTex then frame.bgTex:Hide() end
+    if frame.headTex then frame.headTex:Hide() end
+    if frame.headLine then frame.headLine:Hide() end
+    S.Surface(frame, S.COLOR.windowGround, 1)
+    S.Rim(frame, S.COLOR.rim, 0.4)
+    S.Lockup(frame, SET_X, 30)
+  end
+
+  frame.heading = S and S.Text(frame, "light", "title", S.COLOR.white, "LEFT")
+    or frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  if S then S.SetFont(frame.heading, S.FONT.light, 18) end
+  frame.heading:ClearAllPoints()
+  frame.heading:SetPoint("TOPLEFT", SET_X, -86)
+  frame.heading:SetText("SETTINGS")
 
   frame.rows = {}
   local y = -HEADER_H
 
   for _, spec in ipairs(Settings.SPEC) do
-    local label = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    label:SetPoint("TOPLEFT", 18, y)
-    label:SetText(spec.label)
+    -- ⚠️ UPPERCASE, IN THE HEADING PURPLE — the same treatment every heading in
+    -- the redesign takes, from the Standings rail to the Runner's sections.
+    local label = S and S.Text(frame, "bold", "head", S.COLOR.accent, "LEFT")
+      or frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    label:ClearAllPoints()
+    label:SetPoint("TOPLEFT", SET_X, y + SET_LABEL_Y)
+    label:SetText((spec.label or ""):upper())
 
-    local help = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    help:SetPoint("TOPLEFT", 18, y - 16)
-    help:SetWidth(FRAME_W - 36)
+    local help = S and S.Text(frame, "light", "name", S.COLOR.white, "LEFT")
+      or frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    help:ClearAllPoints()
+    help:SetPoint("TOPLEFT", SET_X, y - SET_HELP_Y)
+    -- Stops short of the control column rather than running the full width, so
+    -- a long sentence wraps instead of sliding under a checkbox.
+    help:SetWidth(SET_CHECK_X - SET_X - 16)
     help:SetJustifyH("LEFT")
     help:SetWordWrap(true)
     -- Capped so a long help line cannot grow the row it was measured for.
@@ -314,10 +395,26 @@ local function build()
 
     local control
     if spec.kind == "toggle" then
-      control = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
-      control:SetPoint("TOPRIGHT", -20, y + 4)
+      -- ⚠️ THE DESIGN'S OWN CHECKBOX, not Blizzard's — a 24px square with the
+      -- control's gradient rim and the mock's 10x7 tick, which is what
+      -- Style.Check already draws for the Loot tab's Vault control. Passing an
+      -- EMPTY label because this row has drawn its own above the help text.
+      control = S and S.Check(frame, "", SET_CHECK_SZ)
+        or CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
+      control:SetSize(SET_CHECK_SZ, SET_CHECK_SZ)
+      control:SetPoint("TOPLEFT", SET_CHECK_X, y + 4)
       control:SetScript("OnClick", function(self)
-        Settings.Set(spec.key, self:GetChecked() and "on" or "off")
+        -- ⚠️ Style.Check DOES NOT TOGGLE ITSELF. It is a plain Button with
+        -- SetChecked/GetChecked bolted on, so its state only moves when someone
+        -- moves it — unlike a CheckButton, which has already flipped by the time
+        -- OnClick runs. Reading GetChecked without flipping first would store
+        -- the value it already had, every press, silently.
+        local on = self:GetChecked()
+        if self._hodStyled then
+          on = not on
+          self:SetChecked(on)
+        end
+        Settings.Set(spec.key, on and "on" or "off")
       end)
 
     elseif spec.kind == "slider" then
@@ -334,8 +431,8 @@ local function build()
 
     elseif spec.kind == "number" then
       control = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
-      control:SetSize(46, 20)
-      control:SetPoint("TOPRIGHT", -24, y)
+      control:SetSize(SET_INPUT_W, SET_INPUT_H)
+      control:SetPoint("TOPLEFT", SET_INPUT_X, y)
       control:SetAutoFocus(false)
       control:SetNumeric(true)
       -- Committed on ENTER *and* on losing focus. Enter-only is why "Close"
@@ -364,9 +461,14 @@ local function build()
     elseif spec.kind == "choice" then
       -- A plain cycling button rather than a dropdown: five values, one click
       -- each, and no UIDropDownMenu boilerplate to get wrong.
-      control = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-      control:SetSize(120, 22)
-      control:SetPoint("TOPRIGHT", -18, y + 2)
+      -- The mock draws these as the panel's filled dropdown control, so they
+      -- take the same primitive as the Loot tab's difficulty picker rather than
+      -- a stock button. Still a CYCLER underneath — five values, one click each.
+      control = S and S.Control(frame, "", "head")
+        or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+      control:SetSize(SET_DROP_W, SET_INPUT_H)
+      control:SetPoint("TOPLEFT", FRAME_W - SET_X - SET_DROP_W, y)
+      if control.SetActive then control:SetActive(true) end
       control:SetScript("OnClick", function(self)
         local cur = Settings.Get(spec.key)
         local idx = 1
@@ -378,13 +480,19 @@ local function build()
     end
 
     frame.rows[#frame.rows + 1] = { spec = spec, control = control }
-    y = y - ROW_H
+    y = y - (Settings.RowHeight(spec) + ROW_GAP)
   end
 
-  local reset = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  reset:SetSize(120, 24)
-  reset:SetPoint("BOTTOMLEFT", 18, 12)
-  reset:SetText("Restore Defaults")
+  -- ⚠️ THE TWO CONTROLS TAKE THE REDESIGN'S BUTTON PRIMITIVE, at the mock's own
+  -- widths: RESTORE DEFAULTS 180 on the left margin, DONE 74 on the right.
+  local S2 = ns.Style
+  local reset = S2 and S2.Control(frame, "RESTORE DEFAULTS")
+    or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  reset:SetSize(180, 26)
+  reset:SetPoint("BOTTOMLEFT", SET_X, 27)
+  if reset.SetActive then reset:SetActive(false) end
+  if reset.Repaint then reset:Repaint() end
+  if not S2 then reset:SetText("Restore Defaults") end
   reset:SetScript("OnClick", function()
     Settings.Reset()
     Settings.Refresh()
@@ -416,10 +524,13 @@ local function build()
   frame.display:SetJustifyV("TOP")
   frame.display:SetWordWrap(true)
 
-  local close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  close:SetSize(100, 24)
-  close:SetPoint("BOTTOMRIGHT", -18, 12)
-  close:SetText("Done")
+  local close = S2 and S2.Control(frame, "DONE")
+    or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  close:SetSize(74, 26)
+  close:SetPoint("BOTTOMRIGHT", -SET_X, 27)
+  if close.SetActive then close:SetActive(false) end
+  if close.Repaint then close:Repaint() end
+  if not S2 then close:SetText("Done") end
   close:SetScript("OnClick", function()
     -- Commit anything still being typed before the window goes away.
     for _, row in ipairs(frame.rows) do
