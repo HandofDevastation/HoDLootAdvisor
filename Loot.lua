@@ -307,9 +307,16 @@ end
 --- Each row: { name, class, spec, result, pr, rank, gap, eligible, reason }
 function Loot.RankRaiders(itemID, opts)
   opts = opts or {}
+  -- ⚠️ ONLY THE BAKED DATA IS REQUIRED (Session 256). This asked for a loaded
+  -- raid-night export too, and returned nil without one — so the ranked table
+  -- was dead for anyone who has never imported, which is every install outside
+  -- this guild and every pug or LFR night. The export carries EPGP priority and
+  -- a gear snapshot; neither is what makes a ranking possible. Who is here comes
+  -- from the group, their gear from inspection, their spec from the client, and
+  -- the scoring from the payload baked into the addon.
   local data = ns.Data()
+  if not data then return nil end
   local raid = ns.Payload.Current()
-  if not (data and raid) then return nil end
 
   local rec = (data.items or {})[itemID]
   if not rec then return nil end
@@ -353,11 +360,19 @@ function Loot.RankRaiders(itemID, opts)
         ns.CurrentContentScope and ns.CurrentContentScope() or nil
       )
 
+      -- Tier pieces ride in the export, so an ad-hoc raider has none to read and
+      -- scores 0 — the honest answer for someone we can only see from outside.
+      -- YOURS are countable from your own equipment, and the personal column
+      -- already counts them that way; leaving your row on 0 would grade a tier
+      -- token differently in two places on one screen.
+      local pieces = r.tier or 0
+      if r.me and ns.TierPieceCount then pieces = (ns.TierPieceCount()) or 0 end
+
       local result = ns.Scoring.scoreCandidate(
         {
           equipped_ilvl  = state.ilvl or 0,
           equipped_track = state.track,
-          piece_count    = r.tier or 0,
+          piece_count    = pieces,
           declared_need  = false,
           ranked_tier    = quality and quality.grade or nil,
           bis            = quality and quality.bis or nil,
@@ -462,6 +477,20 @@ function Loot.RankRaiders(itemID, opts)
     -- The two halves of "N of M raiders can use it". Carried on meta because a
     -- ranking that arrived over comms has no `rows` to count.
     usable = #ranked, total = #rows,
+    -- Whether a PRIORITY column has anything to say. EPGP reaches the addon only
+    -- in the export, so with none loaded every cell would be an em-dash under a
+    -- heading — a number we failed to find, rather than a question that does not
+    -- apply here. Same reasoning that hides the standing block and the Standings
+    -- tab together (rules/HoD_Rules_Loot-Gear.txt, "NO STANDING WITHOUT A RAID
+    -- NIGHT"); a column is the third place that claim is made and it must agree
+    -- with the other two.
+    priority = raid ~= nil,
+    -- Whether an EXPORT underlies this ranking at all, which is a different
+    -- question from whether it carried standings. It is what makes the ad-hoc
+    -- asterisk mean anything: "not on tonight's raid roster" is information when
+    -- there IS a roster and noise when there is not — with no export everyone
+    -- present is equally unknown to us, so marking them all says nothing.
+    roster = raid ~= nil,
   }
 end
 
@@ -507,9 +536,23 @@ function Loot.RankingFor(itemID, opts)
           fromRunner = true,
         }
       end
+      -- Read off the ROWS, not from whether we hold an export. A client with no
+      -- payload of its own still shows priorities when the runner's ranking
+      -- carried them, and shows none when it did not — the column follows the
+      -- data on screen rather than a fact about this client.
+      local anyPr = false
+      for _, r in ipairs(display) do
+        if r.pr then anyPr = true; break end
+      end
+
       return display, nil, {
         usable = (meta and meta.usable) or #display,
         total  = meta and meta.total,
+        priority = anyPr,
+        -- A ranking can only be BROADCAST by a runner, and only an import makes
+        -- anyone the runner — so a received list always has a roster behind it,
+        -- whether or not this client holds one.
+        roster = true,
       }, from
     end
   end
@@ -647,7 +690,11 @@ function Loot.ChatLines(itemID, opts)
   local name = (rec and rec.name) or ("item " .. tostring(itemID))
 
   if not ranked then
-    return { ("[Loot Advisor] %s — no raid night imported"):format(name) }
+    -- ⚠️ NOT "no raid night imported" ANY MORE (Session 256). Ranking no longer
+    -- needs an export, so the only way here is an item this season's table
+    -- cannot describe — and only the runner can post, so whoever reads this line
+    -- HAS imported one. It said the opposite.
+    return { ("[Loot Advisor] %s — not in the season's loot table"):format(name) }
   end
   if #ranked == 0 then
     return { ("[Loot Advisor] %s — not an upgrade for anyone here"):format(name) }

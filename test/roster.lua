@@ -203,8 +203,19 @@ do
   -- Ranking them now would put strangers in the list at ilvl 0, which the
   -- scorer reads as an empty slot — making every drop a maximum upgrade for
   -- every one of them.
-  check("an ad-hoc raider with no gear is NOT ranked",
-        #ns.Payload.EffectiveRoster() == 0, #ns.Payload.EffectiveRoster())
+  -- ⚠️ THE COUNT WAS A PROXY AND IT BROKE (Session 256). This asserted the list
+  -- was EMPTY, which was true only because a missing export emptied it outright
+  -- — the same list is now built from the group, so YOU are in it. The property
+  -- worth pinning was never "the list is empty", it is that a stranger we cannot
+  -- describe is not in it, so that is what is asserted now.
+  local eff = ns.Payload.EffectiveRoster()
+  local strangersRanked = 0
+  for _, r in ipairs(eff) do
+    if not r.me then strangersRanked = strangersRanked + 1 end
+  end
+  check("an ad-hoc raider with no gear is NOT ranked", strangersRanked == 0, strangersRanked)
+  check("...but the player is, from their own client",
+        #eff == 1 and eff[1].me == true, #eff)
   check("...but IS listed as unresolved, so they are visible rather than absent",
         #Roster.Unresolved() == #stub.group, #Roster.Unresolved())
 end
@@ -427,6 +438,65 @@ do
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
+header("the whole group ranked with NO export at all")
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- THE CASE THIS FILE ALREADY MODELS, with the export never arriving: anyone
+-- outside this guild, and any pug or LFR night, where nobody imports anything
+-- ever. Until Session 256 the ranked table was dead here — the roster builder
+-- and the ranker BOTH returned nothing without a payload — so the addon showed a
+-- personal column and pointed at an Import Raid Night button for data that was
+-- never coming. Everything the group half needs was already working and simply
+-- never reached.
+--
+-- ⚠️ IT RUNS BEFORE THE SCENARIO BELOW, which loads the export and cannot be
+-- undone. Order is load-bearing here.
+
+do
+  local dataT = _G.HoDLootAdvisorData
+  local noExportChest
+  for id, it in pairs(dataT.items) do
+    if it.slot == "CHEST" and it.classes and it.classes["Hunter"] then
+      noExportChest = id
+      break
+    end
+  end
+
+  check("nothing has been imported", ns.Payload.Current() == nil)
+
+  local ranked, all, meta = ns.Loot.RankRaiders(noExportChest, { difficulty = "h" })
+  check("a ranking is produced anyway", ranked ~= nil and all ~= nil,
+        ranked and #ranked or "nil")
+
+  local byName = {}
+  for _, row in ipairs(all or {}) do byName[row.name or ""] = row end
+
+  check("a stranger resolved in game is in it",
+        byName["Normalguy"] ~= nil)
+  check("...scored from what their own client reported",
+        byName["Normalguy"] and byName["Normalguy"].equipped
+          and byName["Normalguy"].equipped.source == "live",
+        byName["Normalguy"] and byName["Normalguy"].equipped
+          and byName["Normalguy"].equipped.source)
+
+  -- The gate that stops a stranger we cannot describe floating to the top at
+  -- ilvl 0 has to survive the export going away — it is the only thing standing
+  -- between an unreadable pug and a maximum upgrade on every item.
+  check("...while one we could not read is still left out", byName["Faraway"] == nil)
+
+  -- YOU are the person this used to omit, and the omission was invisible because
+  -- your own column was right beside it.
+  check("the player is ranked among them",
+        byName[stub.player.name] ~= nil, stub.player.name)
+
+  check("no priority column is claimed", meta and meta.priority == false)
+  check("...and no roster is claimed either", meta and meta.roster == false)
+  local withPr = 0
+  for _, row in ipairs(all or {}) do if row.pr then withPr = withPr + 1 end end
+  check("...and not one row carries a standing", withPr == 0, withPr)
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
 header("an ad-hoc raider reaching a real ranking")
 -- ═══════════════════════════════════════════════════════════════════════════
 
@@ -470,10 +540,16 @@ do
   -- strangers, reporting "31 of 38 raiders gain from it". The ranking is now the
   -- people PRESENT — the two export raiders standing here plus the strangers we
   -- resolved — so it is SMALLER than the export, not larger.
-  local fromExport, strangers = 0, 0
+  -- THREE KINDS OF ENTRY, not two (Session 256): the export's own raiders, the
+  -- strangers resolved from the group, and YOU — who are on neither list here,
+  -- since this fixture's export does not name the player.
+  local fromExport, strangers, mine = 0, 0, 0
   for _, r in ipairs(effective) do
-    if r.adhoc then strangers = strangers + 1 else fromExport = fromExport + 1 end
+    if r.me then mine = mine + 1
+    elseif r.adhoc then strangers = strangers + 1
+    else fromExport = fromExport + 1 end
   end
+  check("the player is present exactly once", mine == 1, mine)
   check("only export raiders actually in the instance are ranked",
         fromExport == 2, ("%d of %d on the export"):format(fromExport, base))
   check("...alongside the strangers we managed to resolve",

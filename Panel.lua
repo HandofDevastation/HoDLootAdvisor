@@ -2260,7 +2260,10 @@ local function renderRanking(itemID)
   -- rule. Vault mode is a planning view over the full loot table.
   local ranked, _all, meta, fromRunner =
     ns.Loot.RankingFor(itemID, { vault = ns.VaultOn() })
-  setHeaders("RAIDER", "UPGRADE", "GAIN", "PRIORITY")
+  -- PRIORITY only when something can fill it — see the meta field's own note in
+  -- Loot.RankRaiders. A heading over a column of em-dashes is a number we failed
+  -- to find; no heading is a question that does not apply.
+  setHeaders("RAIDER", "UPGRADE", "GAIN", (meta and meta.priority) and "PRIORITY" or nil)
 
   if not ranked then
     -- ⚠️ SAY WHAT IS SHOWN, NOT ONLY WHAT IS MISSING. The grades and BIS marks
@@ -2268,10 +2271,17 @@ local function renderRanking(itemID)
     -- against the addon's baked-in tables, so they are fully correct with no
     -- roster loaded. Reading "nothing imported" beside a full column makes both
     -- halves look broken when neither is.
+    --
+    -- ⚠️ AND IT NO LONGER MEANS "NOTHING IMPORTED" (Session 256). Ranking works
+    -- with no export now, off the group and the inspect pass, so the only way
+    -- here is an item this season's table cannot describe — a dungeon drop, or
+    -- loot from a tier we never imported. Telling someone to import a raid night
+    -- would send them after a fix for a different problem.
     setHeaders()
     frame.more:SetText("")
     frame.note:SetText("The column is scored for you from your own gear. "
-      .. "Press Import Raid Night to rank the raid for this item.")
+      .. "This item is not in the season's loot table, so it cannot be ranked "
+      .. "across the group.")
     hideRows(1)
     return nil
   end
@@ -2281,8 +2291,21 @@ local function renderRanking(itemID)
   if state.rankScroll > maxScroll then state.rankScroll = maxScroll end
 
   if total == 0 then
+    -- ⚠️ TWO DIFFERENT ANSWERS WERE BEING GIVEN ONE SENTENCE. This list holds
+    -- people the item is an UPGRADE for, so an empty one usually means "nobody
+    -- gains" — while the text claimed nobody could USE it, which is a statement
+    -- about armour type and is often false. The distinction was invisible on a
+    -- guild night and is the common case for one person browsing alone.
+    local anyEligible = false
+    for _, row in ipairs(_all or {}) do
+      if row.eligible then anyEligible = true; break end
+    end
+    -- "Here" once the group is the roster, "on the roster" once an export is.
+    local who = ns.Payload.Current() and "on the roster" or "here"
     frame.more:SetText("")
-    frame.note:SetText("Nobody on the roster can use this.")
+    frame.note:SetText(anyEligible
+      and ("Not an upgrade for anyone %s."):format(who)
+      or  ("Nobody %s can use this."):format(who))
     hideRows(1)
     return ranked
   end
@@ -2329,7 +2352,10 @@ local function renderRanking(itemID)
     row.rank:SetTextColor(unpack(MUTED))
 
     local displayName = r.name or "?"
-    if r.adhoc then
+    -- Only where an export exists to be off — see meta.roster. With none loaded
+    -- every name here would carry the mark and the footnote would explain a
+    -- roster that does not exist.
+    if r.adhoc and meta and meta.roster then
       -- AN AD-HOC RAIDER IS MARKED: somebody the raid-night export has never
       -- heard of, resolved entirely from what we could read off them in game.
       -- "Who is that" is the question a runner has when an unfamiliar name
@@ -2388,12 +2414,18 @@ local function renderRanking(itemID)
       leader  = ranked[1] and ranked[1].name or nil,
     }
 
+    -- An em-dash here means "this person has no standing" and is right on a
+    -- guild night, where the column exists and one ad-hoc raider is missing from
+    -- it. With NO export there is no column at all — the heading is gone — so a
+    -- dash in every row would be furniture for a question nobody asked.
     if r.pr then
       row.pr:SetText(("%.2f"):format(r.pr))
       row.pr:SetTextColor(unpack(WHITE))
-    else
+    elseif meta and meta.priority then
       row.pr:SetText("—")
       row.pr:SetTextColor(unpack(MUTED))
+    else
+      row.pr:SetText("")
     end
 
     -- Which TIER this raider's gear came from. Three-tier provenance is only
@@ -2402,7 +2434,7 @@ local function renderRanking(itemID)
     row.src:SetText(srcText or "")
     if srcColor then row.src:SetTextColor(srcColor[1], srcColor[2], srcColor[3]) end
     row.srcHelp, row.srcName = srcHelp, r.name
-    if r.adhoc then
+    if r.adhoc and meta and meta.roster then
       row.srcHelp = (srcHelp and (srcHelp .. "\n\n") or "")
         .. "Not on tonight's raid-night export — read from them in game. "
         .. "No EPGP standing exists for them."

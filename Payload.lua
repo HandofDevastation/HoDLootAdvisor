@@ -243,11 +243,16 @@ end
 --- through to the snapshot, which is exactly how the addon behaved before comms
 --- existed. That is the property that lets one installer be a working system.
 function Payload.SlotState(raider, lootSlot)
-  local data = Payload.Current()
-  if not (data and raider and Payload.slotIndex) then return nil end
+  if not (raider and lootSlot) then return nil end
 
-  local idx = Payload.slotIndex[lootSlot]
-  if not idx then return nil end
+  -- ⚠️ THE SNAPSHOT IS OPTIONAL, AND THAT IS THE POINT (Session 256). This used
+  -- to require a loaded export before it would answer anything, so with none
+  -- loaded it returned nil for EVERY raider and the whole ranked list collapsed
+  -- — which is every install outside this guild. The group scan and the inspect
+  -- pass describe people perfectly well on their own; the export is one source
+  -- among four, not the price of entry.
+  local data = Payload.Current()
+  local idx = Payload.slotIndex and Payload.slotIndex[lootSlot]
 
   -- An AD-HOC raider carries no `g` at all: the export has never heard of them,
   -- so there is no snapshot to fall back to. They resolve entirely from what we
@@ -255,7 +260,9 @@ function Payload.SlotState(raider, lootSlot)
   -- listed as unresolved instead. Defaulting them to ilvl 0 would make every
   -- item a maximum upgrade and float a stranger to the top of every list.
   local ilvl, track = 0, nil
-  if raider.g then
+  local snapshot = false
+  if raider.g and data and idx then
+    snapshot = true
     ilvl = raider.g[(idx - 1) * 2 + 1] or 0
     local trackIdx = raider.g[(idx - 1) * 2 + 2] or 0
     track = trackIdx > 0 and data.tracks[trackIdx] or nil
@@ -294,10 +301,29 @@ function Payload.SlotState(raider, lootSlot)
     source = tier
   end
 
+  -- YOUR OWN EQUIPMENT IS ASKED FOR, NEVER REMEMBERED. Everyone else's best
+  -- answer is a report or an inspection, each as old as the moment it was taken
+  -- — so they compete on recency. Yours can be read from the client right now,
+  -- so it wins outright rather than joining that race.
+  --
+  -- It is also what the PERSONAL column already scores against, and your own row
+  -- in the ranked table sitting beside your own column showing a different item
+  -- level is the disagreement this removes. Solo with no export there is nothing
+  -- else at all: no snapshot, and no self-report, because a broadcast with no
+  -- group to carry it never comes back.
+  local selfRead = false
+  if ns.Comms and ns.Comms.IsSelf(raider.n) and ns.EquippedSlotState then
+    local mine = ns.EquippedSlotState(lootSlot)
+    if mine then
+      ilvl, track = mine.ilvl or 0, mine.track
+      source, selfRead = "live", true
+    end
+  end
+
   -- Nothing from the export AND nothing learned in game. Returning a zeroed
   -- state here would read as "empty slot", which the scorer treats as anything
   -- being an upgrade.
-  if not raider.g and not better then return nil end
+  if not snapshot and not better and not selfRead then return nil end
 
   return {
     ilvl   = ilvl,
@@ -324,10 +350,16 @@ end
 --- They carry no EPGP standing, because that only exists on the website. Their
 --- priority column reads em-dash, which is the honest answer rather than a
 --- fabricated one.
+--- ⚠️ AND IT WORKS WITH NO EXPORT AT ALL (Session 256). It used to return an
+--- empty list the moment no payload was loaded, which took the whole ranked
+--- table with it — so an install outside this guild, and any pug or LFR night,
+--- got the personal column and nothing else. Everything the group half needs is
+--- independent of the site: who is here, what they are wearing, what spec they
+--- are in, what they can use. The export supplies a fourth thing, EPGP priority,
+--- and its absence is a missing COLUMN rather than a missing feature.
 function Payload.EffectiveRoster()
   local data = Payload.Current()
-  if not data then return {} end
-  if not ns.Roster then return data.roster end
+  if not ns.Roster then return data and data.roster or {} end
 
   -- ⚠️ IN A GROUP, RANK ONLY THE PEOPLE IN IT (Jason, Session 253). The roster
   -- is the raid TEAM, not the people standing here — so an LFR showed twenty-two
@@ -359,7 +391,7 @@ function Payload.EffectiveRoster()
   -- group we show the whole imported roster, because browsing solo is planning
   -- and there is no "here" to filter against.
   local out = {}
-  for _, r in ipairs(data.roster) do
+  for _, r in ipairs((data and data.roster) or {}) do
     if not inGroup or seen(r.n) then out[#out + 1] = r end
   end
 
@@ -375,6 +407,42 @@ function Payload.EffectiveRoster()
     end
   end
 
+  -- ⚠️ YOU ARE THE ONE PERSON THE SCAN DELIBERATELY SKIPS. The ad-hoc list
+  -- excludes yourself, because you are never inspected and in a guild night you
+  -- are already on the export. With no export you are on nothing — so the one
+  -- name certain to be standing there was the one name the ranked list could not
+  -- contain, and "who is this for" answered without mentioning you.
+  --
+  -- This also covers the case that always existed and was never noticed: playing
+  -- an alt, or a trial, on a night whose export does not list you.
+  --
+  -- Resolved from the client rather than from the scan, because your class, spec
+  -- and hero tree are all directly readable — the same call the personal column
+  -- scores through, so the two cannot disagree about who you are.
+  local me = UnitName and UnitName("player")
+  if me and ns.ResolveCharacter then
+    local mine = ns.ResolveCharacter()
+    if mine.className and mine.specName then
+      -- Name-folded rather than compared raw: the export writes the name the
+      -- site holds and the client answers with its own, and a realm suffix on
+      -- one side would list you twice.
+      local function isMe(name)
+        if ns.Comms and ns.Comms.IsSelf then return ns.Comms.IsSelf(name) end
+        return (name or ""):lower() == me:lower()
+      end
+      local listed = false
+      for _, r in ipairs(out) do
+        if isMe(r.n) then listed = true; break end
+      end
+      if not listed then
+        out[#out + 1] = {
+          n = me, c = mine.className, s = mine.specName, h = mine.heroTree,
+          me = true,
+        }
+      end
+    end
+  end
+
   return out
 end
 
@@ -382,6 +450,14 @@ end
 --- item level. Only the two-socket slots carry ids, which is the only place the
 --- question can arise.
 function Payload.OwnsCopy(raider, lootSlot, itemID)
+  -- Same reasoning as the live read in SlotState: for YOU the client can be
+  -- asked outright, and it answers about both sockets. The payload only ever
+  -- recorded the worst piece in the slot, so reading it here could miss the copy
+  -- you are actually wearing and offer you a second one.
+  if raider and ns.Comms and ns.Comms.IsSelf(raider.n) and ns.EquippedCopy then
+    return ns.EquippedCopy(lootSlot, itemID)
+  end
+
   local state = Payload.SlotState(raider, lootSlot)
   if not (state and state.ids) then return false, nil end
   for _, id in ipairs(state.ids) do

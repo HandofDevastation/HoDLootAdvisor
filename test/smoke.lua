@@ -438,7 +438,17 @@ local ranked, all, meta = ns.Loot.RankRaiders(chestId, { difficulty = "h" })
 check("the ranking returns rows once a payload is loaded", ranked ~= nil)
 
 if ranked then
-  check("every roster member was considered", #all == 24, #all)
+  -- ⚠️ 24 ON THE EXPORT PLUS YOU (Session 256). The fixture roster does not list
+  -- Gloomrift, and until this session that meant the person running the addon
+  -- was absent from every ranking they looked at — the one name guaranteed to be
+  -- standing there. Counting rows alone would not have caught it either way, so
+  -- the presence of the player is asserted directly.
+  check("every roster member was considered", #all == 25, #all)
+  local sawMe = false
+  for _, row in ipairs(all) do
+    if (row.name or ""):lower() == "gloomrift" then sawMe = true end
+  end
+  check("...including the player, who is not on this export", sawMe)
   check("somebody ranks for the chest", #ranked > 0, #ranked)
 
   local ineligible = 0
