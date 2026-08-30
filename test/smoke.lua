@@ -1064,8 +1064,17 @@ do
 
   check("our key becomes the game's word",
         ns.SlotLabel("TRINKET") == "Trinket", ns.SlotLabel("TRINKET"))
-  check("...including where the wording differs, not just the case",
-        ns.SlotLabel("OFF_HAND") == "Held In Off-hand", ns.SlotLabel("OFF_HAND"))
+  -- ⚠️ OFF HAND IS THE ONE PLACE WE DELIBERATELY DIFFER FROM THE CLIENT (Jason,
+  -- Session 256: "Off Hand is the correct language. It's more succinct and
+  -- clear"). Everywhere else our key maps to the GAME's phrase; here the game
+  -- says "Held In Off-hand" and we say "Off Hand", so the translation has to run
+  -- BOTH ways or the flicker this whole block exists to prevent comes back for
+  -- exactly one slot. Asserted as a pair, because either half alone is the bug.
+  check("...including where we deliberately differ from the game's wording",
+        ns.SlotLabel("OFF_HAND") == "Off Hand", ns.SlotLabel("OFF_HAND"))
+  check("...and the game's own phrase normalises to ours, so it cannot flicker",
+        ns.SlotLabel("Held In Off-hand") == "Off Hand",
+        ns.SlotLabel("Held In Off-hand"))
   -- A slot key we invented, for which the game has no word at all — a token row
   -- drew its badge beside an empty second line without this.
   check("a tier token gets a label rather than nothing",

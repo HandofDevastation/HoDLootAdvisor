@@ -742,9 +742,20 @@ local SLOT_LABEL = {
   HEAD = "Head", NECK = "Neck", SHOULDER = "Shoulder", BACK = "Back",
   CHEST = "Chest", WRIST = "Wrist", HANDS = "Hands", WAIST = "Waist",
   LEGS = "Legs", FEET = "Feet", FINGER = "Finger", TRINKET = "Trinket",
-  MAIN_HAND = "Main Hand", OFF_HAND = "Held In Off-hand",
+  MAIN_HAND = "Main Hand", OFF_HAND = "Off Hand",
   ONE_HAND = "One-Hand", TWO_HAND = "Two-Hand", RANGED = "Ranged",
   TOKEN = "Tier Token",
+
+  -- ⚠️ THE GUIDE'S OWN WORDING, NORMALISED TO OURS (Session 256). Every other
+  -- entry above maps OUR key to the GAME's phrase, because matching the game is
+  -- what stops the line changing under the reader when the Adventure Guide
+  -- answers a beat after our payload. "Off Hand" is Jason's call and is the one
+  -- place we deliberately differ from the client's wording — so the translation
+  -- has to run the other way too, or an off-hand item would read "Off Hand" and
+  -- then flip to "Held In Off-hand", which is precisely the flicker the rest of
+  -- this table exists to prevent. JOURNAL_SLOT already accepts both spellings on
+  -- the way IN; this is the same pair on the way OUT.
+  ["Held In Off-hand"] = "Off Hand",
 }
 
 --- ⚠️ UNKNOWN VALUES PASS THROUGH UNTOUCHED, which is what makes this safe to
