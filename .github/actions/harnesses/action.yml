@@ -63,7 +63,14 @@ runs:
       run: |
         set -euo pipefail
         fail=0
-        for t in smoke comms roster parity; do
+        # ⚠️ `window` IS IN THIS LIST AND THAT IS THE POINT (Session 257). Every
+        # other harness deliberately skips the window files, so a runtime error
+        # in Panel.lua reached the game unopposed twice in one session — a
+        # deleted constant still read three times, which is not a syntax error
+        # and not a load error, just a nil that aborts the build partway. The
+        # panel then draws everything above the error and nothing below it,
+        # which looks like an unfinished redesign rather than a crash.
+        for t in smoke comms roster window parity; do
           echo "──────── $t ────────"
           if ! lua5.4 "test/$t.lua" 2>&1 | tee "/tmp/$t.log"; then
             echo "::error::harness $t FAILED"

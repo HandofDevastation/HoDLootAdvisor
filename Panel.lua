@@ -1701,12 +1701,12 @@ local function buildTabControls()
   -- giving it a home is a matter of showing them again.
   frame.standingsView = ns.Style and ns.Style.Pill(frame, 92, 22, "Targets")
     or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.standingsView:SetPoint("TOPLEFT", TOG_X, -TOG.y)
+  frame.standingsView:SetPoint("TOPLEFT", TOG.srcL, -TOG.y)
   frame.standingsView:Hide()
 
   frame.instDrop = ns.Style and ns.Style.Pill(frame, 170, 22, "")
     or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.instDrop:SetPoint("TOPLEFT", TOG_X, -(TOG.y + TOG_ROW))
+  frame.instDrop:SetPoint("TOPLEFT", TOG.srcL, -(TOG.y + 26))
   frame.instDrop:Hide()
   frame.instDrop:SetScript("OnClick", function()
     local list = ns.Journal and ns.Journal.CachedInstances() or {}
@@ -1718,7 +1718,7 @@ local function buildTabControls()
 
   frame.encDrop = ns.Style and ns.Style.Pill(frame, 170, 22, "")
     or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  frame.encDrop:SetPoint("TOPLEFT", TOG_X, -(TOG.y + TOG_ROW * 2))
+  frame.encDrop:SetPoint("TOPLEFT", TOG.srcL, -(TOG.y + 52))
   frame.encDrop:Hide()
   frame.encDrop:SetScript("OnClick", function()
     local list = Panel._encounterList and Panel._encounterList() or {}
