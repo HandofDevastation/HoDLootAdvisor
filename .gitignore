@@ -3,3 +3,20 @@ dist/
 # macOS folder settings — never part of the addon
 .DS_Store
 **/.DS_Store
+
+# ⚠️ EXCON IS NOT COMMITTED UNTIL ITS LICENCE IS SETTLED (Session 257).
+# The font files are copied into Media/fonts/ so the redesign can be seen in
+# game, but they are deliberately UNTRACKED. Fontshare's ITF Free Font Licence
+# v2.0 (17 Aug 2026, Media/fonts/ITF-FFL.txt) permits embedding in an
+# application and separately forbids making the font software available through
+# a "repository, download service, application or platform" in a form that can
+# be "extracted or used independently". A .ttf sitting loose in an addon zip on
+# a public repo and on CurseForge is extractable by anyone, which is the case
+# the restriction describes. The font FILE's own embedded terms are the older,
+# credit-only text — the same one General Sans already ships under — so the two
+# documents disagree and the newer EULA is the one the download was made under.
+# Khand is unaffected: SIL OFL permits redistribution by design, which is why it
+# was safe to bundle in the first place.
+# Remove these three lines once ITF answers, or once a replacement face lands.
+Media/fonts/Excon-*.ttf
+Media/fonts/ITF-FFL.txt

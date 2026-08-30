@@ -62,7 +62,12 @@ local CLASS_COLOR = {
 
 -- Runner is LAST and conditional: Experience §3 gives it to whoever loaded the
 -- data, and Session 249 made that a rule — the tab renders ONLY for the runner.
-local TABS = { "Loot", "Standings", "Runner" }
+-- ⚠️ SLOTS SITS SECOND, WHERE THE MOCK PUTS IT — between Loot and Standings,
+-- not appended at the end. The two planning surfaces (what dropped, what you
+-- are chasing) belong beside each other; Standings and Runner are the two that
+-- come and go, and a tab that can disappear should not sit between two that
+-- cannot. Its rendering lands with the Slots build; until then it draws empty.
+local TABS = { "Loot", "Slots", "Standings", "Runner" }
 
 -- ---------------------------------------------------------------------------
 -- Geometry — read straight off the Figma frame, at 1:1
@@ -78,11 +83,23 @@ local TABS = { "Loot", "Standings", "Runner" }
 -- do not clip their children, so a row count larger than the space available
 -- draws straight through whatever is below it instead of scrolling.
 
-local FRAME_W, FRAME_H = 620, 560
+-- ⚠️ THE FRAME GREW (Session 257): 620x560 -> 740x600, and the left margin
+-- doubled to 40. Every coordinate below is read off the redesign's frame as an
+-- OFFSET FROM ITS TOP-LEFT, which is why they can be checked against Figma by
+-- subtracting the frame's own origin and nothing else.
+local FRAME_W, FRAME_H = 740, 600
 
-local PAD = 20
+local PAD = 40
 
-local TAB_Y, TAB_W, TAB_H, TAB_PITCH = 60, 100, 24, 110
+-- The tab row. There is no PITCH any more and that is the point: each tab is as
+-- wide as its own label plus the control's padding, so they are laid out with a
+-- GAP between them (Style.LayoutRow). A pitch would have to assume every label
+-- is the same length, which is what made STANDINGS the widest tab in the mock.
+local TAB_Y, TAB_GAP = 82, 10
+
+-- The header lockup's artwork corner. The texture itself is larger; see
+-- Style.Lockup for why the caller anchors the ink rather than the file.
+local LOGO_X, LOGO_Y = 40, 30
 
 -- Boss strip: 32px portraits, right-aligned to the window's right margin.
 local BOSS_Y, BOSS_SIZE, BOSS_PITCH = 102, 32, 42
@@ -106,8 +123,16 @@ local ITEM_H, ITEM_PITCH = 38, 40
 -- The detail pane.
 local PANE_X, PANE_Y, PANE_W, PANE_H = 220, 149, 380, 360
 
--- The bottom bar.
-local FOOT_Y, FOOT_H = 509, 51
+-- The bottom bar. Its own margins are NOT the window's — the mock insets its
+-- text 47 from the left and stops the button row 34 from the right, where the
+-- body above uses 40 on both sides. Written as read rather than rounded to PAD:
+-- these are the file's numbers, and squaring them up is a change to the design
+-- rather than a tidy-up of the code.
+local FOOT_Y, FOOT_H = 550, 50
+local FOOT_TEXT_X, FOOT_RIGHT, FOOT_GAP = 47, 34, 10
+local FOOT_LINE1_Y, FOOT_LINE2_Y = 10, 22
+-- The button row's own top inset inside the bar (3344 - 3333).
+local FOOT_BTN_Y = 11
 
 -- ── Standings tab ──────────────────────────────────────────────────────────
 --
@@ -814,16 +839,10 @@ local function buildChrome()
   -- edge, and one light hairline.
   if ns.Style then ns.Style.PanelGround(frame, FRAME_H) end
 
-  -- ⚠️ THE HEADER IS ONE IMAGE, CREST AND WORDMARK TOGETHER (Jason's export,
-  -- 223x30, which is exactly the crest's 88px plus the wordmark out to x=239 in
-  -- the design). This also settles the one thing the panel could not match: the
-  -- wordmark is painted with the site's brand GRADIENT, and a WoW fontstring
-  -- takes a colour and nothing else — no SetGradient, no way to clip a gradient
-  -- to glyph shapes. Drawn from the design file, the gradient is simply real.
-  frame.logo = frame:CreateTexture(nil, "ARTWORK")
-  frame.logo:SetSize(223, 30)
-  frame.logo:SetPoint("TOPLEFT", 16, -14)
-  frame.logo:SetTexture("Interface\\AddOns\\HoDLootAdvisor\\Media\\hodlogotitle.png")
+  -- The header lockup: crest and wordmark as one texture, because the wordmark's
+  -- gradient, letter spacing and glow are three things a FontString cannot do.
+  -- Style.Lockup owns the arithmetic that compensates for the export's padding.
+  frame.logo = ns.Style and ns.Style.Lockup(frame, LOGO_X, LOGO_Y)
 
   -- The close button the template used to supply.
   frame.close = CreateFrame("Button", nil, frame)
@@ -842,20 +861,33 @@ local function buildChrome()
   end)
 
   -- ── Tabs ──────────────────────────────────────────────────────────────────
+  --
+  -- ⚠️ THE ROW IS LAID OUT AFTER EVERY TAB EXISTS, not as each one is made,
+  -- because a tab's width is not known until its label has been measured and
+  -- each tab's position depends on the width of the one before it.
   frame.tabs = {}
-  for i, name in ipairs(TABS) do
-    -- Tabs carry the design's larger label (16); the filter toggles and footer
-    -- buttons stay at 13. Same control, two type sizes, exactly as drawn.
-    local b = ns.Style and ns.Style.Pill(frame, TAB_W, TAB_H, name, "title")
+  local row = {}
+  for _, name in ipairs(TABS) do
+    local b = ns.Style and ns.Style.Control(frame, name, "head")
       or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    b:SetPoint("TOPLEFT", PAD + (i - 1) * TAB_PITCH, -TAB_Y)
     b:SetScript("OnClick", function()
       state.tab = name
       state.rankScroll, state.colScroll = 0, 0
       Panel.Refresh()
     end)
     frame.tabs[name] = b
+    row[#row + 1] = b
   end
+  if ns.Style then ns.Style.LayoutRow(row, frame, PAD, -TAB_Y, TAB_GAP) end
+  frame.tabRow = row
+
+  -- ⚠️ A TAB THAT DRAWS NOTHING READS AS A BROKEN ADDON, which is this file's
+  -- oldest lesson and the reason a declined drop is counted rather than
+  -- swallowed. Slots is wired into the row before it has a renderer, so it says
+  -- what it is instead of showing an empty violet rectangle.
+  frame.tabEmpty = text(frame, "body", "detail", "body", "CENTER")
+  frame.tabEmpty:SetPoint("CENTER", frame, "CENTER", 0, 0)
+  frame.tabEmpty:Hide()
 
 end
 
@@ -1317,25 +1349,38 @@ local function buildFooter()
     S.Rim(frame.foot, S.COLOR.rim, 0.4)
   end
 
-  frame.gearLine1 = at(text(frame.foot, "body", "tiny", "text"), PAD, 13, 200)
-  frame.gearLine2 = at(text(frame.foot, "body", "tiny", "text"), PAD, 25, 200)
+  frame.gearLine1 = at(text(frame.foot, "body", "label", "body"), FOOT_TEXT_X, FOOT_LINE1_Y, 240)
+  frame.gearLine2 = at(text(frame.foot, "body", "label", "body"), FOOT_TEXT_X, FOOT_LINE2_Y, 240)
 
-  local function footButton(w, rightOffset, label, onClick)
-    local b = ns.Style and ns.Style.Pill(frame.foot, w, 24, label)
+  -- ⚠️ THE ROW IS RIGHT-ALIGNED AND ITS BUTTONS SIZE THEMSELVES, so the row's
+  -- total width is only known once all three have measured their labels. Laying
+  -- out from the left with a computed start is the same arithmetic either way,
+  -- and it keeps ONE layout function rather than a mirrored second one.
+  local function footButton(label, onClick)
+    local b = ns.Style and ns.Style.Control(frame.foot, label, "head")
       or CreateFrame("Button", nil, frame.foot, "UIPanelButtonTemplate")
-    b:SetPoint("TOPRIGHT", -rightOffset, -13)
     b:SetScript("OnClick", onClick)
-    if b.SetPillState then b:SetPillState(true) end
     return b
   end
 
-  frame.cfg = footButton(69, PAD, "Settings", function() ns.Settings.Toggle() end)
-  frame.log = footButton(69, PAD + 79, "Loot Log", function()
+  -- ⚠️ "IMPORT ROSTER DATA", NOT "IMPORT RAID NIGHT" (the mock's wording). The
+  -- old label named the thing being imported FROM; this one names what arrives,
+  -- which is what somebody looking for the button is actually thinking about.
+  frame.load = footButton("IMPORT ROSTER DATA", function() ns.LoadWindow.Toggle() end)
+  frame.log  = footButton("LOOT LOG", function()
     if ns.RecordWindow then ns.RecordWindow.Toggle() end
   end)
-  frame.load = footButton(114, PAD + 79 + 79, "Import Raid Night", function()
-    ns.LoadWindow.Toggle()
-  end)
+  frame.cfg  = footButton("SETTINGS", function() ns.Settings.Toggle() end)
+
+  local btns = { frame.load, frame.log, frame.cfg }
+  local total = 0
+  for i, b in ipairs(btns) do
+    total = total + (b:GetWidth() or 0) + (i > 1 and FOOT_GAP or 0)
+  end
+  if ns.Style then
+    ns.Style.LayoutRow(btns, frame.foot,
+      FRAME_W - FOOT_RIGHT - total, -FOOT_BTN_Y, FOOT_GAP)
+  end
 
   frame.load:SetScript("OnEnter", function(self)
     ns.Tip:SetOwner(self, "ANCHOR_TOP")
@@ -2955,13 +3000,17 @@ local function layoutTabs()
     state.tab = "Loot"
   end
 
-  for i, name in ipairs(visible) do
+  -- Re-laid out on every refresh rather than once at build, because a hidden
+  -- tab must not leave a gap in the row — and with widths that follow their
+  -- labels, closing a gap means re-running the whole row, not shifting an index.
+  local row = {}
+  for _, name in ipairs(visible) do
     local b = frame.tabs[name]
-    b:ClearAllPoints()
-    b:SetPoint("TOPLEFT", PAD + (i - 1) * TAB_PITCH, -TAB_Y)
-    if b.SetPillState then b:SetPillState(name == state.tab) end
+    if b.SetActive then b:SetActive(name == state.tab) end
     b:Show()
+    row[#row + 1] = b
   end
+  if ns.Style then ns.Style.LayoutRow(row, frame, PAD, -TAB_Y, TAB_GAP) end
 end
 
 local function renderFooterGear()
@@ -2977,20 +3026,23 @@ local function renderFooterGear()
   else
     frame.gearLine1:SetText("Your Gear: " .. (live and "LIVE" or "SNAPSHOT"))
   end
-  -- ⚠️ TWO DIFFERENT QUESTIONS ON ONE LINE, deliberately (Jason, Session 253).
-  -- "Reporting" is who else is running this addon; it stays 0 among strangers
-  -- however well the sweep goes, and was being read as inspection progress
-  -- because nothing else showed that. "Inspected" is the sweep — it is the line
-  -- that answers "has everyone been read yet", and it goes quiet once there is
-  -- nobody left to ask.
-  local base = gear
-    and ("%d of %d Reporting"):format(gear.reporting, gear.total)
-    or "No raid data imported"
+  -- ⚠️ "N OF M REPORTING" IS GONE FROM HERE (Session 257, Jason's call on the
+  -- new mock) and this REPLACES the Session 253 decision to show both. The
+  -- figure was right and its home was wrong: it counts who else is running the
+  -- addon, which is the Runner tab's whole subject, and on an ordinary night
+  -- with one installer it sits at "0 of 24" in the corner of every screen
+  -- reading like an alarm. What belongs here is the sweep — "has everyone
+  -- present been read yet" — which is about THIS client's own data.
   local sweep = ns.InspectionSummary and ns.InspectionSummary()
   if sweep then
-    base = base .. ("  ·  %d of %d Inspected"):format(sweep.resolved, sweep.here)
+    frame.gearLine2:SetText(("%d of %d Inspected"):format(sweep.resolved, sweep.here))
+  elseif not gear then
+    -- Outside a group there is nobody to inspect and nothing to say, but a
+    -- blank line under a live one reads as a value that failed to load.
+    frame.gearLine2:SetText("No raid data imported")
+  else
+    frame.gearLine2:SetText("")
   end
-  frame.gearLine2:SetText(base)
 end
 
 function Panel.Refresh()
@@ -3014,6 +3066,14 @@ function Panel.Refresh()
   local onLoot = state.tab == "Loot"
   local onRunner = state.tab == "Runner"
   local onStandings = state.tab == "Standings"
+  local onSlots = state.tab == "Slots"
+
+  if frame.tabEmpty then
+    frame.tabEmpty:SetShown(onSlots)
+    if onSlots then
+      frame.tabEmpty:SetText("Slots is being built.")
+    end
+  end
 
   -- The boss strip, the context line and the two filter toggles belong to the
   -- Loot tab: on the others they would offer navigation that changes nothing.

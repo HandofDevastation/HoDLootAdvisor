@@ -31,27 +31,56 @@ ns.Style = Style
 
 local FONT_DIR = "Interface\\AddOns\\HoDLootAdvisor\\Media\\fonts\\"
 
+-- ⚠️ ONE FAMILY NOW, NOT TWO (Session 257). The redesign is set entirely in
+-- EXCON, so the old Khand-for-display / General-Sans-for-prose split is gone.
+-- Only two weights are used and both were read out of the mock rather than
+-- chosen: LIGHT carries every label, name and heading, and REGULAR appears in
+-- exactly one place — the text inside a FILLED chip, where dark type on a light
+-- ground needs the extra weight to hold at 9px.
+--
+-- ⚠️ THE MOCK IS SET IN THE VARIABLE FONT ("Excon Variable: Light") AND WoW
+-- CANNOT READ ONE. The static instances are the same design at fixed weights,
+-- which is why the download's own TTF folder is not the one to take: it holds
+-- only the variable file. The static weights live under Fonts/WEB/fonts/.
+--
+-- ⚠️ THESE TWO FILES ARE UNTRACKED PENDING A LICENCE ANSWER — see the note in
+-- .gitignore. Style.SetFont falls back to the game font when a file is missing,
+-- so a clone without them draws stock rather than not at all.
+--
+-- The old role NAMES are kept and repointed rather than renamed, because every
+-- other file in the addon asks for a role by name; renaming them would be a
+-- sweep across seventeen files to say the same thing.
 Style.FONT = {
-  -- Khand: the display face. Condensed, so it holds a boss name or an item name
-  -- in a narrow column where General Sans would truncate.
-  title    = FONT_DIR .. "Khand-SemiBold.ttf",
-  titleMed = FONT_DIR .. "Khand-Medium.ttf",
-  -- General Sans: everything read as prose or data.
-  body     = FONT_DIR .. "GeneralSans-Regular.ttf",
-  bodyMed  = FONT_DIR .. "GeneralSans-Medium.ttf",
-  label    = FONT_DIR .. "GeneralSans-Semibold.ttf",
+  title    = FONT_DIR .. "Excon-Light.ttf",
+  titleMed = FONT_DIR .. "Excon-Light.ttf",
+  body     = FONT_DIR .. "Excon-Light.ttf",
+  bodyMed  = FONT_DIR .. "Excon-Light.ttf",
+  -- The filled chip, and nothing else.
+  label    = FONT_DIR .. "Excon-Regular.ttf",
+  -- The two true weights, for call sites written after the redesign that should
+  -- say what they mean rather than inherit a role name from the old pairing.
+  light    = FONT_DIR .. "Excon-Light.ttf",
+  regular  = FONT_DIR .. "Excon-Regular.ttf",
 }
 
--- Type scale, mirroring the site's roles rather than inventing sizes. WoW pixel
--- sizes are not CSS pixels, so these are matched by eye against the site at a
--- typical UI scale, then kept as named roles so a future tweak moves everything
--- that shares a role.
+-- Type scale — every value read off the mock, all whole numbers.
+--
+-- The four old keys (head / row / small / tiny) are RETUNED IN PLACE rather than
+-- retired, so the windows that have no mock yet move with the redesign instead
+-- of staying on the old scale and reading as a different product. The new keys
+-- name the roles the mock actually has.
 Style.SIZE = {
-  title   = 16,   -- window title
-  head    = 13,   -- section / column headers
+  title   = 20,   -- window title (the panel's own is an image; see Style.Lockup)
+  badge   = 16,   -- the large upgrade badge on the detail header
+  rank    = 14,   -- the ranking column's position number
+  detail  = 13,   -- detail-pane body
+  head    = 12,   -- tabs, buttons, column headers
   row     = 12,   -- ranking rows, the densest text that must stay readable
-  small   = 11,   -- chips, secondary data
-  tiny    = 10,   -- tags, footnotes
+  name    = 11,   -- boss, raider and item names
+  small   = 11,
+  label   = 10,   -- field labels, slot lines, the footer, the meta line
+  tiny    = 10,
+  chip    = 9,    -- both chip kinds
 }
 
 -- ── Colour ─────────────────────────────────────────────────────────────────
@@ -82,7 +111,11 @@ Style.COLOR = {
   -- every OTHER window (Import, Loot Log, Settings) is painted with, and this
   -- pass has a mock for the panel only. Repointing them would restyle three
   -- windows nobody has designed yet, sight unseen and with no harness.
-  ground    = hex("060714"),   -- panel + footer fill
+  -- ⚠️ RETUNED SESSION 257 from #060714. The redesign's ground is a deep
+  -- VIOLET, not a near-black navy, and it is also the text colour inside a
+  -- filled chip — so it is one token doing two jobs on purpose, the same way
+  -- `rim` and `mutedGrey` are aliased below.
+  ground    = hex("0c0721"),   -- panel + footer fill; also filled-chip text
   -- ⚠️ THE SAME FIGMA VARIABLE AS `mutedGrey` BELOW ("Muted Grey"), which the
   -- mock uses for BOTH the hairlines and the Runner tab's body copy. Written
   -- once and aliased below rather than as two identical literals, so a retune
@@ -167,12 +200,38 @@ Style.COLOR = {
   -- colour out of Figma rather than derive one. Use it where the mock does;
   -- textDim remains the ramp everywhere else.
   mutedGrey = hex("d9cee2"),
-  -- The title's brand gradient (#a8442d -> #4a3580) FLATTENED TO ITS MIDPOINT.
-  -- ⚠️ WoW fontstrings take a colour, never a gradient — there is no SetGradient
-  -- on a FontString and no way to clip a gradient texture to glyphs. This is the
-  -- honest single-colour stand-in and it is the one place the panel cannot match
-  -- the design; see the note in build().
-  brand     = hex("793c56"),
+
+  -- ── The 2026 redesign's palette (Session 257, read out of the Figma file) ──
+  --
+  -- ⚠️ THIS IS A DIFFERENT PALETTE, NOT A RETUNE OF THE ONE ABOVE. The panel
+  -- moves from navy-and-gold to violet-and-blush, so these are new tokens and
+  -- the old ones are left alone: the tokens above still paint the Import, Loot
+  -- Log and Settings windows until each of those is rebuilt from its own mock.
+  -- Repointing the shared ones would restyle three windows sight unseen, which
+  -- is the same reasoning the Session 250 note above gives for `ground`.
+  --
+  -- ONE CONTROL SHAPE SERVES TABS AND BUTTONS ALIKE. The mock draws an inactive
+  -- TAB and a FOOTER BUTTON identically — 1px `controlRim`, no fill, label at
+  -- half alpha — and an active tab is the same box filled with `control` and
+  -- its label at full. So there is one primitive, not two (Style.Control).
+  control     = hex("632753"),   -- active tab + dropdown fill
+  controlRim  = hex("6f2b57"),   -- the inactive control's 1px border
+  controlText = hex("fef5bf"),   -- every tab and button label; 50% when inactive
+
+  -- ⚠️ THE WORKHORSE, AND IT IS NOT WHITE. Boss names, slot lines, the meta
+  -- line, the footer and most chip text are all this warm blush. PURE WHITE is
+  -- reserved for ITEM NAMES alone, which is what makes an item name read as the
+  -- subject of its row rather than as one more label.
+  body        = hex("f2bdad"),
+
+  -- Headings, and the MODERATE badge. The mock uses one purple for both.
+  accent      = hex("9f50d4"),
+
+  -- ⚠️ THE RULE COLOUR IS THE TITLE GRADIENT'S FAR END (#ac7666), and it appears
+  -- at three alphas rather than as three colours: 0.3 for a row's bottom rule,
+  -- 0.2 for the SELECTED item card's ground, and the same hue is what the
+  -- lockup fades into. Written once because it is one colour.
+  rule        = hex("ac7666"),
 }
 
 -- The badge ramp, in ONE place. Panel rows, the detail header and the item
@@ -482,6 +541,140 @@ function Style.Pill(parent, width, height, label, size)
     if s._dimText ~= false then s.text:SetAlpha(s._alpha or OFF) end
   end)
   return btn
+end
+
+-- ── The 2026 redesign's two shared pieces (Session 257) ────────────────────
+
+--- The ONE control shape: a square box with a centred label, sized to its text.
+---
+--- ⚠️ ONE PRIMITIVE, NOT THREE. The mock draws the tab row, the footer buttons
+--- and the difficulty dropdown identically — and an INACTIVE TAB is
+--- pixel-for-pixel a FOOTER BUTTON (1px rim, no fill, label at half alpha).
+--- Reading them as three controls and building three is how the old panel ended
+--- up with a pill that had to be told not to dim its own label depending on
+--- which row it was standing in. They are one thing in two states.
+---
+--- ⚠️ THE WIDTH IS MEASURED, NOT TABULATED. The mock's four tabs are 72 / 78 /
+--- 109 / 91 wide, which is exactly each label plus 20px of padding on each side
+--- — so the padding is the design and the widths are a consequence. Hardcoding
+--- the four numbers would silently truncate the day a label changes, which is
+--- the failure the "measure the string" rule was written for. GetStringWidth
+--- answers only once the font has loaded, so callers lay out AFTER setting text.
+---
+--- ⚠️ SQUARE CORNERS, DELIBERATELY (Jason). Four 1px textures, no artwork, any
+--- size, recolourable — which is the whole reason the design has no rounding.
+local CONTROL_PAD_X, CONTROL_H = 20, 27
+
+function Style.Control(parent, label, size)
+  local btn = CreateFrame("Button", nil, parent)
+  btn._hodStyled = true
+  btn:SetHeight(CONTROL_H)
+
+  btn.fill = btn:CreateTexture(nil, "BACKGROUND")
+  btn.fill:SetAllPoints()
+  btn.fill:SetColorTexture(Style.rgb(Style.COLOR.control))
+  btn.fill:Hide()
+
+  btn.rim = Style.Rim(btn, Style.COLOR.controlRim, 1)
+
+  -- Built the way Style.Pill is, for the reason recorded there: a fixed width on
+  -- the fontstring plus no SetFontString wiring shipped a row of blank controls
+  -- once already.
+  btn.text = btn:CreateFontString(nil, "OVERLAY")
+  Style.SetFont(btn.text, Style.FONT.light, Style.SIZE[size or "head"])
+  btn.text:SetTextColor(Style.rgb(Style.COLOR.controlText))
+  btn.text:SetJustifyH("CENTER")
+  btn.text:SetPoint("CENTER")
+  btn:SetFontString(btn.text)
+  btn.text:SetText(label or "")
+
+  --- Re-measure and resize to the current label. Safe to call repeatedly.
+  function btn:FitToLabel()
+    local w = self.text:GetStringWidth() or 0
+    -- A zero width means the font has not loaded yet; keep whatever we had
+    -- rather than collapsing the control to its padding, which reads as a bug.
+    if w > 0 then self:SetWidth(math.floor(w + 0.5) + CONTROL_PAD_X * 2) end
+    return self
+  end
+
+  --- on = active. An active control is FILLED and its label is at full
+  --- strength; an inactive one is an empty box with the label at half. Both
+  --- states keep the SAME label colour — the design never swaps the hue, only
+  --- the alpha, so the row still reads as one group.
+  function btn:SetActive(on)
+    self._on = on and true or false
+    if self._on then
+      self.fill:Show()
+      self.rim:SetColor(Style.COLOR.control, 1)
+      self.text:SetAlpha(1)
+    else
+      self.fill:Hide()
+      self.rim:SetColor(Style.COLOR.controlRim, 1)
+      self.text:SetAlpha(0.5)
+    end
+  end
+
+  function btn:SetLabel(s)
+    self.text:SetText(s or "")
+    return self:FitToLabel()
+  end
+
+  btn:HookScript("OnEnter", function(s)
+    if not s._on then s.text:SetAlpha(0.8) end
+  end)
+  btn:HookScript("OnLeave", function(s)
+    if not s._on then s.text:SetAlpha(0.5) end
+  end)
+
+  btn:SetActive(false)
+  btn:FitToLabel()
+  return btn
+end
+
+--- Lay a row of controls out left to right with a fixed gap, returning the
+--- total width. Each one has already sized itself to its own label, so the row
+--- cannot be described by a pitch — only by a gap.
+function Style.LayoutRow(controls, anchorTo, x, y, gap)
+  gap = gap or 10
+  local cursor = x or 0
+  for _, c in ipairs(controls) do
+    c:ClearAllPoints()
+    c:SetPoint("TOPLEFT", anchorTo, "TOPLEFT", cursor, y or 0)
+    cursor = cursor + (c:GetWidth() or 0) + gap
+  end
+  return cursor - gap - (x or 0)
+end
+
+--- The header lockup: crest and wordmark as one texture.
+---
+--- ⚠️ IT HAS TO BE AN IMAGE AND THAT IS SETTLED, NOT A SHORTCUT. The wordmark
+--- carries a gradient fill, 2px of letter spacing and a glow, and a WoW
+--- FontString supports NONE of the three — there is no tracking API at all.
+--- Drawn from the design file, all three are simply real.
+---
+--- ⚠️ THE EXPORT IS 2x AND CARRIES ITS GLOW AS PADDING. The file is 485x136,
+--- of which the artwork is 405x56 inset 40px on every side — measured off the
+--- alpha channel, not assumed. So it draws at HALF size, and the caller anchors
+--- the ARTWORK rather than the file: BLEED is how much padding to compensate
+--- for, and it is what keeps the lockup landing where the mock puts it even
+--- though the texture is bigger than the thing you can see.
+Style.LOCKUP = {
+  file  = "Interface\\AddOns\\HoDLootAdvisor\\Media\\lockup.png",
+  w     = 242,  -- 485 / 2, the whole file
+  h     = 68,   -- 136 / 2
+  bleed = 20,   -- 40 / 2, the transparent margin on each side
+  inkW  = 202,  -- what you actually see, for anything laying out beside it
+  inkH  = 28,
+}
+
+--- Place the lockup so its ARTWORK's top-left lands at (x, -y) inside parent.
+function Style.Lockup(parent, x, y)
+  local L = Style.LOCKUP
+  local tex = parent:CreateTexture(nil, "ARTWORK")
+  tex:SetTexture(L.file)
+  tex:SetSize(L.w, L.h)
+  tex:SetPoint("TOPLEFT", (x or 0) - L.bleed, -((y or 0) - L.bleed))
+  return tex
 end
 
 --- A checkbox in the panel's own language: a small square with a coloured rim
