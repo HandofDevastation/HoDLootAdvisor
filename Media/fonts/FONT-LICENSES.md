@@ -38,3 +38,33 @@ Terms: <https://fontshare.com/terms>
 This file exists to satisfy that credit requirement: the fonts are identified by
 name above, and the Indian Type Foundry's ownership of the trademarks and
 copyrights is acknowledged.
+
+---
+
+## Excon — Indian Type Foundry / Fontshare
+
+`Excon-Light.ttf` · `Excon-Regular.ttf`
+
+> Copyright 2016-2021 Indian Type Foundry. All rights reserved.
+> Excon is a trademark of the Indian Type Foundry.
+
+License terms as embedded in the font files themselves:
+
+> This Font Software is protected under domestic and international trademark and
+> copyright law. You agree to identify the ITF fonts by name and credit the ITF's
+> ownership of the trademarks and copyrights in any design or production credits.
+
+Terms: <https://fontshare.com/terms>
+
+⚠️ **The bundled EULA and the font files disagree, and this is unresolved.**
+[ITF-FFL.txt](ITF-FFL.txt) is the ITF Free Font License v2.0, dated 17 Aug 2026,
+which shipped in the Excon download. Its §01 permits embedding the font in a
+desktop application; its §02 forbids making the font software available through a
+"repository, download service, application or platform", and its §03 permits
+embedding only where the font "cannot be extracted or used independently". A
+`.ttf` in an addon zip on a public repo is extractable. The font files' own
+embedded terms — quoted above, and the same ones General Sans ships under — carry
+no such restriction.
+
+Jason has asked ITF directly. Until that is answered these two files must not be
+pushed to the public repo; see the Session 257 handoff entry.
