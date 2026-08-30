@@ -213,6 +213,31 @@ drive("scrolling the column, including past both ends", function()
   for _ = 1, 60 do ns.Panel.ScrollColumn(-1) end
 end)
 
+-- ⚠️ THE OPENING STATE IS COLLAPSED (Jason). Asserted rather than assumed,
+-- because the panel used to expand the first boss and that cost four rows of
+-- the list it exists to show.
+do
+  local panel = _G.HoDLootAdvisorPanel
+  ns.Panel.Show()
+  local expanded = 0
+  for _, tile in ipairs(panel.bossTiles or {}) do
+    if tile:IsShown() and tile.sel and tile.sel:IsShown() then expanded = expanded + 1 end
+  end
+  check("the panel opens with no boss expanded", expanded == 0, expanded)
+
+  -- And a second click on the open boss closes it again, or the collapsed state
+  -- is reachable only by shutting the window.
+  local first = panel.bossTiles and panel.bossTiles[1]
+  if first and first.scripts.OnClick then
+    first.scripts.OnClick(first)
+    local opened = first.sel and first.sel:IsShown()
+    first.scripts.OnClick(first)
+    local closed = not (first.sel and first.sel:IsShown())
+    check("clicking a boss expands it", opened == true)
+    check("...and clicking it again collapses it", closed == true)
+  end
+end
+
 drive("selecting each boss in turn expands its loot without erroring", function()
   local panel = _G.HoDLootAdvisorPanel
   for _, tile in ipairs(panel.bossTiles or {}) do
@@ -238,6 +263,15 @@ do
         rim.top._color and table.concat(rim.top._color, ","))
   check("the bottom edge takes the BOTTOM stop", near(rim.bottom._color, S.COLOR.rule),
         rim.bottom._color and table.concat(rim.bottom._color, ","))
+
+  -- ⚠️ THE BASE UNDER A RAMP MUST BE WHITE. WoW MULTIPLIES a gradient into the
+  -- texture's own colour, so a side painted its own hex and then given a ramp
+  -- comes out a dark constant — which is what shipped, and what made the border
+  -- read as three flat colours instead of one transition.
+  local base = rim.left._color
+  check("a gradient side is painted WHITE before the ramp, never its own colour",
+        base and base[1] == 1 and base[2] == 1 and base[3] == 1,
+        base and table.concat(base, ","))
 
   local g = rim.left._gradient
   check("the side edges carry a vertical ramp", g ~= nil and g.orientation == "VERTICAL")

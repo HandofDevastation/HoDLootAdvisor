@@ -4030,22 +4030,46 @@ header("Pixel alignment — the arithmetic behind a blurry panel")
   -- ── Snapping to whole pixels ──────────────────────────────────────────────
   -- The fix, not just the diagnosis. Every window routes through MakeWindow,
   -- which asks PixelSnapScale for a scale that lands units on whole pixels.
-  local everyInteger, neverZero = true, true
-  for _, h in ipairs({ 1080, 1440, 1794, 2160, 2880, 4320 }) do
+  -- ⚠️ SNAPPING IS NOW ALLOWED TO DECLINE, and that is the contract this block
+  -- tests. It used to assert that every combination snapped; it now asserts the
+  -- two properties that actually matter — when it snaps the result is aligned,
+  -- and it NEVER resizes the window by more than a tenth. A snap that moves the
+  -- window 20% is not snapping, and it is what made the panel massively larger
+  -- than the frame it was drawn from.
+  local everyInteger, neverZero, neverResizes = true, true, true
+  local worst = 0
+  for _, h in ipairs({ 1080, 1440, 1794, 1800, 2160, 2880, 4320 }) do
     for _, ps in ipairs({ 0.4, 0.5, 0.64, 0.65, 0.71, 0.8, 1.0 }) do
       _G.GetPhysicalScreenSize = function() return math.floor(h * 16 / 9), h end
       local own, target = ns.PixelSnapScale(ps)
-      if not own then everyInteger = false
-      else
+      if own then
         if target < 1 or target ~= math.floor(target) then neverZero = false end
-        -- The property that matters: the RESULTING scale must report aligned.
         local out = ns.DisplayReport(ps * own)
         if not out or not out.aligned then everyInteger = false end
+        -- own IS the size multiplier: it is what SetScale receives.
+        local drift = math.abs(own - 1)
+        if drift > worst then worst = drift end
+        if drift > 0.10 then neverResizes = false end
       end
     end
   end
-  check("snapping lands on whole pixels at every screen height and starting scale", everyInteger)
+  check("when it snaps, the result lands on whole pixels", everyInteger)
   check("...and never collapses a window below one pixel per unit", neverZero)
+  check("...and never resizes a window by more than a tenth",
+        neverResizes, ("worst drift: %.1f%%"):format(worst * 100))
+
+  -- ⚠️ JASON'S OWN CLIENT, PINNED. 1800 physical rows at ~0.711 gives 1.667
+  -- pixels per unit, which rounds to 2 and would make every window 20% bigger
+  -- than drawn. It must decline rather than snap.
+  _G.GetPhysicalScreenSize = function() return 2880, 1800 end
+  check("a 1.667 px/unit client is left alone rather than grown 20%",
+        ns.PixelSnapScale(768 / 1800 * (5 / 3)) == nil)
+
+  -- ...while the case the rule was WRITTEN for still snaps: 4K at the default
+  -- scale is 1.83 -> 2, a 9% move, and the crispness is worth it.
+  _G.GetPhysicalScreenSize = function() return 3840, 2160 end
+  check("a 1.83 px/unit client still snaps, because 9% is affordable",
+        ns.PixelSnapScale(0.65) ~= nil)
 
   -- ⚠️ SetScale is RELATIVE to the parent. Returning the DESIRED effective scale
   -- instead of the own-scale would double-apply the parent's and shrink every

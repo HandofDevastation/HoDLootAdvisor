@@ -385,10 +385,25 @@ function Style.Rim(frame, color, alpha, thickness, color2)
     end
     if not nc2 then return end
     if not (CreateColor and self.top.SetGradient) then return end
-    -- VERTICAL puts the FIRST colour at the BOTTOM, so the stops go in reversed.
+
+    -- The two horizontal edges sit at one end of the ramp each, so they take a
+    -- flat endpoint colour: a 1px strip has nowhere to put a vertical ramp.
     self.top:SetColorTexture(nc.r, nc.g, nc.b, na)
     self.bottom:SetColorTexture(nc2.r, nc2.g, nc2.b, na)
+
+    -- ⚠️ THE BASE MUST BE WHITE OR THE GRADIENT IS MULTIPLIED INTO IT. This is
+    -- the bug Jason screenshotted: the sides were painted #6f2b57 with
+    -- SetColorTexture and THEN given a ramp, and WoW multiplies the two — so
+    -- they came out a dark muddy constant that varied too little to read as a
+    -- ramp at all. The border looked like three flat colours stacked, because
+    -- effectively it was.
+    --
+    -- Style.PanelGround already did this correctly (SetColorTexture(1,1,1,1),
+    -- then the gradient) and that precedent was sitting in this same file.
     for _, side in ipairs({ "left", "right" }) do
+      self[side]:SetColorTexture(1, 1, 1, na)
+      -- VERTICAL puts the FIRST colour at the BOTTOM, so the stops go in
+      -- reversed against how the design reads them.
       pcall(self[side].SetGradient, self[side], "VERTICAL",
         CreateColor(nc2.r, nc2.g, nc2.b, na), CreateColor(nc.r, nc.g, nc.b, na))
     end

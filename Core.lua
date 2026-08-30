@@ -1720,6 +1720,30 @@ function ns.PixelSnapScale(parentScale)
   local target  = math.floor(current + 0.5)
   if target < 1 then target = 1 end              -- never collapse a window to nothing
 
+  -- ⚠️ SNAPPING MUST BE NEARLY FREE, OR IT IS NOT SNAPPING — IT IS RESIZING.
+  -- Jason measured the panel at 1.20x the size of the Figma frame at 100% and
+  -- said, correctly, that it was massively larger than intended. This function
+  -- was the cause: his client gives 1.667 pixels per unit, which rounds to 2 and
+  -- makes every window 20% BIGGER than drawn.
+  --
+  -- The original note above reasons about 1.83 -> 2, which costs 9% and is a
+  -- fair price for crisp glyph edges. It never asked what the price is at other
+  -- ratios, and the answer is that it is unbounded in the middle: 1.5 -> 2 costs
+  -- 33%. A window that does not match the design it was drawn from is a worse
+  -- fault than a resampled edge, so the snap now DECLINES when it is expensive.
+  --
+  -- THE THRESHOLD IS DERIVED FROM THE TWO REAL CASES, not picked. Both are
+  -- complaints Jason actually made, and 10% is the only band that satisfies
+  -- both of them:
+  --   · 1.83 -> 2 costs 9%. That is a 4K client at the default scale, it is the
+  --     case this function was written for, and the crispness was worth it.
+  --   · 1.667 -> 2 costs 20%. That is Jason's own client, and it made the panel
+  --     visibly larger than the frame it was drawn from.
+  -- The middle of the range is where it gets expensive — 1.5 -> 2 is 33% — and
+  -- the original never asked what it was paying there.
+  local drift = math.abs(target - current) / current
+  if drift > 0.10 then return nil end
+
   -- SetScale is RELATIVE to the parent, so divide out what we already inherit.
   return (target * factor) / parentScale, target
 end

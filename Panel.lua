@@ -386,7 +386,10 @@ end
 local frame
 local state = {
   tab = "Loot",
-  sel = 1, bossIndex = 1,
+  -- ⚠️ NIL MEANS NOTHING IS EXPANDED, and that is the OPENING state (Jason).
+  -- The accordion's whole point is seeing the boss list; starting with the first
+  -- boss open costs four rows of it to answer a question nobody asked yet.
+  sel = 1, bossIndex = nil,
   colScroll = 0, rankScroll = 0,
   -- The two filter toggles. `source` is which list the column shows; `filter`
   -- is whether it hides what this character cannot use.
@@ -624,11 +627,16 @@ local function buildBossTile(parent, i)
 
   -- The best-in-slot diamond, right-aligned in the row. Sized and placed from
   -- the mock's own node (15x12, at the row's right edge).
+  -- ⚠️ THE MOCK'S OWN DIAMOND, IN THE MOCK'S OWN COLOUR. It was the item list's
+  -- mark-bis.png tinted #fff468 — a different SHAPE and a yellow this design
+  -- does not contain. Media/ui/diamond.png is the faceted gem exported straight
+  -- from the node's path, rendered WHITE so it can be tinted from the palette
+  -- rather than needing a re-export when a colour moves.
   tile.bis = tile:CreateTexture(nil, "OVERLAY")
   tile.bis:SetSize(15, 12)
   tile.bis:SetPoint("RIGHT", -10, 0)
-  tile.bis:SetTexture(MARK_BIS_TEX)
-  if S and S.COLOR.bis then tile.bis:SetVertexColor(S.rgb(S.COLOR.bis)) end
+  tile.bis:SetTexture("Interface\\AddOns\\HoDLootAdvisor\\Media\\ui\\diamond.png")
+  if S and S.COLOR.accent then tile.bis:SetVertexColor(S.rgb(S.COLOR.accent)) end
   tile.bis:Hide()
 
   -- The row rule. DROPPED ON THE SELECTED ROW, which is how the mock joins a
@@ -675,7 +683,14 @@ local function buildBossTile(parent, i)
 
   tile:SetScript("OnClick", function(self)
     if not self.bossIndex then return end
-    state.bossIndex = self.bossIndex
+    -- ⚠️ A SECOND CLICK COLLAPSES. Without it there is no way BACK to the full
+    -- list once you have opened anything, and the state Jason asked for would
+    -- be reachable only by closing the window.
+    if state.bossIndex == self.bossIndex then
+      state.bossIndex = nil
+    else
+      state.bossIndex = self.bossIndex
+    end
     state.sel, state.colScroll, state.rankScroll = 1, 0, 0
     Panel.Refresh()
   end)
@@ -1533,6 +1548,13 @@ local function buildDetailPane()
   frame.factTags = at(text(frame, "bold", "label", "body"), FACTS_X, FACTS_Y, DIV_W - 20)
   frame.div2 = divider(frame, DIV_X, DIV2_Y, DIV_W)
 
+  -- ⚠️ UPPERCASE, 11px LIGHT, BLUSH — the node's own treatment, not a grey
+  -- sentence. Centred across the detail column at the y both empty-state frames
+  -- put it (314 in one, 319 in the other; they are the same line to the eye).
+  frame.paneEmpty = text(frame, "light", "name", "body", "CENTER")
+  frame.paneEmpty:SetPoint("TOP", frame, "TOPLEFT", DIV_X + DIV_W / 2, -314)
+  frame.paneEmpty:Hide()
+
   -- ⚠️ WON BY IS NOT IN THE MOCK and is kept anyway, moved onto the meta row's
   -- right end where nothing else sits. It states who actually received a drop,
   -- which the panel is the only surface to show during a raid; deleting a fact
@@ -2200,6 +2222,9 @@ end
 local function showLootPaneParts(shown)
   for _, part in ipairs({
     frame.badgeBox, frame.div1, frame.facts, frame.factTags, frame.div2,
+    -- paneEmpty is NOT here: it is the absence of the pane, so showing it with
+    -- the rest would put "choose a boss" beside a fully drawn item.
+
     frame.itemIcon, frame.itemHover, frame.itemName, frame.itemSub,
     frame.wonLabel,
   }) do
@@ -2273,7 +2298,9 @@ end
 local function renderColumn(items)
   local list = columnEntries(items)
   local bosses = bossList()
-  if state.bossIndex > #bosses then state.bossIndex = 1 end
+  -- A boss list that shrank under a selection collapses rather than jumping to
+  -- the first boss, which would silently expand something nobody chose.
+  if state.bossIndex and state.bossIndex > #bosses then state.bossIndex = nil end
 
   -- ⚠️ THE SCROLL OFFSET IS AN ENTRY INDEX, and it is clamped by MEASURING from
   -- the end rather than by counting rows: entries are two different heights, so
@@ -2861,8 +2888,14 @@ local function renderLoot()
 
   local entry = entries[state.sel]
 
-  -- NO SELECTION MEANS NO PANE, exactly as the 0-Drops mock draws it. The whole
-  -- right-hand side goes away rather than standing there empty.
+  -- NO SELECTION MEANS NO PANE, exactly as the empty-state mocks draw it. The
+  -- whole right-hand side goes away rather than standing there empty.
+  --
+  -- ⚠️ TWO DIFFERENT EMPTIES, AND THE MOCK GIVES THEM DIFFERENT WORDS. "Choose
+  -- a Boss to View Loot" is what you see with nothing expanded — the opening
+  -- state — and "Choose an Item to View Details" once a boss is open but no
+  -- card is picked. Collapsing both into one message would answer the wrong
+  -- question in whichever state it was not written for.
   if not entry then
     showPaneSurface(false)
     showLootPaneParts(false)
@@ -2870,8 +2903,13 @@ local function renderLoot()
     frame.more:SetText("")
     frame.note:SetText("")
     hideRows(1)
+    frame.paneEmpty:SetText(state.bossIndex
+      and "CHOOSE AN ITEM TO VIEW DETAILS"
+      or  "CHOOSE A BOSS TO VIEW LOOT")
+    frame.paneEmpty:Show()
     return
   end
+  frame.paneEmpty:Hide()
 
   showPaneSurface(true)
   showLootPaneParts(true)
@@ -3397,6 +3435,7 @@ function Panel.Refresh()
     end
   end
   frame.col:SetShown(onLoot)
+  if frame.paneEmpty and not onLoot then frame.paneEmpty:Hide() end
   frame.colEmpty:SetShown(false)
   frame.colMore:SetShown(onLoot)
   if not onLoot then
@@ -3533,6 +3572,10 @@ function Panel.Show()
   -- during a session sticks until the panel is closed.
   state.source = ns.DefaultLootSource()
   state.sel, state.colScroll, state.rankScroll = 1, 0, 0
+  -- Collapsed on every open, for the same reason the source is re-evaluated
+  -- here: the panel should present the same starting state each time rather
+  -- than resuming a selection made before whatever just happened.
+  state.bossIndex = nil
   -- The panel is the one window with no dock to fall back on — its build-time
   -- CENTER+260 IS the default — so it restores here rather than in
   -- DockBesidePanel.
