@@ -1,83 +1,62 @@
 # Bundled font licenses
 
-This addon ships seven font files in `Media/fonts/`. The panel is set in
-**Manrope**; Khand and General Sans remain for the windows that have not yet
-been rebuilt to the 2026 design.
+The addon is set entirely in **Saira**. Manrope, Khand and General Sans were
+removed in Session 262 when the last window using them was rebuilt — nothing in
+the addon referenced them any more, and an unreferenced font is 300 KB of the
+zip every installer downloads.
 
 ---
 
-## Khand — SIL Open Font License 1.1
+## Saira — SIL Open Font License 1.1
 
-`Khand-Medium.ttf` · `Khand-SemiBold.ttf`
+`Saira-Light.ttf` · `Saira-Regular.ttf` · `Saira-Medium.ttf` · `Saira-Bold.ttf` · `Saira-Black.ttf`
 
-> Copyright 2014-2022 Indian Type Foundry. All rights reserved.
-> Khand is a trademark of Indian Type Foundry.
+> Copyright 2020 The Saira Project Authors
+> (https://github.com/Omnibus-Type/Saira)
 
 Licensed under the SIL Open Font License, Version 1.1. The full license text is
-in [OFL.txt](OFL.txt) alongside the fonts, as the OFL requires — the license must
-travel with the font software wherever it is redistributed.
+in [Saira-OFL.txt](Saira-OFL.txt) alongside the fonts, as the OFL requires — the
+license must travel with the font software wherever it is redistributed.
 
-<http://scripts.sil.org/OFL>
-
----
-
-## General Sans — Indian Type Foundry / Fontshare
-
-`GeneralSans-Regular.ttf` · `GeneralSans-Medium.ttf` · `GeneralSans-Semibold.ttf`
-
-> Copyright 2017-2021 Indian Type Foundry. All rights reserved.
-> General is a trademark of the Indian Type Foundry.
-
-License terms as embedded in the font files themselves:
-
-> This Font Software is protected under domestic and international trademark and
-> copyright law. You agree to identify the ITF fonts by name and credit the ITF's
-> ownership of the trademarks and copyrights in any design or production credits.
-
-Terms: <https://fontshare.com/terms>
-
-This file exists to satisfy that credit requirement: the fonts are identified by
-name above, and the Indian Type Foundry's ownership of the trademarks and
-copyrights is acknowledged.
-
----
-
-## Manrope — SIL Open Font License 1.1
-
-`Manrope-Light.ttf` · `Manrope-Regular.ttf`
-
-> Copyright 2018 The Manrope Project Authors
-> (https://github.com/sharanda/manrope)
-
-Licensed under the SIL Open Font License, Version 1.1. The full license text is
-in [Manrope-OFL.txt](Manrope-OFL.txt) alongside the fonts, as the OFL requires —
-the license must travel with the font software wherever it is redistributed.
-
-**These two files are MODIFIED VERSIONS, and that is allowed here.** Manrope is
-distributed as a variable font and WoW cannot read one, so each file is a static
-instance cut from `Manrope-VariableFont_wght.ttf` at a single weight. The OFL
-permits modification and redistribution, and requires a Modified Version to carry
-the same license — which it does. It also forbids using a **Reserved Font Name**
-in a modified build; Manrope's copyright statement declares none, so the family
+**These five files are MODIFIED VERSIONS, and that is allowed here.** Saira is
+distributed as a variable font and WoW cannot read one. The OFL permits
+modification and redistribution and requires a Modified Version to carry the same
+license, which it does. It also forbids a **Reserved Font Name** in a modified
+build; Saira's copyright statement declares none — the only occurrence of the
+phrase in its OFL is the clause that DEFINES the term — so the family
 legitimately keeps its name.
+
+⚠️ **SAIRA HAS TWO AXES AND BOTH MUST BE PINNED.** It varies on `wght` (100–900)
+*and* `wdth` (50–125). Instancing weight alone leaves a font that still carries
+`fvar` and is therefore still variable — which the game will not read. The
+designs are drawn at width 100.
 
 To regenerate (needs `fonttools`):
 
 ```python
 from fontTools.ttLib import TTFont
 from fontTools.varLib import instancer
-for style, wght in (("Light", 300), ("Regular", 400)):
-    f = TTFont("Manrope-VariableFont_wght.ttf")
-    instancer.instantiateVariableFont(f, {"wght": wght}, inplace=True,
-                                      updateFontNames=True)
-    f.save(f"Manrope-{style}.ttf")
+for style, wght in (("Light",300),("Regular",400),("Medium",500),
+                    ("Bold",700),("Black",900)):
+    f = TTFont("Saira[wdth,wght].ttf")
+    instancer.instantiateVariableFont(f, {"wght": wght, "wdth": 100},
+                                      inplace=True, updateFontNames=True)
+    f.save(f"Saira-{style}.ttf")
 ```
 
-Weights are the design's, not a preference: Light carries every label, name and
-heading; Regular appears only inside a filled chip.
+Weights are the design's, not a preference: Light carries body text, labels and
+the bullet separators; Regular the source lines ("From <boss>, <instance>");
+Medium the item, raider and boss names; Bold the column headers and the Standings
+rail labels; and Black the tags alone — the words that used to be drawn as outlined and filled
+chips before Session 262 replaced them with colour-coded text.
+
+Verified after cutting: all five report `usWeightClass` 300/400/500/700/900, none
+carries `fvar`, and each covers every accented character in the test fixtures
+(Vörnix, Dåmir, Mîrâñ, Brambleÿ, Corvá) plus the marks the panel draws. A missing
+glyph in a custom font renders as NOTHING in WoW rather than falling back, so
+coverage is checked rather than assumed.
 
 ---
-
 ## A note on Excon, so it is not tried again
 
 The redesign was drawn in **Excon**, also by the Indian Type Foundry, and it was
@@ -90,5 +69,7 @@ zip on a public repo is. Confusingly, the Excon font files' own embedded terms
 carry the older, credit-only text, the same one General Sans ships under; the two
 documents disagree and the newer EULA is the one a download is made under.
 
-General Sans is in the same position and is still bundled here. It predates the
-license change and is retired as the design reaches each remaining window.
+General Sans was in the same position and is **no longer bundled** — it left with
+Manrope and Khand in Session 262, when the last window still setting type in it
+was rebuilt. Nothing in the addon is set in an ITF face any more, which is the
+tidiest possible answer to the licence question above.

@@ -2503,10 +2503,12 @@ end)()
   check("every font role resolves to a TTF that exists in Media/fonts",
         #missing == 0, table.concat(missing, ", "))
 
-  -- The OFL requires its licence to travel with the font software, and General
-  -- Sans's terms require ITF to be credited. Shipping the fonts without these is
-  -- a licensing fault, not a cosmetic one.
-  for _, doc in ipairs({ "Media/fonts/OFL.txt", "Media/fonts/FONT-LICENSES.md" }) do
+  -- The OFL requires its licence to travel with the font software. Shipping the
+  -- fonts without it is a licensing fault, not a cosmetic one.
+  -- ⚠️ Saira-OFL.txt SINCE SESSION 262. The old OFL.txt was Khand's and left
+  -- with it; a check still naming the old path would have passed for months on
+  -- a file that no longer covers anything we ship.
+  for _, doc in ipairs({ "Media/fonts/Saira-OFL.txt", "Media/fonts/FONT-LICENSES.md" }) do
     local fh = io.open(doc, "rb")
     check(("the bundled fonts ship their licence (%s)"):format(doc), fh ~= nil)
     if fh then fh:close() end
@@ -2993,11 +2995,23 @@ header("The badge ramp — one table, three surfaces")
   -- ⚠️ TWO VALUES, ALWAYS. `local a, b = S and S.Badge(k)` adjusts the `and` to
   -- ONE value and silently drops the colour — which it did, at three call sites,
   -- before this check existed.
+  -- ⚠️ THIS CHECK ASSERTED THE OPPOSITE UNTIL SESSION 262, and it was right to.
+  -- The 2026 mocks used a HEAT SCALE (red = biggest upgrade); the Saira refresh
+  -- returns to a good/bad scale, so MAJOR is green again. Pinned by value rather
+  -- than by "is a colour", because the whole point of the ramp is WHICH colour —
+  -- a check that only asked for a table passed through both designs and would
+  -- have caught neither reversal.
+  local rgb255 = function(c, k) return c and math.floor(c[k] * 255 + 0.5) end
   local label, color = S.Badge("major")
-  check("Major's colour is the design's red, not the old green",
-        color and math.floor(color.r * 255 + 0.5) == 255
-             and math.floor(color.g * 255 + 0.5) == 89,
+  check("Major is the refresh's green, not the old heat-scale red",
+        rgb255(color, "r") == 32 and rgb255(color, "g") == 186 and rgb255(color, "b") == 86,
         color and ("%d,%d,%d"):format(color.r * 255, color.g * 255, color.b * 255))
+  local _, modColor = S.Badge("moderate")
+  check("...Moderate is blue", rgb255(modColor, "r") == 51 and rgb255(modColor, "g") == 130,
+        modColor and ("%d,%d,%d"):format(modColor.r * 255, modColor.g * 255, modColor.b * 255))
+  local _, minColor = S.Badge("minor")
+  check("...and Minor is rust", rgb255(minColor, "r") == 187 and rgb255(minColor, "g") == 63,
+        minColor and ("%d,%d,%d"):format(minColor.r * 255, minColor.g * 255, minColor.b * 255))
   check("an unknown badge falls back to a drawable label rather than nothing",
         (S.Badge("wat")) == "Sidegrade")
   check("a nil badge does the same", (S.Badge(nil)) == "Sidegrade")
@@ -3268,6 +3282,36 @@ header("Dungeons as a content mode — tiles, pooled loot, and scoring")
             ("tile field=%s count=%d"):format(tostring(shown), n))
 
       data.rankings[staged] = prior
+    end
+  end
+
+  -- ── A RAID BOSS ROW COUNTS ITS TARGETS (Session 262) ────────────────────
+  --
+  -- ⚠️ STAGED, NOT OBSERVED. A count read off whatever the fixture happens to
+  -- hold can be zero for a reason that has nothing to do with the code, and a
+  -- zero passes any check that only asks for a number (Core §1.1, S260: a
+  -- literal standing in for a calculation is invisible). This flags a real item
+  -- and requires the count to find it.
+  do
+    local data = ns.Data()
+    local itemID, bossID
+    for id, rec in pairs((data or {}).items or {}) do
+      if rec.boss then itemID, bossID = id, rec.boss break end
+    end
+    check("the payload has a raid item with a boss, to stage on", itemID ~= nil)
+    if itemID and ns.Targets then
+      local before = ns.TargetCountsByBoss()[bossID] or 0
+      ns.Targets.Add(itemID, { name = "staged" })
+      local after = ns.TargetCountsByBoss()[bossID] or 0
+      check("targeting an item raises its boss's target count",
+            after == before + 1, ("before=%d after=%d"):format(before, after))
+
+      -- ⚠️ AND IT MUST REACH THE ROW. Testing the counter alone would pass with
+      -- bossList never reading it — the probe-that-does-not-bite trap that has
+      -- already cost this project a session.
+      ns.Targets.Remove(itemID)
+      check("...and clearing it puts the count back",
+            (ns.TargetCountsByBoss()[bossID] or 0) == before)
     end
   end
 

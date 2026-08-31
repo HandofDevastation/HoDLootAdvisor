@@ -931,8 +931,12 @@ do
     check("...and the block is 34 tall, not one line's 18",
           panel.slotHead:GetHeight() == 34, panel.slotHead:GetHeight())
     local _, sx = pointOf(panel.slotHead.slot)
+    -- 302, not 272: the Slots pane moved right when the window went 740 -> 800
+    -- (Session 262). The RELATIONSHIP is what this guards — the kind line is
+    -- indented to the name rather than to the icon — and it is still 42 in from
+    -- the pane's own left edge.
     check("...and the kind line is indented to the name, not the icon",
-          sx == 272, sx)
+          sx == 302, sx)
   end
 
   local lr = panel.slotListRows and panel.slotListRows[1]
@@ -963,8 +967,9 @@ do
   -- ── The Loot header came down with it ─────────────────────────────────
   do
     local _, nx = pointOf(panel.itemName)
-    check("the Loot header's name column moved left with the smaller icon",
-          nx == 306, nx)
+    -- 386, not 306: same 80px pane shift as above (Session 262).
+    check("the Loot header's name column sits beside the icon",
+          nx == 386, nx)
     -- 32 against a 34-tall block puts the block ONE ABOVE the icon, not three
     -- below it. Asserting the centres agree is what survives a size change.
     local _, _, iy = pointOf(panel.itemIcon)
@@ -1094,10 +1099,13 @@ do
 
   local n, k = panel.slotHead and panel.slotHead.name, panel.slotHead and panel.slotHead.slot
   check("the Slots item name is 13", n and n._size == 13, n and n._size)
-  check("...and Regular, not Light", fontOf(n):match("Manrope%-Regular") ~= nil, fontOf(n))
+  -- ⚠️ MEDIUM NOW, NOT REGULAR (Session 262). The refresh sets every item and
+  -- raider NAME in Saira Medium against Light body copy — that pairing is what
+  -- separates a name from the line under it now that the chips are gone.
+  check("...and Medium, not Light", fontOf(n):match("Saira%-Medium") ~= nil, fontOf(n))
   check("the kind line is 12", k and k._size == 12, k and k._size)
   check("...and Light, which is what separates them",
-        fontOf(k):match("Manrope%-Light") ~= nil, fontOf(k))
+        fontOf(k):match("Saira%-Light") ~= nil, fontOf(k))
 
   -- ⚠️ THE LINE BOXES, WHICH IS WHERE THIS BLOCK WAS ACTUALLY WRONG. Both lines
   -- were the right size and neither had an explicit height, so each drew
@@ -1130,14 +1138,14 @@ do
   for i, name in ipairs({ "RAIDER", "UPGRADE", "ILVL GAIN", "PRIORITY" }) do
     local fs = panel.head and panel.head[i]
     check(("the Loot table's %s header is Bold"):format(name),
-          fontOf(fs):match("Manrope%-Bold") ~= nil, fontOf(fs))
+          fontOf(fs):match("Saira%-Bold") ~= nil, fontOf(fs))
   end
   -- The other table in the same panel, so the two cannot drift apart again.
   for i = 1, 5 do
     local fs = panel.stHead and panel.stHead[i]
     if fs then
       check(("the Standings table's header %d is Bold too"):format(i),
-            fontOf(fs):match("Manrope%-Bold") ~= nil, fontOf(fs))
+            fontOf(fs):match("Saira%-Bold") ~= nil, fontOf(fs))
     end
   end
 
@@ -1146,10 +1154,10 @@ do
   -- in one weight.
   local r1 = panel.rows and panel.rows[1]
   if r1 then
-    check("a raider name is Light, not Bold",
-          fontOf(r1.name):match("Manrope%-Light") ~= nil, fontOf(r1.name))
+    check("a raider name is Medium, not Bold",
+          fontOf(r1.name):match("Saira%-Medium") ~= nil, fontOf(r1.name))
     check("...and the rank is the one Bold cell in the table",
-          fontOf(r1.rank):match("Manrope%-Bold") ~= nil, fontOf(r1.rank))
+          fontOf(r1.rank):match("Saira%-Bold") ~= nil, fontOf(r1.rank))
   end
 end
 
@@ -1327,9 +1335,21 @@ do
   check("a Standings rail block has no border", panel.rail[1].box.rim == nil)
   check("the Slots OBTAINED BY panel has no border", panel.slotPanel.rim == nil)
 
-  -- Four chips: three BIS contexts can apply at once, and the classification
-  -- chip comes after them.
-  check("the Slots header has four chip slots", #panel.slotHead.chips == 4)
+  -- Four tag slots: three BIS contexts can apply at once, and the
+  -- classification follows them. The WIDGET changed in Session 262 — chips
+  -- became colour-coded text — but the count did not, and it is the count this
+  -- has always been guarding.
+  check("the Slots header has four tag slots", #panel.slotHead.tagLine.tags == 4)
+  -- ⚠️ AND THEY ARE THE HEAVIEST WEIGHT. A tag that renders in body text is
+  -- indistinguishable from the line it sits on, which is the whole reason the
+  -- chips could be dropped at all.
+  check("...set in Saira Black", (panel.slotHead.tagLine.tags[1]._font or ""):match("Saira%-Black") ~= nil,
+        panel.slotHead.tagLine.tags[1]._font)
+  -- ⚠️ AND THE SEPARATOR IS NOT (Jason, Session 262: Trash Grey, Saira Light).
+  -- A bullet in the tag's own weight and colour reads as a fifth tag.
+  check("...with Light separators between them",
+        (panel.slotHead.tagLine.seps[1]._font or ""):match("Saira%-Light") ~= nil,
+        panel.slotHead.tagLine.seps[1]._font)
 
   -- ⚠️ NEVER AN ITEM ID ON SCREEN. This is what the whole Slots page rendered.
   do
@@ -1508,6 +1528,42 @@ do
     local tile = panel.bossTiles[1]
     check("a boss row has no tooltip of its own", tile.scripts.OnEnter == nil)
     check("...and the diamond carries its own hover target", tile.bisHit ~= nil)
+
+    -- ── THE COUNTS REACH THE ROW (Session 262) ────────────────────────────
+    --
+    -- ⚠️ ASSERTS THE VALUE, NOT THE WIDGET'S EXISTENCE. A count that is never
+    -- written leaves these fontstrings present, empty and hidden — which passes
+    -- any "is it there" check and is exactly the state the refresh is adding
+    -- them to escape. Staged through the real fill so the number has to travel.
+    do
+      local data = ns.Data()
+      local itemID, bossID
+      for id, rec in pairs((data or {}).items or {}) do
+        if rec.boss then itemID, bossID = id, rec.boss break end
+      end
+      if itemID and ns.Targets then
+        ns.Targets.Add(itemID, { name = "staged" })
+        ns.Panel.Refresh()
+        local marked
+        for _, t in ipairs(panel.bossTiles) do
+          if t.bossIndex and t.tgtN and t.tgtN:IsShown() then marked = t end
+        end
+        check("a targeted item makes its boss row show a target count",
+              marked ~= nil, "no boss row showed one")
+        if marked then
+          check("...printed as a count, not a bare icon",
+                (marked.tgtN._text or ""):match("^x%d+$") ~= nil, marked.tgtN._text)
+        end
+        ns.Targets.Remove(itemID)
+        ns.Panel.Refresh()
+        local still
+        for _, t in ipairs(panel.bossTiles) do
+          if t.tgtN and t.tgtN:IsShown() then still = t.tgtN._text end
+        end
+        check("...and it goes away again when the target is cleared",
+              still == nil, tostring(still))
+      end
+    end
 
     local said
     local realSet, realShow, realOwner =

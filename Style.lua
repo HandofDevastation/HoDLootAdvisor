@@ -59,20 +59,33 @@ local FONT_DIR = "Interface\\AddOns\\HoDLootAdvisor\\Media\\fonts\\"
 -- The old role NAMES are kept and repointed rather than renamed, because every
 -- other file in the addon asks for a role by name; renaming them would be a
 -- sweep across seventeen files to say the same thing.
+-- ⚠️ SAIRA, AND IT IS THE ONLY FAMILY (Session 262). Manrope, General Sans and
+-- Khand all leave with the last window that used them. Saira is SIL OFL and
+-- declares no Reserved Font Name, so the cuts keep the name; the recipe and the
+-- licence are in Media/fonts/FONT-LICENSES.md.
+--
+-- ⚠️ SAIRA VARIES ON TWO AXES — wght 100-900 AND wdth 50-125 — so a static must
+-- pin BOTH. Instancing weight alone leaves the file carrying fvar, which is
+-- still a variable font and which the game will not read. The designs are drawn
+-- at width 100.
 Style.FONT = {
-  title    = FONT_DIR .. "Manrope-Light.ttf",
-  titleMed = FONT_DIR .. "Manrope-Light.ttf",
-  body     = FONT_DIR .. "Manrope-Light.ttf",
-  bodyMed  = FONT_DIR .. "Manrope-Light.ttf",
-  -- The filled chip, and nothing else.
-  label    = FONT_DIR .. "Manrope-Regular.ttf",
-  -- The three true weights, for call sites written after the redesign that
-  -- should say what they mean rather than inherit a role name from the old
-  -- pairing. BOLD earns its place on one element: the large upgrade badge, where
-  -- the mock sets MAJOR at 16 Bold — the only genuinely loud text in the panel.
-  light    = FONT_DIR .. "Manrope-Light.ttf",
-  regular  = FONT_DIR .. "Manrope-Regular.ttf",
-  bold     = FONT_DIR .. "Manrope-Bold.ttf",
+  title    = FONT_DIR .. "Saira-Medium.ttf",
+  titleMed = FONT_DIR .. "Saira-Medium.ttf",
+  body     = FONT_DIR .. "Saira-Light.ttf",
+  bodyMed  = FONT_DIR .. "Saira-Medium.ttf",
+  -- ⚠️ WAS "the filled chip, and nothing else". THE CHIPS ARE GONE (Jason,
+  -- Session 262: the outline "takes up too much vertical space and was
+  -- distracting"), and what they carried is now colour-coded text in the
+  -- heaviest weight. The role keeps its name because every call site asks for it
+  -- by name, and it still means the same thing: this is a tag.
+  label    = FONT_DIR .. "Saira-Black.ttf",
+  -- The true weights, for call sites that should say what they mean rather than
+  -- inherit a role name from the old pairing.
+  light    = FONT_DIR .. "Saira-Light.ttf",
+  regular  = FONT_DIR .. "Saira-Regular.ttf",
+  medium   = FONT_DIR .. "Saira-Medium.ttf",
+  bold     = FONT_DIR .. "Saira-Bold.ttf",
+  black    = FONT_DIR .. "Saira-Black.ttf",
 }
 
 -- Type scale — every value read off the mock, all whole numbers.
@@ -189,20 +202,31 @@ Style.COLOR = {
   hotPink   = hex("ff0080"),   -- --hue-hot-pink, the BIS colour (Session 245)
   white     = hex("ffffff"),
 
-  -- ── Semantics the redesign introduces (Session 250) ──────────────────────
-  -- MAJOR IS RED HERE, NOT GREEN. The mock's badge ramp reads
-  -- major #ff595b -> moderate #ff7729 -> grey, which is a heat scale rather
-  -- than the good/bad scale the old panel used (green Major, amber Moderate).
-  -- Not a stylistic tweak to fold in quietly: it inverts what a colour MEANS,
-  -- so it is a named token and the ramp lives in one table below.
-  major     = hex("ff595b"),
-  -- BIS OWNS A YELLOW, AND THE TARGET OWNS THE GREEN. Session 249 settled that
-  -- these two marks must not share a hue and that BIS holds the gold-ish one;
-  -- the mock picks the exact pair. The old code had BIS on the brand gold
-  -- (#f3c56b) and the target marker on the SAME gold, which is precisely the
-  -- collision that rule forbids.
-  bis       = hex("fff468"),
-  target    = hex("20ba56"),
+  -- ── Semantics the redesign introduces (Session 250, REVERSED Session 262) ──
+  -- ⚠️ MAJOR IS GREEN AGAIN. Session 250 recorded the opposite in this exact
+  -- spot — "MAJOR IS RED HERE, NOT GREEN" — because the 2026 mocks used a heat
+  -- scale that cools. The Saira refresh goes back to a good/bad scale, which is
+  -- what the pre-2026 panel used and what raiders already read. The old text is
+  -- summarised rather than kept verbatim because leaving a sentence that says
+  -- the opposite of the value beneath it is how the S253 handoff trap works.
+  major     = hex("20ba56"),
+  moderate  = hex("3382ff"),
+  -- Rust. Aliased to darkOrange above rather than a second literal: one Figma
+  -- variable, and two literals is one of them going stale.
+  minor     = hex("bb3f22"),
+  -- ⚠️ BIS AND THE TARGET SWAPPED ENDS (Session 262). Session 249 settled that
+  -- these two must never share a hue and that BIS holds the gold-ish one. The
+  -- first half still holds and is what matters; the second is now FALSE — BIS
+  -- takes the violet that matches the gem icon, and the target takes the gold
+  -- that matches its own new icon. Amended deliberately, not contradicted
+  -- quietly.
+  bis       = hex("9f50d4"),
+  target    = hex("dca75e"),
+  -- The tier family: TIER PIECE, TIER TOKEN, CATALYZE TARGET. Same green as
+  -- MAJOR by design — see the collision note on Style.BADGE.
+  tier      = hex("20ba56"),
+  -- Crafted, on the Slots page (Jason, Session 262). Same blue as MODERATE.
+  crafted   = hex("3382ff"),
   -- --hue-bright-purple. The Standings rail's section headings, and DISTINCT
   -- from `purple` (--hue-tab-stroke, the control fill) even though the two are
   -- neighbours: one is a surface, the other is type on it.
@@ -263,16 +287,25 @@ Style.COLOR = {
 -- column all read it, so a retune moves every surface at once instead of three
 -- tables drifting apart — which is how the strip and the ranking list ended up
 -- disagreeing about Moderate before.
--- ⚠️ READ OFF THE MOCK'S FOUR CHIPS, ONE AT A TIME (Session 257). This ramp had
--- MODERATE on the old orange and MINOR on dimmed white, neither of which is in
--- the design. The real one is a HEAT SCALE that cools rather than a good/bad
--- scale: #ff595b -> #9f50d4 -> #ac7666 -> #606060. MINOR being the title
--- gradient's own far end is why it reads as part of the panel rather than as a
--- warning, and it is the same value the row rules are drawn in.
+-- ⚠️ IT IS A GOOD/BAD SCALE AGAIN (Session 262), AND THAT REVERSES THIS BOX.
+-- Session 257 read a HEAT SCALE off the mocks — #ff595b -> #9f50d4 -> #ac7666 ->
+-- #606060, red for the biggest upgrade — and recorded that the flip AWAY from
+-- good/bad was deliberate and "inverts what a colour MEANS". The refresh flips
+-- it back, confirmed by Jason against the new mocks:
+--   MAJOR #20ba56 green · MODERATE #3382ff blue · MINOR #bb3f22 rust ·
+--   SIDEGRADE #606060 grey, unchanged and the only survivor.
+-- The old wording is kept above so nobody re-derives the heat scale from the
+-- mocks it was true of. Green now means "biggest upgrade" and red-ish means
+-- "least", which is the pre-2026 reading and the one raiders already had.
+--
+-- ⚠️ GREEN ALSO MARKS THE TIER FAMILY (TIER PIECE / TIER TOKEN / CATALYZE
+-- TARGET). The two never share a line today — the Slots page draws no badges and
+-- the Loot page draws no tier classification — so this is a latent collision,
+-- not a live one. Worth knowing before any surface starts showing both.
 Style.BADGE = {
   major     = { label = "Major",     color = "major" },
-  moderate  = { label = "Moderate",  color = "accent" },
-  minor     = { label = "Minor",     color = "rule" },
+  moderate  = { label = "Moderate",  color = "moderate" },
+  minor     = { label = "Minor",     color = "minor" },
   sidegrade = { label = "Sidegrade", color = "grey" },
 }
 

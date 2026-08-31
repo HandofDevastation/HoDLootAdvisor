@@ -77,8 +77,12 @@ check("every file the .toc loads is in the package",
 -- to travel with the font software, and a correct path to a font nobody copied
 -- looks identical in code while silently falling back to the game font.
 for _, required in ipairs({
-  "Media/fonts/OFL.txt", "Media/fonts/FONT-LICENSES.md",
-  "Media/fonts/Khand-Medium.ttf", "Media/fonts/GeneralSans-Regular.ttf",
+  -- Saira-OFL.txt, not OFL.txt: the file is named for its family now that only
+  -- one family ships (Session 262). Two of the five weights are listed rather
+  -- than all five — the point is that the COPY step ran, and a build that
+  -- dropped fonts would drop them all.
+  "Media/fonts/Saira-OFL.txt", "Media/fonts/FONT-LICENSES.md",
+  "Media/fonts/Saira-Light.ttf", "Media/fonts/Saira-Black.ttf",
 }) do
   local fh = io.open(dir .. "/" .. required, "r")
   check("ships " .. required, fh ~= nil)

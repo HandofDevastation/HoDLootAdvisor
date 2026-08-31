@@ -647,6 +647,29 @@ function ns.BisCountsByBoss()
   return out
 end
 
+--- How many of each boss's drops the viewer has TARGETED, keyed the same way.
+---
+--- ⚠️ NEW IN SESSION 262 and it is data, not styling: the refresh puts a second
+--- count on every boss row and nothing has ever counted targets per boss.
+---
+--- SEPARATE FROM THE BIS COUNT ON PURPOSE, though they are drawn side by side.
+--- A target is per-CHARACTER state the viewer set by hand; a BIS listing is a
+--- fact about their spec. They fail independently too — a character whose spec
+--- will not resolve has no BIS count and can still have targets — so folding
+--- them into one walk would make the early return above silently take the
+--- targets with it. Two questions, two functions (the S252 proxy rule).
+function ns.TargetCountsByBoss()
+  local out = {}
+  local data = ns.Data()
+  if not (data and data.items and ns.Targets) then return out end
+  for itemID, rec in pairs(data.items) do
+    if rec.boss and ns.Targets.Has(itemID) then
+      out[rec.boss] = (out[rec.boss] or 0) + 1
+    end
+  end
+  return out
+end
+
 --- The same count for a single boss.
 function ns.BisCountForBoss(bossID)
   if not bossID then return 0 end
