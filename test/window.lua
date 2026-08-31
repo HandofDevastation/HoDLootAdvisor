@@ -68,6 +68,27 @@ function real.GetStringWidth(self)
 end
 function real.SetFont(self, path, size) self._font, self._size = path, size; return true end
 
+-- ⚠️ WRAPPING IS MODELLED, BECAUSE THE ADDON LAYS OUT FROM IT (Session 258).
+-- The Settings window re-flows its rows from GetStringHeight, and a stub that
+-- answered nil made every row one line tall — so the overlap check written to
+-- catch rows colliding measured nothing and passed with the fix reverted.
+--
+-- The arithmetic is deliberately crude and only has to be MONOTONIC: a longer
+-- sentence in a narrower column must come back taller. Line height is the font
+-- size plus leading, matching how the real client stacks wrapped lines closely
+-- enough for a layout assertion.
+function real.GetStringHeight(self)
+  local s = self._text
+  if not s or s == "" then return 0 end
+  local size = self._size or 12
+  local lineH = size + 4
+  local w = self:GetWidth() or 0
+  if w <= 0 or not self._wordWrap then return lineH end
+  local textW = self:GetStringWidth()
+  return math.max(1, math.ceil(textW / w)) * lineH
+end
+function real.SetWordWrap(self, on) self._wordWrap = on and true or false end
+
 -- ⚠️ Show AND Hide FIRE THEIR SCRIPTS, BECAUSE THE CLIENT'S DO (Session 258).
 -- Without this the stub is quieter than the runtime in a way that hides real
 -- behaviour rather than real errors: ns.TrackWindow hooks OnShow/OnHide to keep
@@ -860,6 +881,101 @@ do
     ns.ApplyWindowScale()
   end
 
+  -- ── Nothing from one tab draws on another ─────────────────────────────────
+  --
+  -- ⚠️ THE CHECK THAT WOULD HAVE CAUGHT THE WORST BUG OF THIS SESSION. The
+  -- Slots renderer never took the Loot tab's furniture down, so its ranking
+  -- table, column headers and dividers went on drawing straight through the
+  -- Slots page — a list of raiders with badges and priorities under a BIS item.
+  -- WoW frames do not clip their children and nothing errors, so it looked like
+  -- a half-built page rather than a fault.
+  --
+  -- Every previous check here asked "is what this tab owns visible". None asked
+  -- "is anything ELSE visible", which is the question that fails loudly.
+  do
+    local owned = {
+      -- panel.col is a bare CONTAINER — its item rows are what paint, and they
+      -- are listed separately. A shown container with hidden children draws
+      -- nothing, so flagging it would be a false positive.
+      Loot = function()
+        local t = { panel.badgeBox, panel.itemIcon, panel.div1, panel.div2 }
+        for _, h in ipairs(panel.head) do t[#t + 1] = h end
+        for i = 1, 3 do t[#t + 1] = panel.rows[i] end
+        for i = 1, 3 do t[#t + 1] = panel.itemRows[i] end
+        return t
+      end,
+      Slots = function()
+        return { panel.slotRail, panel.slotPanel, panel.slotList, panel.slotSpec }
+      end,
+      Standings = function()
+        local t = { panel.stList }
+        for _, b in ipairs(panel.rail) do t[#t + 1] = b.box end
+        for _, h in ipairs(panel.stHead) do t[#t + 1] = h end
+        return t
+      end,
+      Runner = function() return { panel.rn.statusBox, panel.rn.dataBox, panel.rn.lead } end,
+    }
+
+    -- ⚠️ THE LOOT TAB HAS TO BE DRAWN FIRST OR THIS PROVES NOTHING. Its ranking
+    -- rows only exist once a boss and an item have been selected; reaching
+    -- Slots from a cold panel finds them already hidden, so the check passed
+    -- with the fix reverted. Staged, then ASSERTED — if the staging ever stops
+    -- producing a visible row, the guard below has gone quiet and says so.
+    -- ⚠️ STAGED DIRECTLY, NOT INHERITED. Driving the panel into a state with a
+    -- real ranking needs a group, an inspected roster and a selected drop —
+    -- none of which this harness has, so the first version of this staging
+    -- produced nothing and the guard passed with the fix reverted. The
+    -- condition under test is "does switching tab put the Loot furniture
+    -- away", so the furniture is simply SHOWN and then the tab is switched.
+    -- That is the S254 rule: a test for the absent case stages the absence
+    -- itself rather than inheriting it from whatever the data happens to be.
+    local function stageLoot()
+      -- ⚠️ THE PANEL MUST BE OPEN. Panel.Refresh returns immediately on a
+      -- hidden frame, so a tab click does nothing — and an earlier block in
+      -- this file closes every window to test Escape. Without this the guard
+      -- reports stale visibility from before that.
+      ns.Panel.Show()
+      local loot = panel.tabs.Loot
+      loot.scripts.OnClick(loot)
+      for i = 1, 3 do panel.rows[i]:Show() end
+      panel.badgeBox:Show()
+      panel.itemIcon:Show()
+      panel.div1:Show()
+      panel.div2:Show()
+      panel.head[1]:SetText("RAIDER")
+      panel.head[1]:Show()
+      return panel.rows[1]:IsShown() and panel.head[1]:IsShown()
+    end
+    check("the Loot furniture can be staged, so the guard below can bite",
+          stageLoot(), "nothing could be shown — the checks below prove nothing")
+
+    for _, tab in ipairs({ "Loot", "Slots", "Standings", "Runner" }) do
+      local b = panel.tabs[tab]
+      if b and b:IsShown() then
+        stageLoot()
+        b.scripts.OnClick(b)
+        local strays = {}
+        for other, list in pairs(owned) do
+          if other ~= tab then
+            for i, w in ipairs(list()) do
+              -- ⚠️ AN EMPTY FONTSTRING IS SHOWN AND DRAWS NOTHING. Several
+              -- views blank their headers rather than hiding them, which is
+              -- fine — so "shown" alone would report a page as dirty when
+              -- nothing is on it.
+              local paints = w and w.IsShown and w:IsShown()
+                and not (w._kind == "FontString" and (w._text or "") == "")
+              if paints then
+                strays[#strays + 1] = ("%s[%d]"):format(other, i)
+              end
+            end
+          end
+        end
+        check(("the %s tab draws nothing belonging to another tab"):format(tab),
+              #strays == 0, table.concat(strays, ", "))
+      end
+    end
+  end
+
   -- ── The Loot tab's detail header (node 582:983) ───────────────────────────
   do
     -- The icon is cropped rather than masked: node 577:878 is a rounded
@@ -868,11 +984,11 @@ do
     local tc = panel.itemIcon._texCoord
     check("the item icon is cropped to hide its baked border",
           tc ~= nil and tc[1] > 0 and tc[2] < 1, tc and table.concat(tc, ",") or "no crop")
-    -- ⚠️ AND NOT MASKED AS WELL. The two fight — a mask samples the texture in
-    -- its own coordinate space — which is why the crop replaced the mask rather
-    -- than joining it.
-    check("...and carries no mask alongside the crop",
-          (panel.itemIcon._masks or 0) == 0, panel.itemIcon._masks)
+    -- ⚠️ AND MASKED TOO. The icon is a CIRCLE in the design; the crop removes
+    -- the baked border that a circle inscribed in a square still touches at
+    -- four points. Both, not either.
+    check("...and is masked to a circle as well",
+          (panel.itemIcon._masks or 0) > 0, panel.itemIcon._masks)
 
     -- ⚠️ THE BLOCK IS CENTRED ON THE ICON, not aligned to the header's top.
     -- Both are anchored TOPLEFT with explicit heights, so this is arithmetic
@@ -968,6 +1084,42 @@ do
       ns.Settings.Set("panelScale", 100)
       ns.ApplyWindowScale()
     end
+  end
+
+  -- ── The Settings window's own layout ──────────────────────────────────────
+  do
+    local cfg = _G.HoDLootAdvisorConfigFrame
+    ns.Settings.Toggle()          -- open, so Refresh has run and rows are placed
+    if not cfg:IsShown() then ns.Settings.Toggle() end
+
+    -- ⚠️ NO ROW MAY OVERLAP THE ONE BELOW IT. The height was guessed from a
+    -- character count, which is wrong in both directions once the help column
+    -- narrows — a short sentence can wrap and a long one may not.
+    local function topOf(f)
+      local pt = { f:GetPoint(1) }
+      for i = #pt, 1, -1 do if type(pt[i]) == "number" then return -pt[i] end end
+    end
+    local overlaps = {}
+    for i = 1, #cfg.rows - 1 do
+      local thisHelp = cfg.rows[i].help
+      local nextLabel = cfg.rows[i + 1].label
+      local bottom = topOf(thisHelp) + (thisHelp:GetStringHeight() or 0)
+      if topOf(nextLabel) < bottom then
+        overlaps[#overlaps + 1] = cfg.rows[i].spec.key
+      end
+    end
+    check("no settings row overlaps the next", #overlaps == 0,
+          table.concat(overlaps, ", "))
+
+    -- ⚠️ AND NO HELP TEXT MAY RUN UNDER A CONTROL. It was sized against the
+    -- CHECKBOX at x496 while the dropdown starts at 403, so it ran 93px into
+    -- the dropdown's column on every row that has one.
+    local widest = 0
+    for _, row in ipairs(cfg.rows) do
+      widest = math.max(widest, row.help:GetWidth() or 0)
+    end
+    check("help text stops before the leftmost control", 40 + widest <= 403,
+          ("help reaches %d, control starts at 403"):format(40 + widest))
   end
 
   -- The settings window may not be taller than the addon window.

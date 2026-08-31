@@ -1964,17 +1964,28 @@ local function buildDetailPane()
   frame.itemIcon = frame:CreateTexture(nil, "ARTWORK")
   frame.itemIcon:SetSize(DET.icon, DET.icon)
   frame.itemIcon:SetPoint("TOPLEFT", DET.iconX, -DET.iconY)
-  -- ⚠️ SQUARE AND CROPPED, NOT MASKED (Session 258). The comment here said the
-  -- icon "IS CIRCULAR, matching the boss rail" and used the client's portrait
-  -- mask. Node 577:878 is a ROUNDED-RECTANGLE 40x40 — it was never a circle —
-  -- and the mask was evidently not applying in game anyway, because the border
-  -- baked into every WoW item icon was plainly visible. Jason asked for the
-  -- crop that removes it.
+  -- ⚠️ CIRCULAR, AND CROPPED. I got this wrong once and the correction is worth
+  -- keeping (Jason, Session 258: "what the fuck do you mean it was never meant
+  -- to be circular? It's circular in the Figma design").
   --
-  -- The standing rule "no SetTexCoord alongside a mask" still holds and is why
-  -- the mask goes rather than the two being stacked: at 40px an 8% inset trims
-  -- 3.2px from each edge, which is exactly the baked border.
+  -- WHY I GOT IT WRONG: the node metadata calls it a "rounded-rectangle", which
+  -- is what Figma's exporter says for a rect with a 50% corner radius — a
+  -- circle. I read the WORD and never looked at the render, on a page I had
+  -- already been sent a screenshot of. Metadata describes the primitive, not
+  -- the shape.
+  --
+  -- WHY THE BORDER SHOWED ANYWAY: Style.Round was failing silently — see the
+  -- pcall note there. So the icon really was square on screen; the fix is to
+  -- make the mask work, not to abandon it.
+  --
+  -- ⚠️ BOTH, WHICH DEVIATES FROM THE S257 NOTE saying never to combine a mask
+  -- with SetTexCoord. That note's stated reason is "the mask already hides the
+  -- icon border the crop was for", and that is FALSE for a circle inscribed in
+  -- a square: the circle touches all four edges at their midpoints, which is
+  -- exactly where the border is. Blizzard's own UI uses both on one texture.
+  -- The crop trims 3.2px per edge at 40px, then the mask rounds what is left.
   frame.itemIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+  if ns.Style then ns.Style.Round(frame, frame.itemIcon) end
 
   -- ⚠️ THE NAME IS BLUSH AND THE SLOT LINE IS WHITE — the OPPOSITE of the left
   -- rail's cards, and read off the node rather than reasoned about. See the note
@@ -3692,6 +3703,23 @@ local function fillPickChips(chips, pick)
 end
 
 local function renderSlots()
+  -- ⚠️ TAKE THE LOOT TAB'S FURNITURE DOWN FIRST (Jason, Session 258). The
+  -- Standings and Runner renderers both open with these four calls and this one
+  -- did not, so the ranking table, its column headers and the two dividers went
+  -- on drawing straight through the Slots page — a list of raiders with badges
+  -- and priorities under a BIS item, which is not a thing this page has.
+  --
+  -- WoW frames do not clip their children and nothing errors, so a view that
+  -- forgets to hide another view's widgets looks exactly like a half-built one.
+  -- That is why this is four calls rather than a comment telling the next person
+  -- to remember.
+  showPaneSurface(false)
+  showLootPaneParts(false)
+  setHeaders()
+  hideRows(1)
+  frame.more:SetText("")
+  frame.note:SetText("")
+
   local report = ns.SlotsReport and ns.SlotsReport(state.slotsView)
   if not report then return end
 

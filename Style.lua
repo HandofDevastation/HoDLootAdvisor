@@ -785,15 +785,31 @@ function Style.Round(parent, tex)
   local ok, mask = pcall(parent.CreateMaskTexture, parent)
   if not ok or not mask then return end
 
+  -- ⚠️ pcall TELLS YOU THE CALL DID NOT ERROR, NOT THAT IT WORKED (Session 258).
+  -- SetAtlas RETURNS A BOOLEAN — Blizzard's own LFGList.lua branches on it
+  -- (`if not self.InfoBackground:SetAtlas(...)`) — so an atlas that fails to
+  -- resolve returns false without raising, `applied` was set true anyway, and
+  -- the texture fallback beneath it NEVER RAN. The failure is silent and total:
+  -- no mask, no error, a square icon with its border showing. That is what
+  -- Jason was looking at.
   local applied = false
   if mask.SetAtlas then
-    applied = pcall(mask.SetAtlas, mask, "CircleMaskScalable")
+    local ok, res = pcall(mask.SetAtlas, mask, "CircleMaskScalable")
+    applied = ok and res ~= false
   end
   if not applied and mask.SetTexture then
-    applied = pcall(mask.SetTexture, mask,
+    local ok = pcall(mask.SetTexture, mask,
       "Interface\\CharacterFrame\\TempPortraitAlphaMask")
+    applied = ok
   end
   if not applied then return end
+
+  -- The wrap mode Blizzard's own MaskTexture XML pairs with this atlas
+  -- (Blizzard_PVPUI.xml, Blizzard_Commentator*). Without it, everything outside
+  -- the mask's own bounds clamps to the mask's edge pixel instead of being
+  -- masked out, which is the other way a circle mask comes out square.
+  if mask.SetHorizTile then pcall(mask.SetHorizTile, mask, false) end
+  if mask.SetVertTile then pcall(mask.SetVertTile, mask, false) end
 
   mask:SetAllPoints(tex)
   if tex.AddMaskTexture then pcall(tex.AddMaskTexture, tex, mask) end

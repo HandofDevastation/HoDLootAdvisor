@@ -306,6 +306,10 @@ local SET_HELP_Y  = 16
 local SET_CHECK_X, SET_CHECK_SZ = 496, 24
 local SET_INPUT_X, SET_INPUT_W, SET_INPUT_H = 440, 80, 30
 local SET_DROP_W = 131
+-- The leftmost edge any control occupies, and the help's right boundary 16
+-- short of it. Derived rather than typed, so moving a control moves the text.
+local SET_CTRL_L = math.min(SET_CHECK_X, SET_INPUT_X, FRAME_W - SET_X - SET_DROP_W - 26)
+local SET_HELP_W = SET_CTRL_L - SET_X - 16
 local FOOTER_H = 48
 -- ⚠️ THE READOUT NEEDS ITS OWN BAND IN THE HEIGHT, and adding it without one is
 -- exactly the mistake the note above describes — it drew over the last row's
@@ -324,8 +328,50 @@ local READOUT_H = 58
 --- ⚠️ MEASURED FROM THE HELP STRING, not from a per-key table. A table would be
 --- a second place to update every time a sentence changes, and the failure is
 --- silent — the row simply overlaps the one beneath it.
+--- ⚠️ A CHARACTER COUNT IS NOT A HEIGHT (Jason, Session 258 — the rows
+--- overlapped). This guessed two lines above 90 characters, which is wrong in
+--- both directions once the help column narrows: a 70-character sentence can
+--- wrap and a 100-character one may not. The estimate stays as the value used
+--- to SIZE the window before anything is drawn; Settings.Layout re-flows from
+--- what the font actually reports once the rows exist.
 function Settings.RowHeight(spec)
-  return (#(spec.help or "") > 90) and ROW_H_TALL or ROW_H
+  return (#(spec.help or "") > 70) and ROW_H_TALL or ROW_H
+end
+
+--- Re-place every row from the MEASURED height of its help text.
+---
+--- Runs on Refresh, which runs on show — by which point the fonts have loaded
+--- and GetStringHeight answers honestly. Cheap, and it is the only thing that
+--- can know how many lines a sentence took at this width.
+function Settings.Layout()
+  if not (frame and frame.rows) then return end
+  local y = 0
+  for _, row in ipairs(frame.rows) do
+    local h = row.help and row.help:GetStringHeight() or 0
+    -- The label sits above the help; the row is whichever is taller than the
+    -- one-line minimum.
+    local rowH = math.max(ROW_H, SET_HELP_Y + math.ceil(h))
+    row.label:ClearAllPoints()
+    row.label:SetPoint("TOPLEFT", SET_X, -(y + SET_LABEL_Y))
+    row.help:ClearAllPoints()
+    row.help:SetPoint("TOPLEFT", SET_X, -(y + SET_HELP_Y))
+    if row.control and row.control.ClearAllPoints then
+      row.control:ClearAllPoints()
+      local kind = row.spec.kind
+      if kind == "toggle" then
+        row.control:SetPoint("TOPLEFT", SET_CHECK_X, -(y + 4))
+      elseif kind == "number" then
+        row.control:SetPoint("TOPLEFT", SET_INPUT_X, -y)
+      elseif kind == "slider" then
+        row.control:SetPoint("TOPRIGHT", -60, -y)
+      else
+        row.control:SetPoint("TOPLEFT", FRAME_W - SET_X - SET_DROP_W - 26, -y)
+      end
+    end
+    y = y + rowH + ROW_GAP
+  end
+  if frame.content then frame.content:SetHeight(math.max(1, y)) end
+  return y
 end
 
 --- How tall the ROWS are, all together.
@@ -396,6 +442,38 @@ local function build()
   frame.scroll:SetPoint("TOPLEFT", 0, -HEADER_H)
   frame.scroll:SetPoint("BOTTOMRIGHT", -26, FOOTER_H + READOUT_H)
 
+  -- ⚠️ THE SCROLL TEMPLATE BRINGS ITS OWN CHROME. UIPanelScrollFrameTemplate
+  -- adds a track and two arrow buttons in Blizzard's parchment styling, which
+  -- appeared in the top-right corner of a window that is meant to have none.
+  -- Hidden the same way Style.Window strips the frame templates — by name, and
+  -- guarded, because template internals are not contractual.
+  -- ⚠️ TYPE-CHECKED, NOT JUST NIL-CHECKED. A named region on a template is a
+  -- TABLE or absent; anything else is not one. The headless stub answers any
+  -- CamelCase key with a function, so `if bar then` was true for a scrollbar
+  -- that does not exist and the next line indexed a function. The real client
+  -- can hand back something unexpected too — template internals are not
+  -- contractual, which is the whole reason this is guarded at all.
+  local function hideRegion(r)
+    if type(r) == "table" and type(r.Hide) == "function" then r:Hide() end
+  end
+  for _, key in ipairs({ "ScrollBar", "scrollBar" }) do
+    local bar = frame.scroll[key]
+    if type(bar) == "table" then
+      hideRegion(bar)
+      for _, part in ipairs({ "ScrollUpButton", "ScrollDownButton", "Background",
+                              "Track", "Top", "Middle", "Bottom", "ThumbTexture" }) do
+        hideRegion(bar[part])
+      end
+    end
+  end
+  local sbName = frame.scroll.GetName and frame.scroll:GetName()
+  if type(sbName) == "string" then
+    for _, suffix in ipairs({ "ScrollBar", "ScrollBarScrollUpButton",
+                             "ScrollBarScrollDownButton", "ScrollBarBackground" }) do
+      hideRegion(_G[sbName .. suffix])
+    end
+  end
+
   frame.content = CreateFrame("Frame", nil, frame.scroll)
   frame.content:SetSize(FRAME_W - 26, math.max(1, Settings.ContentHeight()))
   frame.scroll:SetScrollChild(frame.content)
@@ -432,7 +510,12 @@ local function build()
     help:SetPoint("TOPLEFT", SET_X, -(y + SET_HELP_Y))
     -- Stops short of the control column rather than running the full width, so
     -- a long sentence wraps instead of sliding under a checkbox.
-    help:SetWidth(SET_CHECK_X - SET_X - 16)
+    -- ⚠️ STOPS BEFORE THE NARROWEST CONTROL, NOT THE CHECKBOX (Jason, Session
+    -- 258 — the help ran underneath the AUTO and RAID_WARNING buttons). The
+    -- checkbox starts at 496 and the DROPDOWN at 403, so sizing the help
+    -- against the checkbox let it run 93px into the dropdown's column. One
+    -- width for every row, taken from whichever control starts furthest left.
+    help:SetWidth(SET_HELP_W)
     help:SetJustifyH("LEFT")
     help:SetWordWrap(true)
     -- Capped so a long help line cannot grow the row it was measured for.
@@ -537,7 +620,8 @@ local function build()
       end)
     end
 
-    frame.rows[#frame.rows + 1] = { spec = spec, control = control }
+    frame.rows[#frame.rows + 1] =
+      { spec = spec, control = control, label = label, help = help }
     y = y + Settings.RowHeight(spec) + ROW_GAP
   end
 
@@ -622,6 +706,10 @@ function Settings.Refresh()
   if frame.display and ns.DisplayReport then
     frame.display:SetText(Settings.DisplayLine(ns.DisplayReport()))
   end
+  -- Re-flow before writing values in: the rows have to be where they belong
+  -- before anything is measured against them.
+  Settings.Layout()
+
   for _, row in ipairs(frame.rows) do
     local v = Settings.Get(row.spec.key)
     if row.spec.kind == "toggle" then
