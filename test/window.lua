@@ -855,6 +855,64 @@ do
     ns.ApplyWindowScale()
   end
 
+  -- ── The size slider ───────────────────────────────────────────────────────
+  -- ⚠️ IT WAS IMPOSSIBLE TO USE, and neither failure was visible to a test.
+  do
+    local cfg = _G.HoDLootAdvisorConfigFrame
+    local slider
+    for _, row in ipairs(cfg.rows) do
+      if row.spec.kind == "slider" then slider = row.control end
+    end
+    check("the size setting has a slider", slider ~= nil)
+
+    -- (a) APPLYING REPEATEDLY MUST NOT COMPOUND. A baseline captured after a
+    -- scale had already been applied would multiply on every call, which is one
+    -- way to get "flickers in and out at a HUGE size".
+    ns.Settings.Set("panelScale", 80)
+    local base = panel._baseScale or 1
+    for _ = 1, 10 do ns.ApplyWindowScale() end
+    check("applying the scale ten times lands where applying it once does",
+          math.abs(panel:GetScale() - base * 0.8) < 0.0001,
+          ("%.4f vs %.4f"):format(panel:GetScale(), base * 0.8))
+
+    -- (b) THE WINDOW HOLDING THE KNOB IS HELD OUT OF THE LIVE RESIZE. Resizing
+    -- it moves the slider under the cursor, which changes the value, which
+    -- resizes it again — the loop that made this control unusable.
+    if slider then
+      ns.Settings.Set("panelScale", 100)
+      ns.ApplyWindowScale()
+      local settingsScaleBefore = cfg:GetScale()
+      slider.scripts.OnMouseDown(slider)
+      check("the slider reports itself as being dragged", slider:IsDragging())
+      slider.scripts.OnValueChanged(slider, 60)
+      check("...the panel resizes live while it is dragged",
+            math.abs(panel:GetScale() - (panel._baseScale or 1) * 0.6) < 0.0001,
+            panel:GetScale())
+      check("...and the window holding the slider does NOT",
+            math.abs(cfg:GetScale() - settingsScaleBefore) < 0.0001,
+            ("%.4f vs %.4f"):format(cfg:GetScale(), settingsScaleBefore))
+
+      slider.scripts.OnMouseUp(slider)
+      check("...until the knob is released", not slider:IsDragging())
+      check("...when it catches up in one step",
+            math.abs(cfg:GetScale() - (cfg._baseScale or 1) * 0.6) < 0.0001,
+            cfg:GetScale())
+
+      -- A drag that ends because the window closed still ends, or the hold
+      -- would never lift and the window could never be scaled again.
+      -- ⚠️ SHOWN FIRST, DELIBERATELY. Hide() on an already-hidden frame fires no
+      -- OnHide — in the client or here — so without this the check passes or
+      -- fails for a reason unrelated to the code it is testing.
+      cfg:Show()
+      slider.scripts.OnMouseDown(slider)
+      cfg:Hide()
+      check("a drag interrupted by the window closing still releases",
+            not slider:IsDragging() and ns.scaleHeld == nil)
+      ns.Settings.Set("panelScale", 100)
+      ns.ApplyWindowScale()
+    end
+  end
+
   -- The settings window may not be taller than the addon window.
   check("the Settings window is no taller than the panel",
         ns.Settings.WindowHeight() <= 600, ns.Settings.WindowHeight())

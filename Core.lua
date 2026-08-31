@@ -2222,15 +2222,45 @@ end
 --- MakeWindow has already pixel-snapped each frame to its own value, so scaling
 --- from a shared constant would undo that — and re-reading GetScale each time
 --- would compound the multiplier on every call.
+--- A window that must NOT be resized right now, because the control being
+--- dragged lives on it.
+---
+--- ⚠️ YOU CANNOT RESCALE THE WINDOW THAT OWNS THE SLIDER YOU ARE DRAGGING
+--- (Jason, Session 258: "as you start moving it, the settings page flickers in
+--- and out at a HUGE size. It's impossible to set it"). Resizing the settings
+--- window moves and resizes the slider UNDER THE CURSOR, which changes the
+--- value, which resizes the window again — a feedback loop, and the reason the
+--- control was unusable.
+---
+--- The old comment on the panelScale spec said the window "resizes under the
+--- drag" and that was FINE when this setting scaled the panel only: the slider
+--- was on a different window and stayed still. Making the setting govern all
+--- four windows — which is what it should do — is what turned live feedback
+--- into a loop. So the live preview still happens, on every window EXCEPT the
+--- one holding the control; that one catches up on release.
+ns.scaleHeld = nil
+
 function ns.ApplyWindowScale(frame)
   local list = frame and { frame } or ns.scaledWindows
   local mult = ns.WindowScale()
   for _, f in ipairs(list) do
-    if f and f.SetScale then
+    if f and f.SetScale and f ~= ns.scaleHeld then
       f._baseScale = f._baseScale or (f.GetScale and f:GetScale()) or 1
       pcall(f.SetScale, f, f._baseScale * mult)
     end
   end
+end
+
+--- Hold a window out of live scaling for the duration of a drag, then let it
+--- catch up. Idempotent, and safe to release when nothing is held.
+function ns.HoldWindowScale(frame)
+  ns.scaleHeld = frame
+end
+
+function ns.ReleaseWindowScale()
+  local held = ns.scaleHeld
+  ns.scaleHeld = nil
+  if held then ns.ApplyWindowScale(held) end
 end
 
 --- Put a window on the stack when it opens and take it off when it closes,
@@ -2245,6 +2275,12 @@ function ns.TrackWindow(frame)
   frame:HookScript("OnHide", function(self)
     stackRemove(self)
     if escCatcher then escCatcher:EnableKeyboard(#ns.windowStack > 0) end
+    -- ⚠️ A WINDOW THAT CLOSES MID-DRAG MUST RELEASE ITS SCALE HOLD, or the hold
+    -- outlives the drag and that window can never be resized again. Put here
+    -- rather than on the slider's own OnHide because a child's OnHide depends
+    -- on the client propagating it — true in WoW, and not something worth
+    -- resting a stuck-forever state on.
+    if ns.scaleHeld == self then ns.ReleaseWindowScale() end
   end)
 end
 

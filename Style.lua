@@ -970,13 +970,35 @@ function Style.Slider(parent, width, minV, maxV, step)
   --- suffix is appended to the readout ("%" here). onChange fires on every
   --- step, so a caller can apply the value live rather than on release —
   --- dragging a SIZE control you cannot see the effect of is guesswork.
-  function s:Wire(suffix, onChange)
+  --- suffix is appended to the readout ("%" here). onChange fires on every
+  --- step; onRelease fires once, when the drag ends.
+  ---
+  --- ⚠️ THE DRAG STATE IS PART OF THE CONTRACT, not an internal detail. A
+  --- caller that resizes anything needs to know whether the user still has hold
+  --- of the knob — and Settings.Refresh needs it too, because writing a value
+  --- into a slider mid-drag fights the drag.
+  function s:Wire(suffix, onChange, onRelease)
     self:SetScript("OnValueChanged", function(self2, v)
       v = math.floor(v + 0.5)
       self2.value:SetText(tostring(v) .. (suffix or ""))
       if onChange then onChange(v) end
     end)
+    self:SetScript("OnMouseDown", function(self2) self2._dragging = true end)
+    self:SetScript("OnMouseUp", function(self2)
+      self2._dragging = false
+      if onRelease then onRelease(math.floor((self2:GetValue() or 0) + 0.5)) end
+    end)
+    -- A drag that ends off the control still ends. Without this the hold below
+    -- would never be released and the window would stay unscalable.
+    self:HookScript("OnHide", function(self2)
+      if self2._dragging then
+        self2._dragging = false
+        if onRelease then onRelease(math.floor((self2:GetValue() or 0) + 0.5)) end
+      end
+    end)
   end
+
+  function s:IsDragging() return self._dragging and true or false end
 
   return s
 end

@@ -400,6 +400,20 @@ local function build()
   frame.content:SetSize(FRAME_W - 26, math.max(1, Settings.ContentHeight()))
   frame.scroll:SetScrollChild(frame.content)
 
+  -- ⚠️ A DRAG ENDS WHEN THE WINDOW DOES. Without this the slider keeps
+  -- `_dragging` set after the window closes mid-drag — and Settings.Refresh
+  -- refuses to write into a slider that thinks it is being dragged, so the
+  -- control would silently stop tracking the stored value for the rest of the
+  -- session. The scale hold is released alongside it (Core's TrackWindow does
+  -- the same from its side; both are cheap and neither is sufficient alone).
+  frame:HookScript("OnHide", function()
+    for _, row in ipairs(frame.rows or {}) do
+      local c = row.control
+      if c and c.IsDragging and c:IsDragging() then c._dragging = false end
+    end
+    if ns.ReleaseWindowScale then ns.ReleaseWindowScale() end
+  end)
+
   frame.rows = {}
   local y = 0
 
@@ -457,8 +471,20 @@ local function build()
           -- Only write when it actually moved: OnValueChanged fires while the
           -- window is being POPULATED too, and storing there would rewrite the
           -- setting from the widget on every open.
-          if v ~= Settings.Get(spec.key) then Settings.Set(spec.key, v) end
-        end)
+          if v == Settings.Get(spec.key) then return end
+          -- ⚠️ THIS WINDOW IS HELD OUT OF THE LIVE RESIZE WHILE THE KNOB IS
+          -- HELD. Scaling the window the slider sits on moves the slider under
+          -- the cursor, which changes the value, which scales again — the loop
+          -- that made this control impossible to use. Every OTHER window still
+          -- resizes live, which is the feedback that matters: you are sizing
+          -- the panel, and you can see the panel.
+          if control:IsDragging() then ns.HoldWindowScale(frame) end
+          Settings.Set(spec.key, v)
+        end,
+        -- On release the held window catches up, in one step, with the knob
+        -- already where the user let go of it.
+        function() ns.ReleaseWindowScale() end)
+
       end
 
     elseif spec.kind == "number" then
@@ -601,7 +627,12 @@ function Settings.Refresh()
     if row.spec.kind == "toggle" then
       row.control:SetChecked(v and true or false)
     elseif row.spec.kind == "slider" then
-      row.control:SetValue(tonumber(v) or row.spec.default)
+      -- ⚠️ NEVER WHILE IT IS BEING DRAGGED. Writing the stored value back into
+      -- the widget mid-drag fights the drag: the knob jumps to where the value
+      -- was rather than where the finger is.
+      if not (row.control.IsDragging and row.control:IsDragging()) then
+        row.control:SetValue(tonumber(v) or row.spec.default)
+      end
     elseif row.spec.kind == "number" then
       row.control:SetText(tostring(v))
     elseif row.spec.kind == "choice" then
