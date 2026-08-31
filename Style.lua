@@ -59,7 +59,7 @@ local FONT_DIR = "Interface\\AddOns\\HoDLootAdvisor\\Media\\fonts\\"
 -- The old role NAMES are kept and repointed rather than renamed, because every
 -- other file in the addon asks for a role by name; renaming them would be a
 -- sweep across seventeen files to say the same thing.
--- ⚠️ SAIRA, AND IT IS THE ONLY FAMILY (Session 262). Manrope, General Sans and
+-- ⚠️ SAIRA, AND IT IS THE ONLY FAMILY (Session 261). Manrope, General Sans and
 -- Khand all leave with the last window that used them. Saira is SIL OFL and
 -- declares no Reserved Font Name, so the cuts keep the name; the recipe and the
 -- licence are in Media/fonts/FONT-LICENSES.md.
@@ -74,7 +74,7 @@ Style.FONT = {
   body     = FONT_DIR .. "Saira-Light.ttf",
   bodyMed  = FONT_DIR .. "Saira-Medium.ttf",
   -- ⚠️ WAS "the filled chip, and nothing else". THE CHIPS ARE GONE (Jason,
-  -- Session 262: the outline "takes up too much vertical space and was
+  -- Session 261: the outline "takes up too much vertical space and was
   -- distracting"), and what they carried is now colour-coded text in the
   -- heaviest weight. The role keeps its name because every call site asks for it
   -- by name, and it still means the same thing: this is a tag.
@@ -202,7 +202,7 @@ Style.COLOR = {
   hotPink   = hex("ff0080"),   -- --hue-hot-pink, the BIS colour (Session 245)
   white     = hex("ffffff"),
 
-  -- ── Semantics the redesign introduces (Session 250, REVERSED Session 262) ──
+  -- ── Semantics the redesign introduces (Session 250, REVERSED Session 261) ──
   -- ⚠️ MAJOR IS GREEN AGAIN. Session 250 recorded the opposite in this exact
   -- spot — "MAJOR IS RED HERE, NOT GREEN" — because the 2026 mocks used a heat
   -- scale that cools. The Saira refresh goes back to a good/bad scale, which is
@@ -214,7 +214,7 @@ Style.COLOR = {
   -- Rust. Aliased to darkOrange above rather than a second literal: one Figma
   -- variable, and two literals is one of them going stale.
   minor     = hex("bb3f22"),
-  -- ⚠️ BIS AND THE TARGET SWAPPED ENDS (Session 262). Session 249 settled that
+  -- ⚠️ BIS AND THE TARGET SWAPPED ENDS (Session 261). Session 249 settled that
   -- these two must never share a hue and that BIS holds the gold-ish one. The
   -- first half still holds and is what matters; the second is now FALSE — BIS
   -- takes the violet that matches the gem icon, and the target takes the gold
@@ -225,7 +225,7 @@ Style.COLOR = {
   -- The tier family: TIER PIECE, TIER TOKEN, CATALYZE TARGET. Same green as
   -- MAJOR by design — see the collision note on Style.BADGE.
   tier      = hex("20ba56"),
-  -- Crafted, on the Slots page (Jason, Session 262). Same blue as MODERATE.
+  -- Crafted, on the Slots page (Jason, Session 261). Same blue as MODERATE.
   crafted   = hex("3382ff"),
   -- --hue-bright-purple. The Standings rail's section headings, and DISTINCT
   -- from `purple` (--hue-tab-stroke, the control fill) even though the two are
@@ -287,7 +287,7 @@ Style.COLOR = {
 -- column all read it, so a retune moves every surface at once instead of three
 -- tables drifting apart — which is how the strip and the ranking list ended up
 -- disagreeing about Moderate before.
--- ⚠️ IT IS A GOOD/BAD SCALE AGAIN (Session 262), AND THAT REVERSES THIS BOX.
+-- ⚠️ IT IS A GOOD/BAD SCALE AGAIN (Session 261), AND THAT REVERSES THIS BOX.
 -- Session 257 read a HEAT SCALE off the mocks — #ff595b -> #9f50d4 -> #ac7666 ->
 -- #606060, red for the biggest upgrade — and recorded that the flip AWAY from
 -- good/bad was deliberate and "inverts what a colour MEANS". The refresh flips

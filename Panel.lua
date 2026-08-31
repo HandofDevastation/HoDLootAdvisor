@@ -83,7 +83,7 @@ local TABS = { "Loot", "Slots", "Standings", "Runner" }
 -- do not clip their children, so a row count larger than the space available
 -- draws straight through whatever is below it instead of scrolling.
 
--- ⚠️ THE FRAME GREW AGAIN (Session 262): 620x560 -> 740x600 -> 800x600. The left
+-- ⚠️ THE FRAME GREW AGAIN (Session 261): 620x560 -> 740x600 -> 800x600. The left
 -- margin stays 40, so the RIGHT EDGE moves 700 -> 760 and every right-aligned
 -- constant below moves with it. Every coordinate here is read off the redesign's
 -- frame as an OFFSET FROM ITS TOP-LEFT, which is why they can be checked against
@@ -110,7 +110,7 @@ local LOGO_X, LOGO_Y = 40, 30
 -- defining change to this tab and the reason the old strip's numbers are gone
 -- rather than retuned — a right-aligned row of tiles has no counterpart here.
 --
--- ⚠️ THE ROW AND ITS ICON BOTH SHRANK (Session 262): 37 -> 29 and 28 -> 20.
+-- ⚠️ THE ROW AND ITS ICON BOTH SHRANK (Session 261): 37 -> 29 and 28 -> 20.
 -- Jason: the round icons come down "to compress vertical space", and with the
 -- chips gone from the item cards this is where the refresh buys its room. The
 -- last row is 28 and drops its bottom rule — the same one-pixel tell as before.
@@ -134,7 +134,7 @@ local COL_X, COL_W, COL_TOP = BOSS_X, BOSS_W, BOSS_TOP
 -- the same one-pixel tell the rail uses — its own rule is not drawn. Inside: 10
 -- of padding either side, the name and slot line as one 29-tall block at y 8,
 -- and the chip row at y 39.
--- ⚠️ THE CARD LOST A ROW (Session 262): 61 -> 45, pitch 63 -> 47. The chip row
+-- ⚠️ THE CARD LOST A ROW (Session 261): 61 -> 45, pitch 63 -> 47. The chip row
 -- is gone entirely — what it carried is now inline on the slot line as
 -- colour-coded text ("Back, Cloth • MAJOR • O-BIS • TARGET"), so a card is two
 -- lines instead of two lines plus a row of boxes.
@@ -727,7 +727,7 @@ end
 --- A tag line: a body run, then up to `maxTags` colour-coded tags separated by
 --- a bullet — "Back, Cloth • MAJOR • O-BIS • TARGET".
 ---
---- ⚠️ THIS REPLACES THE CHIPS (Session 262). Jason: the outline "takes up too
+--- ⚠️ THIS REPLACES THE CHIPS (Session 261). Jason: the outline "takes up too
 --- much vertical space and was distracting", so what an outlined or filled chip
 --- carried is now text. The distinction the two chip KINDS used to make — a
 --- claim about this raider versus a fact about the item — is carried by COLOUR
@@ -755,7 +755,7 @@ local function buildTagLine(parent, x, y, maxTags, anchorTo)
   local prev = g.lead
   for i = 1, (maxTags or 4) do
     -- The bullet is Light and Trash Grey on every line it appears (Jason,
-    -- Session 262) — never the tag's own colour, which would read as a fifth tag.
+    -- Session 261) — never the tag's own colour, which would read as a fifth tag.
     local sep = text(parent, "light", "label", "grey")
     sep:ClearAllPoints(); sep:SetPoint("LEFT", prev, "RIGHT", 0, 0)
     local tag = text(parent, "black", "label", "white")
@@ -815,7 +815,7 @@ local function buildItemRow(parent, i)
   row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
   row:SetSize(CARD.w, ITEM_H)
   -- Indented to the boss NAME, not the column edge: the cards line up under the
-  -- text they belong to rather than under the icons (Session 262).
+  -- text they belong to rather than under the icons (Session 261).
   row:SetPoint("TOPLEFT", CARD.x, -(i - 1) * ITEM_PITCH)
 
   local S = ns.Style
@@ -833,7 +833,7 @@ local function buildItemRow(parent, i)
 
   -- ⚠️ WHITE NAME OVER A BLUSH SLOT LINE — the opposite of the detail header,
   -- and read off the node. 11 over 10, both Light.
-  -- ⚠️ THE NAME IS MEDIUM NOW (Session 262), not Light. The refresh sets every
+  -- ⚠️ THE NAME IS MEDIUM NOW (Session 261), not Light. The refresh sets every
   -- item and raider name in Saira Medium against Light body copy, which is what
   -- separates a name from the line beneath it once the chips are gone and the
   -- card is only two lines tall.
@@ -914,7 +914,7 @@ local function buildBossTile(parent, i)
   -- An explicit height equal to the ROW plus JustifyV MIDDLE centres it against
   -- the row and therefore against the icon, with no arithmetic to keep in step
   -- if either changes. The S258 rule, applied where it had not been.
-  -- ⚠️ NO EXPLICIT WIDTH ANY MORE (Session 262). The refresh puts the BIS and
+  -- ⚠️ NO EXPLICIT WIDTH ANY MORE (Session 261). The refresh puts the BIS and
   -- target counts immediately after the name rather than at the row's right
   -- edge, so the name has to size to its own string for anything to anchor to
   -- it. That is the same reason buildSourceLine gives its three runs no width —
@@ -932,7 +932,7 @@ local function buildBossTile(parent, i)
   -- does not contain. Media/ui/diamond.png is the faceted gem exported straight
   -- from the node's path, rendered WHITE so it can be tinted from the palette
   -- rather than needing a re-export when a colour moves.
-  -- ⚠️ IT FOLLOWS THE NAME NOW, RIGHT-ALIGNED NO LONGER (Session 262). The mock
+  -- ⚠️ IT FOLLOWS THE NAME NOW, RIGHT-ALIGNED NO LONGER (Session 261). The mock
   -- puts "Nymrissa Wavecaller  ◆ x2  ⊚ x1" as one flowing line.
   tile.bis = tile:CreateTexture(nil, "OVERLAY")
   tile.bis:SetSize(15, 12)
@@ -952,7 +952,7 @@ local function buildBossTile(parent, i)
   -- than depending on what the client permits.
   --
   -- Sized to the diamond and no larger, so it never covers the boss's name.
-  -- ⚠️ THE COUNTS ARE NEW DATA, NOT DECORATION (Session 262). "x2" beside the
+  -- ⚠️ THE COUNTS ARE NEW DATA, NOT DECORATION (Session 261). "x2" beside the
   -- diamond is how many of this boss's drops are best-in-slot for you; "x1"
   -- beside the target is how many you have flagged. Nothing counted either
   -- before — see ns.BossItemCounts, which also explains why a zero HIDES the
@@ -1122,7 +1122,7 @@ local function buildRankRow(parent, i)
     fs:SetJustifyV("MIDDLE")
   end
 
-  -- ⚠️ THE UPGRADE COLUMN WAS CHIPS AND IS NOW TEXT (Session 262). It read
+  -- ⚠️ THE UPGRADE COLUMN WAS CHIPS AND IS NOW TEXT (Session 261). It read
   -- "MAJOR  O-BIS  -16" as three bordered boxes; it reads "MAJOR • O-BIS • -16"
   -- as colour-coded runs. Four tags at most: the verdict, the BIS listing, an
   -- ALT SPEC marker and the gap.
@@ -1185,7 +1185,7 @@ local function buildRankRow(parent, i)
 
   function row:AnchorScoreHit()
     -- The verdict run, which is the first tag and the widest thing in the
-    -- column. It was a chip until Session 262 and the fontstring before that;
+    -- column. It was a chip until Session 261 and the fontstring before that;
     -- both times the hit area was left pointing at the old widget and the
     -- breakdown tooltip silently became unreachable, so this follows the tag.
     local target = self.tagLine and self.tagLine.tags[1]
@@ -1422,7 +1422,7 @@ local function resetRow(row)
   -- left behind is a claim about the previous occupant of the row, which is
   -- exactly the failure that sweep exists to prevent.
   if row.ClearChips then row:ClearChips() end
-  -- ⚠️ AND SO IS A TAG LINE, FOR THE SAME REASON (Session 262). Its runs are
+  -- ⚠️ AND SO IS A TAG LINE, FOR THE SAME REASON (Session 261). Its runs are
   -- fontstrings but they are held inside a table, so TEXT_KEYS cannot see them
   -- either; a stale tag is the same wrong claim a stale chip was.
   if row.tagLine then row.tagLine:Set("", nil) end
@@ -2141,7 +2141,7 @@ local function buildSlotListRow(parent, i)
   row.check:SetTexture(SLOT_CHECK_TEX)
   row.check:Hide()
 
-  -- ⚠️ THE TAGS FLOW AFTER THE NAME (Session 262), they are not a right-aligned
+  -- ⚠️ THE TAGS FLOW AFTER THE NAME (Session 261), they are not a right-aligned
   -- column any more. Anchored to nameHit rather than to the name fontstring:
   -- FitTip sizes the hit target to the STRING, while the fontstring carries a
   -- declared width, so anchoring to the latter would start the tags at a fixed
@@ -3403,7 +3403,7 @@ function fillBossTile(tile, en)
   tile.bis:SetShown((b.bis or 0) > 0)
   tile.bisHit:SetShown((b.bis or 0) > 0)
 
-  -- ⚠️ THE COUNTS THEMSELVES (Session 262). `b.bis` has always been a number and
+  -- ⚠️ THE COUNTS THEMSELVES (Session 261). `b.bis` has always been a number and
   -- only ever gated a diamond's visibility; the refresh prints it. The target
   -- count is new end to end — ns.BossItemCounts computes both.
   --
@@ -3457,7 +3457,7 @@ function fillItemRow(row, e, idx)
     verdict, vColor = (label or ""):upper(), color
   end
 
-  -- ⚠️ ONE LINE, THREE TAGS, NO CHIPS (Session 262). The verdict leads because
+  -- ⚠️ ONE LINE, THREE TAGS, NO CHIPS (Session 261). The verdict leads because
   -- it is what you scan the column for; BIS and TARGET follow because they are
   -- facts about the item rather than claims about this raider. That ordering is
   -- what the chip KINDS used to encode, and with the boxes gone it is all that
@@ -4169,13 +4169,13 @@ end
 --- The tags a BIS pick carries: every context that lists it, then its
 --- classification. Returns the list buildTagLine wants.
 ---
---- ⚠️ WAS fillPickChips (Session 262). Four chip slots became four text runs;
+--- ⚠️ WAS fillPickChips (Session 261). Four chip slots became four text runs;
 --- the SLOT COUNT is unchanged and still four, because three BIS contexts can
 --- apply before the classification (Session 258).
 ---
 --- ⚠️ THE CLASSIFICATION TAKES THE TIER GREEN, NOT THE HEADING PURPLE. The
 --- refresh gives TIER PIECE / TIER TOKEN / CATALYZE TARGET the same green as
---- MAJOR, and Crafted the same blue as MODERATE (Jason, Session 262).
+--- MAJOR, and Crafted the same blue as MODERATE (Jason, Session 261).
 local function pickTags(pick)
   local tags = {}
   for _, view in ipairs(ns.SLOT_VIEWS or {}) do

@@ -1,7 +1,7 @@
 # Bundled font licenses
 
 The addon is set entirely in **Saira**. Manrope, Khand and General Sans were
-removed in Session 262 when the last window using them was rebuilt — nothing in
+removed in Session 261 when the last window using them was rebuilt — nothing in
 the addon referenced them any more, and an unreferenced font is 300 KB of the
 zip every installer downloads.
 
@@ -48,7 +48,7 @@ Weights are the design's, not a preference: Light carries body text, labels and
 the bullet separators; Regular the source lines ("From <boss>, <instance>");
 Medium the item, raider and boss names; Bold the column headers and the Standings
 rail labels; and Black the tags alone — the words that used to be drawn as outlined and filled
-chips before Session 262 replaced them with colour-coded text.
+chips before Session 261 replaced them with colour-coded text.
 
 Verified after cutting: all five report `usWeightClass` 300/400/500/700/900, none
 carries `fvar`, and each covers every accented character in the test fixtures
@@ -70,6 +70,6 @@ carry the older, credit-only text, the same one General Sans ships under; the tw
 documents disagree and the newer EULA is the one a download is made under.
 
 General Sans was in the same position and is **no longer bundled** — it left with
-Manrope and Khand in Session 262, when the last window still setting type in it
+Manrope and Khand in Session 261, when the last window still setting type in it
 was rebuilt. Nothing in the addon is set in an ITF face any more, which is the
 tidiest possible answer to the licence question above.

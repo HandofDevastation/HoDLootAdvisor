@@ -932,7 +932,7 @@ do
           panel.slotHead:GetHeight() == 34, panel.slotHead:GetHeight())
     local _, sx = pointOf(panel.slotHead.slot)
     -- 302, not 272: the Slots pane moved right when the window went 740 -> 800
-    -- (Session 262). The RELATIONSHIP is what this guards — the kind line is
+    -- (Session 261). The RELATIONSHIP is what this guards — the kind line is
     -- indented to the name rather than to the icon — and it is still 42 in from
     -- the pane's own left edge.
     check("...and the kind line is indented to the name, not the icon",
@@ -967,7 +967,7 @@ do
   -- ── The Loot header came down with it ─────────────────────────────────
   do
     local _, nx = pointOf(panel.itemName)
-    -- 386, not 306: same 80px pane shift as above (Session 262).
+    -- 386, not 306: same 80px pane shift as above (Session 261).
     check("the Loot header's name column sits beside the icon",
           nx == 386, nx)
     -- 32 against a 34-tall block puts the block ONE ABOVE the icon, not three
@@ -1099,7 +1099,7 @@ do
 
   local n, k = panel.slotHead and panel.slotHead.name, panel.slotHead and panel.slotHead.slot
   check("the Slots item name is 13", n and n._size == 13, n and n._size)
-  -- ⚠️ MEDIUM NOW, NOT REGULAR (Session 262). The refresh sets every item and
+  -- ⚠️ MEDIUM NOW, NOT REGULAR (Session 261). The refresh sets every item and
   -- raider NAME in Saira Medium against Light body copy — that pairing is what
   -- separates a name from the line under it now that the chips are gone.
   check("...and Medium, not Light", fontOf(n):match("Saira%-Medium") ~= nil, fontOf(n))
@@ -1336,7 +1336,7 @@ do
   check("the Slots OBTAINED BY panel has no border", panel.slotPanel.rim == nil)
 
   -- Four tag slots: three BIS contexts can apply at once, and the
-  -- classification follows them. The WIDGET changed in Session 262 — chips
+  -- classification follows them. The WIDGET changed in Session 261 — chips
   -- became colour-coded text — but the count did not, and it is the count this
   -- has always been guarding.
   check("the Slots header has four tag slots", #panel.slotHead.tagLine.tags == 4)
@@ -1345,7 +1345,7 @@ do
   -- chips could be dropped at all.
   check("...set in Saira Black", (panel.slotHead.tagLine.tags[1]._font or ""):match("Saira%-Black") ~= nil,
         panel.slotHead.tagLine.tags[1]._font)
-  -- ⚠️ AND THE SEPARATOR IS NOT (Jason, Session 262: Trash Grey, Saira Light).
+  -- ⚠️ AND THE SEPARATOR IS NOT (Jason, Session 261: Trash Grey, Saira Light).
   -- A bullet in the tag's own weight and colour reads as a fifth tag.
   check("...with Light separators between them",
         (panel.slotHead.tagLine.seps[1]._font or ""):match("Saira%-Light") ~= nil,
@@ -1529,7 +1529,7 @@ do
     check("a boss row has no tooltip of its own", tile.scripts.OnEnter == nil)
     check("...and the diamond carries its own hover target", tile.bisHit ~= nil)
 
-    -- ── THE COUNTS REACH THE ROW (Session 262) ────────────────────────────
+    -- ── THE COUNTS REACH THE ROW (Session 261) ────────────────────────────
     --
     -- ⚠️ ASSERTS THE VALUE, NOT THE WIDGET'S EXISTENCE. A count that is never
     -- written leaves these fontstrings present, empty and hidden — which passes

@@ -78,7 +78,7 @@ check("every file the .toc loads is in the package",
 -- looks identical in code while silently falling back to the game font.
 for _, required in ipairs({
   -- Saira-OFL.txt, not OFL.txt: the file is named for its family now that only
-  -- one family ships (Session 262). Two of the five weights are listed rather
+  -- one family ships (Session 261). Two of the five weights are listed rather
   -- than all five — the point is that the COPY step ran, and a build that
   -- dropped fonts would drop them all.
   "Media/fonts/Saira-OFL.txt", "Media/fonts/FONT-LICENSES.md",

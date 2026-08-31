@@ -1,6 +1,6 @@
 # The Saira refresh — what changed, measured against what is built
 
-Working document for the Session 262 restyle. It exists because "be thorough in
+Working document for the Session 261 restyle. It exists because "be thorough in
 cataloguing the differences" is the cheapest thing anyone can do for this job:
 every number below was READ OFF THE FIGMA NODE and compared against the constant
 that currently produces it, so the build is a list of edits rather than a series

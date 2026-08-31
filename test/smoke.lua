@@ -3285,7 +3285,7 @@ header("Dungeons as a content mode — tiles, pooled loot, and scoring")
     end
   end
 
-  -- ── A RAID BOSS ROW COUNTS ITS TARGETS (Session 262) ────────────────────
+  -- ── A RAID BOSS ROW COUNTS ITS TARGETS (Session 261) ────────────────────
   --
   -- ⚠️ STAGED, NOT OBSERVED. A count read off whatever the fixture happens to
   -- hold can be zero for a reason that has nothing to do with the code, and a
