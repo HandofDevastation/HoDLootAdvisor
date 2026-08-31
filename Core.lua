@@ -863,6 +863,28 @@ function ns.CraftedSource(q)
   return { boss = "Crafted" }
 end
 
+--- Where an item comes from, as one ladder, for every surface that draws the
+--- line. Most authoritative first: our own raid table (which names the boss the
+--- way the rest of the site does), then the Adventure Guide (the ONLY place
+--- dungeon loot has a source at all, and it names the dungeon too), then the
+--- item's own crafted claim.
+---
+--- ⚠️ ONE SEAM, BECAUSE THERE WERE TWO AND THEY DISAGREED (Session 260, Jason:
+--- "a piece listed as a catalyze target that has NO location/source showing").
+--- SlotsReport walked all three rungs; ObtainRoutes called ns.ItemSource ALONE,
+--- so a route drawn from a dungeon drop or a crafted piece got no second line
+--- while the pick directly above it got one. Desert Guardian's Breastplate is a
+--- revamped-dungeon drop, so our raid table has never heard of it.
+--- Core §1.1: a new surface must CALL the settled seam, not re-derive it.
+---
+--- `q` is optional — a tier TOKEN carries no BIS row, so it has no quality to
+--- read a crafted claim off, and the other two rungs still answer for it.
+function ns.SourceFor(itemID, rec, q)
+  return ns.ItemSource(itemID, rec)
+    or ns.JournalSource(itemID)
+    or ns.CraftedSource(q)
+end
+
 --- Every way to end up holding one item.
 ---
 --- ⚠️ THE TIER TOKEN CARRIES NO BIS ROW and never has, so it cannot be found by
@@ -883,7 +905,7 @@ function ns.ObtainRoutes(itemID, slotKey, char)
       and (not char or ns.CanUse(rec, char.className, char.specName)) then
       out[#out + 1] = {
         itemID = tokenID, name = ns.ItemName(tokenID), kind = "TIER TOKEN",
-        source = ns.ItemSource(tokenID, rec),
+        source = ns.SourceFor(tokenID, rec),
       }
     end
   end
@@ -896,7 +918,7 @@ function ns.ObtainRoutes(itemID, slotKey, char)
         local rec = data.items[srcID]
         out[#out + 1] = {
           itemID = srcID, name = ns.ItemName(srcID),
-          kind = "CATALYZE TARGET", source = ns.ItemSource(srcID, rec),
+          kind = "CATALYZE TARGET", source = ns.SourceFor(srcID, rec, q),
         }
       end
     end
@@ -957,13 +979,7 @@ function ns.SlotsReport(view)
             for _, c in ipairs(q.contexts) do contexts[c] = true end
             local owned = false
             if ns.EquippedCopy then owned = ns.EquippedCopy(slotKey, itemID) end
-            -- Three sources, most authoritative first: our own raid table
-            -- (which names the boss the way the rest of the site does), then
-            -- the Adventure Guide, which is the ONLY place dungeon loot has a
-            -- source at all, then the item's own crafted claim.
-            local src = ns.ItemSource(itemID, rec)
-              or ns.JournalSource(itemID)
-              or ns.CraftedSource(q)
+            local src = ns.SourceFor(itemID, rec, q)
             bySlot[slotKey][#bySlot[slotKey] + 1] = {
               itemID = itemID,
               -- Through ns.ItemName, not rec.name: a BIS pick is usually one of

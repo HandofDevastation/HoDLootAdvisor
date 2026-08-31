@@ -265,7 +265,25 @@ local SL = {
 
   -- MULTI-ITEM: a flat list of candidates, each 55 tall with a 10px top inset.
   -- The icon sits at 11, one below the text block, on the same centre line.
-  listY = 129, listPitch = 55, listNameY = 10, listSourceY = 28, listIconY = 11,
+  --
+  -- ⚠️ 131, NOT THE MOCK'S 129 (Session 260, Jason: the icon and the text "move
+  -- a few pixels up or down" when the OBTAINED BY box appears and disappears).
+  -- THE TWO MOCKS DISAGREE, and the code was faithfully reproducing both. Read
+  -- back from the nodes: the single-item block (591:2187) sits at 141 with its
+  -- icon at 142 and its second line at 159; the multi-item list (591:2199) puts
+  -- the equivalents at 139, 140 and 157. Everything else on the two frames —
+  -- rail, tabs, caption, dropdown, footer — is identical to the pixel, which is
+  -- what makes this drawing drift between two frames rather than intent. This
+  -- box's own header already says the two are ONE PAGE IN TWO STATES.
+  --
+  -- The LIST moves rather than the block, because every number in the single
+  -- layout is load-bearing against its neighbours: the icon is centred in a
+  -- 34-tall two-line block and the OBTAINED BY panel is anchored under it at
+  -- 186, read from its own node. Shifting that costs four constants and moves
+  -- the panel off the position its node states. Shifting the list costs one,
+  -- and lands all three elements exactly on the block's: name 141, icon 142,
+  -- second line 159. slotNote derives from listY and follows for free.
+  listY = 131, listPitch = 55, listNameY = 10, listSourceY = 28, listIconY = 11,
   listRows = 7, routeRows = 4,
 
   chipH = 15, chipGap = 6,

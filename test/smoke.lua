@@ -3492,6 +3492,29 @@ header("Dungeons as a content mode — tiles, pooled loot, and scoring")
       check("...and is NOT labelled a tier piece",
             found and found.tierPiece == false,
             found and tostring(found.tierPiece))
+
+      -- ⚠️ AND A ROUTE INSIDE THE OBTAINED BY PANEL GETS THE SAME LADDER
+      -- (Session 260, Jason: "a piece listed as a catalyze target that has NO
+      -- location/source showing"). The panel drew a line for one route and
+      -- nothing for the other on the same screen, because ObtainRoutes called
+      -- ns.ItemSource ALONE while the pick above it walked all three rungs.
+      -- A catalyse source that drops in a REVAMPED DUNGEON — which is what
+      -- Desert Guardian's Breastplate is — is not in our raid table at all.
+      -- Both now go through ns.SourceFor, so they cannot diverge again.
+      local tierTarget = 999042
+      data.rankings[dungeonId][key].cat = tierTarget
+      local routes = ns.ObtainRoutes(tierTarget, "FINGER",
+        ns.ResolveCharacter and ns.ResolveCharacter()) or {}
+      local catRoute
+      for _, r in ipairs(routes) do
+        if r.itemID == dungeonId then catRoute = r end
+      end
+      check("a catalyse source from a dungeon reaches the OBTAINED BY panel",
+            catRoute ~= nil)
+      check("...carrying the guide's source line, not a blank",
+            catRoute and catRoute.source and catRoute.source.boss == dungeonSrc.boss,
+            catRoute and catRoute.source and catRoute.source.boss or "NO SOURCE LINE")
+      data.rankings[dungeonId][key].cat = nil
       data.rankings[dungeonId] = nil
       stub.itemEquipLoc[dungeonId] = nil
     end

@@ -1405,6 +1405,39 @@ do
       if g then break end
     end
     check("a drawn Slots source line was found to inspect", g ~= nil)
+
+    -- ⚠️ THE ITEM MUST NOT JUMP WHEN THE LAYOUT CHANGES (Session 260, Jason:
+    -- it moves "a few pixels up or down" depending on whether there is an
+    -- OBTAINED BY box). A tier slot draws the identity block, an ordinary slot
+    -- draws the list, and the two mocks put their first item 2px apart — so
+    -- walking the rail nudged the icon and the name every time the layout
+    -- flipped. Both frames were re-read to confirm the difference is drawing
+    -- drift and not intent; see the SL.listY note.
+    --
+    -- Sums the anchor offsets up to the panel, so it asserts the POSITION a
+    -- viewer sees rather than the constant a developer typed.
+    local function topOf(w)
+      local y, n = 0, w
+      while n and n ~= panel do
+        local p = n._points and n._points[1]
+        if not p then break end
+        local toSibling = (type(p[2]) == "table")
+        y = y + ((toSibling and p[5] or p[3]) or 0)
+        n = toSibling and p[2] or n._parent
+      end
+      return -y
+    end
+    local row1 = panel.slotListRows[1]
+    check("the item icon lands at the same height in both layouts",
+          topOf(panel.slotHead.icon) == topOf(row1.icon),
+          ("single=%s list=%s"):format(topOf(panel.slotHead.icon), topOf(row1.icon)))
+    check("...and so does the item name",
+          topOf(panel.slotHead.name) == topOf(row1.name),
+          ("single=%s list=%s"):format(topOf(panel.slotHead.name), topOf(row1.name)))
+    check("...and the second line under it",
+          topOf(panel.slotHead.slot) == topOf(row1.source.pre),
+          ("single=%s list=%s"):format(topOf(panel.slotHead.slot),
+                                       topOf(row1.source.pre)))
     if g then
       local b, t = g.boss._points[1] or {}, g.rest._points[1] or {}
       check("the boss name is anchored to the RIGHT of \"From \"",
