@@ -397,7 +397,7 @@ function M.resolveQuality(rankings, itemId, className, specName, heroTree, conte
   local byKey = rankings and rankings[itemId]
   if not byKey then return nil end
 
-  local grade, bis, contexts, catalysesInto, bonusIds, nameDesc
+  local grade, bis, contexts, catalysesInto, bonusIds, nameDesc, tierSet
   for _, key in ipairs(qualityKeys(className, specName, heroTree, contentScope)) do
     local e = byKey[key]
     if e then
@@ -413,6 +413,17 @@ function M.resolveQuality(rankings, itemId, className, specName, heroTree, conte
       -- ADDITIVE ONLY: nothing scored changes, and no existing field moves.
       if bonusIds == nil then bonusIds = e.bi end
       if nameDesc == nil then nameDesc = e.nd end
+      -- ⚠️ BLIZZARD SAYS THIS IS A TIER PIECE; NOTHING HERE INFERS IT. The
+      -- emitter resolves preview_item.set.item_set.name and ships the ANSWER,
+      -- so this is a read rather than a rule. What it REPLACES is an
+      -- elimination — not in our loot table, nothing sourced it, a token exists
+      -- for the slot — which labelled ordinary dungeon and crafted picks in the
+      -- five tier slots as tier.
+      --
+      -- ⚠️ nil MEANS NOT TIER, and that is only safe because the harvest asks
+      -- the question for every pick in those five slots. Do not read an absence
+      -- here as "unknown" and reintroduce a fallback guess.
+      if tierSet == nil then tierSet = e.ts end
     end
   end
 
@@ -422,7 +433,7 @@ function M.resolveQuality(rankings, itemId, className, specName, heroTree, conte
   -- caller handle "sometimes absent" is how one of them ends up not handling it.
   if bis and not contexts then contexts = { bis } end
   return { grade = grade, bis = bis, contexts = contexts, catalysesInto = catalysesInto,
-           bonusIds = bonusIds, nameDesc = nameDesc }
+           bonusIds = bonusIds, nameDesc = nameDesc, tierSet = tierSet }
 end
 
 --- Just the letter grade. Kept as its own call because the scorer's ranked-tier

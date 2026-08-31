@@ -3640,6 +3640,50 @@ header("Dungeons as a content mode — tiles, pooled loot, and scoring")
       stub.itemEquipLoc[dungeonId] = "INVTYPE_FINGER"
       data.rankings[dungeonId] = { [key] = { b = "overall", bx = { "overall" } } }
 
+      -- ⚠️ THE TWO CHECKS ABOVE CANNOT FAIL UNDER EITHER RULE, and that is the
+      -- S259 trap: both assert an ABSENCE, and the label is absent whether it
+      -- was suppressed by a condition or never claimed at all. Neither notices
+      -- the emitted flag arriving or leaving. The two below are staged so the
+      -- OLD elimination — `rec == nil and src == nil and HasTierToken(slot)` —
+      -- gives the opposite answer to the new one, in both directions.
+      --
+      -- (a) POSITIVE, AND IT MUST BE. A test that only ever asserts "not tier"
+      -- passes against a rule that says nothing is ever tier (Core §1.1, S260:
+      -- a literal standing in for a calculation is invisible). This pick HAS a
+      -- guide source, so the old rule scored it false; Blizzard says it is in a
+      -- set, so the new one says true.
+      data.rankings[dungeonId][key] = { b = "overall", bx = { "overall" }, ts = true }
+      local repTier = ns.SlotsReport("overall")
+      local tierPick
+      for _, row in ipairs(repTier.rows) do
+        for _, p in ipairs(row.picks) do if p.itemID == dungeonId then tierPick = p end end
+      end
+      check("a pick the payload marks as set gear IS a tier piece",
+            tierPick and tierPick.tierPiece == true,
+            tierPick and tostring(tierPick.tierPiece) or "no pick")
+
+      -- (b) THE 62-ITEM DEFECT ITSELF, staged exactly: an unsourced pick in a
+      -- slot tier DOES exist in, which the payload does not mark. The old rule
+      -- had nothing left to stop it — the raid table does not hold it, nothing
+      -- sourced it, and the season ships a HEAD token for every armour type —
+      -- so it drew a TIER PIECE chip on ordinary dungeon and crafted gear.
+      data.rankings[dungeonId][key] = { b = "overall", bx = { "overall" } }
+      stub.itemEquipLoc[dungeonId] = "INVTYPE_HEAD"
+      local headIdx = ns.Journal.SourceIndex()[dungeonId]
+      local headSrc = headIdx and headIdx.boss
+      if headIdx then headIdx.boss = nil end   -- nothing can name it
+      local repHead = ns.SlotsReport("overall")
+      local headPick
+      for _, row in ipairs(repHead.rows) do
+        for _, p in ipairs(row.picks) do if p.itemID == dungeonId then headPick = p end end
+      end
+      check("an unsourced HEAD pick the payload does not mark is NOT tier",
+            headPick and headPick.tierPiece == false,
+            headPick and tostring(headPick.tierPiece) or "no pick")
+      if headIdx then headIdx.boss = headSrc end
+      stub.itemEquipLoc[dungeonId] = "INVTYPE_FINGER"
+      data.rankings[dungeonId] = { [key] = { b = "overall", bx = { "overall" } } }
+
       -- ⚠️ AND A ROUTE INSIDE THE OBTAINED BY PANEL GETS THE SAME LADDER
       -- (Session 260, Jason: "a piece listed as a catalyze target that has NO
       -- location/source showing"). The panel drew a line for one route and

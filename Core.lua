@@ -885,28 +885,13 @@ function ns.SourceFor(itemID, rec, q)
     or ns.CraftedSource(q)
 end
 
---- Is there a tier token for this slot that this character could use?
----
---- ⚠️ THE POSITIVE HALF OF THE TIER TEST (Session 260, Jason: a WRIST showed a
---- TIER PIECE chip). Tier exists in five slots — head, shoulder, chest, hands,
---- legs — and nothing else, ever. The previous test was pure elimination: no
---- source found, therefore tier. That labels every unsourced item a tier piece,
---- including bracers, rings and weapons, which is nonsense on its face.
----
---- This asks the payload a question it can actually answer, using the SAME
---- derivation ObtainRoutes uses to name the token: a token whose own slot is
---- this slot and whose class gate admits you. No token for the slot, no tier.
-function ns.HasTierToken(slotKey, char)
-  local data = ns.Data()
-  if not (data and data.items and slotKey) then return false end
-  for _, rec in pairs(data.items) do
-    if rec.slot == "TOKEN" and ns.ItemSlot(rec) == slotKey
-      and (not char or ns.CanUse(rec, char.className, char.specName)) then
-      return true
-    end
-  end
-  return false
-end
+-- ns.HasTierToken lived here until Session 261. It was the last CONDITION on the
+-- tier-piece elimination — "a token exists for this slot, so an unsourced pick
+-- in it must be tier" — and the emitted `ts` flag answers that question outright
+-- from Blizzard's item-set membership. Deleted rather than left unused: a
+-- plausible-looking helper with no callers is one somebody wires back in.
+-- ObtainRoutes below still derives the token for its own purpose, which is
+-- naming a route rather than classifying a piece.
 
 --- Every way to end up holding one item.
 ---
@@ -1023,30 +1008,35 @@ function ns.SlotsReport(view)
               -- bold white run, and a crafted item has no instance to name.
               source = src,
               owned = owned,
-              -- ⚠️ "NOT IN OUR RAID TABLE" IS NOT "TIER PIECE" (Session 260,
-              -- Jason: Worldroot Canopy is not a tier piece). This was the LAST
-              -- consumer of the proxy the Session 259 box retired everywhere
-              -- else — a question equally TRUE of dungeon loot, crafted gear,
-              -- world bosses and Delve gear, so it is wrong for four of five.
-              -- A dungeon helm is absent from our raid table, so it was given
-              -- the TIER PIECE chip, the tier layout, and an OBTAINED BY panel
-              -- offering a token that does not produce it.
+              -- HISTORY, because two sessions were spent narrowing this and the
+              -- narrowing was the wrong move each time. Session 260 found the
+              -- chip on Worldroot Canopy ("not in our raid table" is equally
+              -- true of dungeon loot, crafted gear, world bosses and Delve
+              -- gear), then on a WRIST (absence of a source is true of any
+              -- slot). Both were answered by adding a CONDITION to an
+              -- elimination, which shrinks a wrong answer without making it
+              -- right — and ns.HasTierToken, the last of those conditions, is
+              -- deleted along with this.
               --
-              -- ⚠️ AND IT NEEDS A SLOT THAT TIER EXISTS IN (Session 260, Jason:
-              -- a WRIST carrying a TIER PIECE chip). Absence of a source was
-              -- still pure elimination, so every unsourced pick — bracers,
-              -- rings, weapons — was labelled tier. ns.HasTierToken asks the
-              -- payload a question it can answer, and there is no wrist token
-              -- in any season.
+              -- ⚠️ NOW THE POSITIVE TEST, AND THE ELIMINATION IS GONE (Session
+              -- 261). `q.tierSet` is Blizzard's own item-set membership,
+              -- resolved by the harvest from preview_item.set.item_set.name and
+              -- emitted as `ts` — the "emit the answer, never infer it in Lua"
+              -- move that already settled the item level and the crafted line.
               --
-              -- ⚠️ STILL NOT THE WHOLE POSITIVE TEST. The real answer is
-              -- Blizzard's own item-set membership, which the SITE can resolve
-              -- and the emitter should ship as a flag — the "emit the answer,
-              -- never infer it in Lua" move that settled the item level and the
-              -- crafted line. This bounds the damage to the five slots where a
-              -- wrong answer is at least possible.
-              tierPiece = (rec == nil) and (src == nil)
-                and ns.HasTierToken(slotKey, char),
+              -- WHAT THE OLD RULE COST: "not in our loot table AND nothing
+              -- sourced it AND a token exists for this slot" is true of every
+              -- dungeon, crafted and Delve pick in the five tier slots. 62 such
+              -- picks were eligible for a TIER PIECE chip they should never have
+              -- had — bounded only by whatever the player's own Adventure Guide
+              -- happened to source, which is not a guarantee and is exactly the
+              -- load-bearing dependency Session 260 was about.
+              --
+              -- ⚠️ NO FALLBACK TO THE OLD TEST WHEN `ts` IS ABSENT, deliberately.
+              -- An older payload simply reports no tier pieces, which is a
+              -- visible and harmless absence; falling back would restore the
+              -- wrong answers for exactly the installs least able to notice.
+              tierPiece = q.tierSet == true,
             }
           end
         end
