@@ -3526,6 +3526,65 @@ header("Dungeons as a content mode — tiles, pooled loot, and scoring")
     check("an item the guide has never heard of gets no line invented for it",
           ns.JournalSource(880999) == nil)
 
+    -- ── AND NOW WE SOURCE DUNGEONS OURSELVES (Session 261) ────────────────
+    --
+    -- ⚠️ THE COMMENT ABOVE — "the guide is the only thing that knows" — WAS THE
+    -- PROBLEM, not a description of a settled design. It made every dungeon
+    -- pick's second line depend on the player's client answering correctly, and
+    -- Session 260 is the record of it not doing so: the dungeon list came from
+    -- the expansion's TIER rather than the season's keystone pool, so three
+    -- dungeons were never enumerated and nothing downstream could source their
+    -- loot. The site harvests the pool from Blizzard's own leaderboard and
+    -- emits it, so the guide is now a FALLBACK.
+    do
+      local d = data.dungeons
+      check("the payload carries a dungeon source table", type(d) == "table")
+      check("...naming the season's dungeons", d and d.places and next(d.places) ~= nil)
+      -- ⚠️ ASSERT A REAL VALUE, NOT THE ABSENCE OF AN ERROR. An empty table
+      -- passes every "is it a table" check and sources nothing.
+      local dItem, dEnc
+      for id, enc in pairs((d or {}).items or {}) do dItem, dEnc = id, enc; break end
+      check("...and at least one item, so the checks below can fail", dItem ~= nil)
+      if dItem then
+        local src = ns.DungeonSource(dItem)
+        check("DungeonSource names the boss from OUR table",
+              src and ns.NonEmpty(src.boss) ~= nil, src and src.boss)
+        check("...and the dungeon it sits in",
+              src and ns.NonEmpty(src.instance) ~= nil, src and src.instance)
+        check("...matching the boss the payload records for it",
+              src and src.boss == d.bosses[dEnc].name,
+              src and src.boss)
+
+        -- ⚠️ THE LADDER MUST ACTUALLY PREFER IT, which is the whole change.
+        -- Testing DungeonSource alone would pass with the rung never added to
+        -- ns.SourceFor — the S259 probe-that-does-not-bite trap, which cost a
+        -- session here already. Staged so the guide would answer DIFFERENTLY:
+        -- if the ladder still reached it first, the boss name would be the
+        -- guide's, not ours.
+        local idx2 = ns.Journal.SourceIndex()
+        local saved = idx2[dItem]
+        idx2[dItem] = { boss = "THE GUIDE ANSWERED", instance = "GUIDE INSTANCE" }
+        local via = ns.SourceFor(dItem, nil, nil)
+        check("the ladder takes OUR dungeon answer over the guide's",
+              via and via.boss == d.bosses[dEnc].name,
+              via and via.boss or "no source")
+        idx2[dItem] = saved
+      end
+
+      -- The guide keeps its rung, and must: it knows world bosses, Delve gear
+      -- and anything a season's harvest has not covered. Staged as an item our
+      -- dungeon table does not hold.
+      local guideOnly
+      for id in pairs(ns.Journal.SourceIndex()) do
+        if not ((d or {}).items or {})[id] then guideOnly = id break end
+      end
+      if guideOnly then
+        local src = ns.SourceFor(guideOnly, nil, nil)
+        check("an item only the guide knows still gets its line",
+              src and ns.NonEmpty(src.boss) ~= nil, src and src.boss)
+      end
+    end
+
     -- ── THE PLAYER'S OWN GUIDE SETTINGS ARE NOT OUR INPUT (Session 260) ─────
     --
     -- Journal.Loot's own header already says ambient selection state is a race,

@@ -846,6 +846,34 @@ function ns.JournalSource(itemID)
   return { boss = hit.boss, instance = ns.NonEmpty(hit.instance) }
 end
 
+--- Where OUR OWN tables say a dungeon item drops (Session 261).
+---
+--- ⚠️ THIS EXISTS SO THE ADVENTURE GUIDE IS A FALLBACK. Dungeon loot was in
+--- none of our tables, so ns.JournalSource — the player's own client, read
+--- through their own sticky filters — was the ONLY answer for it. Session 260
+--- is the record of what that costs: a dungeon the walk never enumerated has no
+--- loot at all, so no fix downstream could source an item from it, and two real
+--- repairs landed and changed nothing Jason could see.
+---
+--- Returns the SAME { boss, instance } shape as the other two rungs.
+---
+--- ⚠️ NORMALISED, SO IT IS TWO HOPS. `items` maps an item to its encounter,
+--- `bosses` names the encounter and points at its place, `places` names that.
+--- The names repeat across a hundred-odd items and are stored once each.
+function ns.DungeonSource(itemID)
+  local data = ns.Data()
+  local d = data and data.dungeons
+  if not (itemID and d and d.items) then return nil end
+  local enc = d.items[itemID]
+  local boss = enc and d.bosses and d.bosses[enc]
+  local bossName = boss and ns.NonEmpty(boss.name)
+  if not bossName then return nil end
+  -- The dungeon's name is a bonus, not a requirement: a boss alone is still a
+  -- true line, and the same rule ns.ItemSource follows for a raid instance.
+  local place = boss.place and d.places and d.places[boss.place]
+  return { boss = bossName, instance = ns.NonEmpty(place) }
+end
+
 --- "From Crafted", but ONLY when the item says it is crafted.
 ---
 --- ⚠️ POSITIVE SIGNAL ONLY. The item's own name-description is "Tidal Crafted"
@@ -865,9 +893,15 @@ end
 
 --- Where an item comes from, as one ladder, for every surface that draws the
 --- line. Most authoritative first: our own raid table (which names the boss the
---- way the rest of the site does), then the Adventure Guide (the ONLY place
---- dungeon loot has a source at all, and it names the dungeon too), then the
---- item's own crafted claim.
+--- way the rest of the site does), then our own dungeon table, then the
+--- Adventure Guide, then the item's own crafted claim.
+---
+--- ⚠️ THE GUIDE MOVED DOWN A RUNG (Session 261) AND THAT IS THE WHOLE POINT. It
+--- used to be the only source dungeon loot had, which made every dungeon pick's
+--- second line depend on the player's client answering correctly — and Session
+--- 260 is the record of it not doing so, silently and completely. It stays on
+--- the ladder because it still knows things we do not: world bosses, Delve gear,
+--- anything a season's harvest has not covered, and a weapon's subtype.
 ---
 --- ⚠️ ONE SEAM, BECAUSE THERE WERE TWO AND THEY DISAGREED (Session 260, Jason:
 --- "a piece listed as a catalyze target that has NO location/source showing").
@@ -881,6 +915,7 @@ end
 --- read a crafted claim off, and the other two rungs still answer for it.
 function ns.SourceFor(itemID, rec, q)
   return ns.ItemSource(itemID, rec)
+    or ns.DungeonSource(itemID)
     or ns.JournalSource(itemID)
     or ns.CraftedSource(q)
 end
