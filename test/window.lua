@@ -880,6 +880,44 @@ do
       check("...cropped to shed the baked-in border",
             tex._texCoord ~= nil and tex._texCoord[1] == 0.08, tex._texCoord and tex._texCoord[1])
       check("...and masked to a circle", (tex._masks or 0) > 0, tex._masks)
+
+      -- ⚠️ THE 1px HAIRLINE (Jason, Session 260 — it is in the mocks). WoW has
+      -- no stroke on a texture and Style.Rim's four straight edges cannot
+      -- follow a curve, so the border is a second disc one pixel larger
+      -- sitting behind the icon. It needs its OWN mask: a MaskTexture is sized
+      -- to what it masks, so reusing the icon's would clip the ring back to
+      -- the icon's bounds and draw nothing — which would look exactly like a
+      -- border that was never added.
+      local ring = tex.border
+      check("...and carries a 1px border", ring ~= nil)
+      if ring then
+        check("......masked to a circle of its own", (ring._masks or 0) > 0, ring._masks)
+        local tl = ring._points and ring._points[1]
+        check("......inset one pixel outside the icon",
+              tl and tl[4] == -1 and tl[5] == 1,
+              tl and ("%s,%s"):format(tostring(tl[4]), tostring(tl[5])))
+        -- Compared against the TOKEN, not a literal: the point is that the ring
+        -- takes the palette's accent, so a check written as #9f50d4 would pass
+        -- while quietly no longer being the same colour the chips and the
+        -- OBTAINED BY heading use.
+        local want = ns.Style.COLOR[ns.Style.ICON_BORDER.color]
+        local got = ring._color
+        check("......in the design's accent, the same token the chips take",
+              got ~= nil and math.abs(got[1] - want.r) < 0.01
+                and math.abs(got[2] - want.g) < 0.01
+                and math.abs(got[3] - want.b) < 0.01,
+              got and ("%.3f,%.3f,%.3f"):format(got[1], got[2], got[3]))
+
+        -- ⚠️ AND IT FOLLOWS THE ICON. Hiding a texture does not hide another
+        -- behind it, and these icons are hidden in five places — a ring left
+        -- alone draws a violet circle where no icon is. Bound in Style.Round
+        -- rather than at the call sites, so this is the check that the binding
+        -- actually holds.
+        tex:Hide()
+        check("......and disappears with the icon", not ring:IsShown())
+        tex:Show()
+        check("......and comes back with it", ring:IsShown())
+      end
     end
   end
 

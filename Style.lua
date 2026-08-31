@@ -837,7 +837,22 @@ end
 --- The mask must be anchored to the texture rather than to its parent: the
 --- portraits are 28px inside a 200px row, and a mask sized to the row would
 --- round the row.
-function Style.Round(parent, tex)
+--- The hairline that runs round a circular icon.
+---
+--- #9F50D4, which is the palette's `accent` — Jason's own value from the mocks
+--- (Session 260), not a colour chosen here to look right. It is the same violet
+--- the OBTAINED BY heading, the TIER PIECE chip and the MODERATE badge take, so
+--- the ring is the design's existing purple rather than a fifth edge colour.
+---
+--- ⚠️ ONE COLOUR, DELIBERATELY. The mocks use the blush for a SELECTED icon;
+--- Jason's call was that the second state is not worth the complexity, so this
+--- is a single token and every circular icon takes it. If that changes, it
+--- changes here and nowhere else.
+Style.ICON_BORDER = { color = "accent", alpha = 1, width = 1 }
+
+--- Give a texture a circular mask. Returns the mask, or nil if the client
+--- would not supply one.
+local function circleMask(parent, tex)
   if not parent or not tex or not parent.CreateMaskTexture then return end
   local ok, mask = pcall(parent.CreateMaskTexture, parent)
   if not ok or not mask then return end
@@ -870,6 +885,70 @@ function Style.Round(parent, tex)
 
   mask:SetAllPoints(tex)
   if tex.AddMaskTexture then pcall(tex.AddMaskTexture, tex, mask) end
+  return mask
+end
+
+--- Round a texture, and draw the design's 1px hairline around it.
+---
+--- ⚠️ THE BORDER IS A SECOND CIRCLE BEHIND THE FIRST, not a stroke — WoW has no
+--- stroke on a texture, and the four straight textures Style.Rim uses cannot
+--- follow a curve. A disc one pixel larger in the icon's own colour sits one
+--- sublevel below it, so exactly the outer pixel shows and the icon covers the
+--- rest. It needs its own mask: a MaskTexture is sized to the thing it masks,
+--- so sharing the icon's would clip the ring back to the icon's own bounds and
+--- draw nothing at all.
+---
+--- EVERY CIRCULAR ICON IN THE ADDON COMES THROUGH HERE — the Loot detail
+--- header, the Slots identity block, every Slots list row, and the boss and
+--- dungeon portraits — which is why the border goes here rather than at four
+--- call sites that would drift apart.
+---
+--- Pass opts.noBorder for a circle the design leaves bare.
+function Style.Round(parent, tex, opts)
+  local mask = circleMask(parent, tex)
+  if not mask then return end
+  if opts and opts.noBorder then return mask end
+
+  local B = Style.ICON_BORDER
+  local col = B and Style.COLOR[B.color]
+  if not col then return mask end
+  local w = B.width or 1
+
+  -- One sublevel below the icon, on the icon's OWN layer, so the ring cannot
+  -- land above it or behind an unrelated background.
+  local layer, sub = "ARTWORK", 0
+  if tex.GetDrawLayer then
+    local l, s = tex:GetDrawLayer()
+    layer, sub = l or layer, s or 0
+  end
+  local ok, ring = pcall(parent.CreateTexture, parent, nil, layer, nil,
+    math.max(-8, (sub or 0) - 1))
+  if not ok or not ring then return mask end
+
+  ring:SetColorTexture(Style.rgb(col))
+  ring:SetAlpha(B.alpha or 1)
+  ring:SetPoint("TOPLEFT", tex, "TOPLEFT", -w, w)
+  ring:SetPoint("BOTTOMRIGHT", tex, "BOTTOMRIGHT", w, -w)
+  circleMask(parent, ring)
+
+  -- ⚠️ THE RING FOLLOWS THE ICON BY CONSTRUCTION, NOT BY CALL SITES REMEMBERING
+  -- (Session 260). Hiding a texture does not hide another texture behind it, and
+  -- these icons are hidden and shown in five places already — the detail header
+  -- on an empty pane, and the boss portrait swapping with its initial-bearing
+  -- fallback. Every site that forgot would draw a stray violet circle where an
+  -- icon is not, and the sixth site added next month would forget again.
+  --
+  -- Wrapping the instance's own Show/Hide is the addon-standard way to bind two
+  -- regions that WoW gives no parent-child relationship: a texture cannot own
+  -- another texture, and a texture has no scripts to hook.
+  tex.border = ring
+  local show, hide = tex.Show, tex.Hide
+  tex.Show = function(self, ...) if self.border then self.border:Show() end return show(self, ...) end
+  tex.Hide = function(self, ...) if self.border then self.border:Hide() end return hide(self, ...) end
+  tex.SetShown = function(self, v) if v then self:Show() else self:Hide() end end
+  -- Matches whatever the icon already is, so a texture built hidden does not
+  -- leave its ring on screen alone.
+  ring:SetShown(tex:IsShown())
   return mask
 end
 

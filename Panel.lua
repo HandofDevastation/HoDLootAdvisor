@@ -3273,6 +3273,8 @@ function fillBossTile(tile, en)
   tile.art:SetTexture(("Interface\\AddOns\\HoDLootAdvisor\\Media\\%s\\%d.png")
     :format(folder, b.id))
   local drew = tile.art:GetTexture() ~= nil
+  -- Both of these are round and exactly one is ever shown, so each carries its
+  -- own 1px ring — which follows it automatically; see Style.Round.
   tile.art:SetShown(drew)
   tile.fallback:SetShown(not drew)
   tile.initial:SetText(drew and "" or (b.name or "?"):sub(1, 1):upper())
