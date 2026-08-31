@@ -237,7 +237,7 @@ local function buildItemRow(parent, i)
     -- ⚠️ THE GAME'S OWN ITEM CARD, DELIBERATELY. Stats, sockets, set bonuses
     -- and the upgrade track are Blizzard's to draw; Tip.lua is for the addon's
     -- own explanatory tooltips. The S254 rule names both halves.
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
     GameTooltip:SetHyperlink(link)
     GameTooltip:Show()
   end)
@@ -267,7 +267,7 @@ local function buildItemRow(parent, i)
 
   row.del:SetScript("OnEnter", function(self)
     self.x:SetTextColor(unpack(RED))
-    ns.Tip:SetOwner(self, "ANCHOR_RIGHT")
+    ns.Tip:SetOwner(self, "ANCHOR_CURSOR")
     ns.Tip:SetText("Remove This Drop", 1, 1, 1)
     ns.Tip:AddLine("Deletes only this item. The rest of the run is kept.", 0.8, 0.8, 0.8, true)
     ns.Tip:Show()
@@ -359,8 +359,8 @@ local function build()
     if frame.bgTex then frame.bgTex:Hide() end
     if frame.headTex then frame.headTex:Hide() end
     if frame.headLine then frame.headLine:Hide() end
+    -- No rim: the fill is the window, exactly as on the panel.
     S.Surface(frame, S.COLOR.windowGround, 1)
-    S.Rim(frame, S.COLOR.rim, 0.4)
     S.Lockup(frame, LOG_X, 30)
   end
 
@@ -464,7 +464,7 @@ local function build()
   if frame.tag.Repaint then frame.tag:Repaint() end
   frame.tag:SetScript("OnClick", function() RecordWindow.ToggleKind() end)
   frame.tag:SetScript("OnEnter", function(self)
-    ns.Tip:SetOwner(self, "ANCHOR_RIGHT")
+    ns.Tip:SetOwner(self, "ANCHOR_CURSOR")
     ns.Tip:SetText("Guild or Personal", 1, 1, 1)
     ns.Tip:AddLine("Guild runs are what the website's loot history is for. Personal runs stay here, in the addon, and are left out of the bulk export.", 0.8, 0.8, 0.8, true)
     ns.Tip:AddLine("Set automatically — raid group means guild — and always yours to change.", 0.8, 0.8, 0.8, true)
@@ -481,7 +481,7 @@ local function build()
   if not S then frame.del:SetText("Delete Run") end
   frame.del:SetScript("OnClick", function() RecordWindow.ConfirmDelete() end)
   frame.del:SetScript("OnEnter", function(self)
-    ns.Tip:SetOwner(self, "ANCHOR_RIGHT")
+    ns.Tip:SetOwner(self, "ANCHOR_CURSOR")
     ns.Tip:SetText("Delete Run", 1, 1, 1)
     ns.Tip:AddLine("Removes only the selected instance run. Everything else is kept.", 0.8, 0.8, 0.8, true)
     ns.Tip:Show()
@@ -499,7 +499,7 @@ local function build()
     if state.selected then RecordWindow.ShowExport({ index = state.selected }) end
   end)
   frame.expSel:SetScript("OnEnter", function(self)
-    ns.Tip:SetOwner(self, "ANCHOR_LEFT")
+    ns.Tip:SetOwner(self, "ANCHOR_CURSOR")
     ns.Tip:SetText("Export This Run", 1, 1, 1)
     ns.Tip:AddLine("Just the selected run — a few KB, and the only way a Personal run ever leaves the addon.", 0.8, 0.8, 0.8, true)
     ns.Tip:Show()
@@ -517,7 +517,7 @@ local function build()
     RecordWindow.ShowExport({ kind = ns.Record.GUILD })
   end)
   frame.expAll:SetScript("OnEnter", function(self)
-    ns.Tip:SetOwner(self, "ANCHOR_LEFT")
+    ns.Tip:SetOwner(self, "ANCHOR_CURSOR")
     ns.Tip:SetText("Export Guild Loot", 1, 1, 1)
     ns.Tip:AddLine("Every Guild run, for pasting into the website's loot import. Personal runs are never included here.", 0.8, 0.8, 0.8, true)
     ns.Tip:AddLine("The site de-duplicates, so importing this alongside HoDLootTracker's export is harmless.", 0.8, 0.8, 0.8, true)

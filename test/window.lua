@@ -68,9 +68,37 @@ function real.GetStringWidth(self)
 end
 function real.SetFont(self, path, size) self._font, self._size = path, size; return true end
 
-function real.Show(self) self._shown = true end
-function real.Hide(self) self._shown = false end
-function real.SetShown(self, v) self._shown = v and true or false end
+-- ⚠️ Show AND Hide FIRE THEIR SCRIPTS, BECAUSE THE CLIENT'S DO (Session 258).
+-- Without this the stub is quieter than the runtime in a way that hides real
+-- behaviour rather than real errors: ns.TrackWindow hooks OnShow/OnHide to keep
+-- the window stack that Escape walks, so every window opened in the harness was
+-- invisible to it and the stack was permanently empty. The addon was correct;
+-- the double simply never told it anything had opened.
+--
+-- Guarded against re-entry: a handler that hides its own frame would otherwise
+-- recurse, and OnHide legitimately does that in a couple of places.
+local function fire(self, which)
+  local fn = self.scripts and self.scripts[which]
+  if not fn or self._firing then return end
+  self._firing = true
+  local ok, err = pcall(fn, self)
+  self._firing = false
+  if not ok then error(err, 0) end
+end
+
+function real.Show(self)
+  local was = self._shown
+  self._shown = true
+  if not was then fire(self, "OnShow") end
+end
+function real.Hide(self)
+  local was = self._shown
+  self._shown = false
+  if was then fire(self, "OnHide") end
+end
+function real.SetShown(self, v)
+  if v then real.Show(self) else real.Hide(self) end
+end
 function real.IsShown(self) return self._shown end
 function real.IsVisible(self) return self._shown end
 
@@ -709,6 +737,131 @@ do
     check("...and none of them is a label with nothing beside it",
           #missing == 0, table.concat(missing, ", "))
   end
+end
+
+
+header("What the design actually says (Session 258)")
+
+-- ⚠️ THIS BLOCK EXISTS BECAUSE THE SUITE COULD NOT SEE A SINGLE ONE OF THESE.
+-- Every check below is something Jason had to find by opening the addon and
+-- comparing it to Figma himself, while 78 green checks said the panel was fine.
+-- "No runtime error" is not "matches the design", and the gap between those two
+-- was the whole of this session's failure. These pin the VALUES.
+do
+  local function hex(c)
+    if not c then return "nil" end
+    return string.format("#%02x%02x%02x@%.2f", math.floor((c[1] or 0) * 255 + 0.5),
+      math.floor((c[2] or 0) * 255 + 0.5), math.floor((c[3] or 0) * 255 + 0.5), c[4] or 1)
+  end
+
+  -- The window ground, and the border that should not exist.
+  check("the panel's ground is #0c0721",
+        hex(panel.bgTex and panel.bgTex._color) == "#0c0721@1.00",
+        hex(panel.bgTex and panel.bgTex._color))
+  check("the panel has NO outer border", panel.rim == nil)
+
+  -- The footer is a wash, not a rule. Read from the footer's own SVG:
+  -- fill="#AC7666" fill-opacity="0.1".
+  local footBg
+  for _, r in ipairs({ panel.foot:GetRegions() }) do
+    if r._color then footBg = r._color end
+  end
+  check("the footer is #ac7666 at 10%, a fill rather than a border",
+        hex(footBg) == "#ac7666@0.10", hex(footBg))
+
+  -- Every rule in the design is the same warm blush at 30%.
+  local rules, wrong = 0, nil
+  for _, r in ipairs({ panel:GetRegions() }) do
+    local c = r._color
+    if c and (c[4] or 1) < 1 and c[4] > 0.2 and c[4] < 0.4 then
+      rules = rules + 1
+      if hex(c) ~= "#ac7666@0.30" then wrong = hex(c) end
+    end
+  end
+  check("every separator is #ac7666 at 30%", rules > 0 and wrong == nil,
+        wrong or "no rules found")
+
+  -- The rail blocks are fills. Style.Surface used to rim everything it touched.
+  check("a Standings rail block has no border", panel.rail[1].box.rim == nil)
+  check("the Slots OBTAINED BY panel has no border", panel.slotPanel.rim == nil)
+
+  -- Four chips: three BIS contexts can apply at once, and the classification
+  -- chip comes after them.
+  check("the Slots header has four chip slots", #panel.slotHead.chips == 4)
+
+  -- ⚠️ NEVER AN ITEM ID ON SCREEN. This is what the whole Slots page rendered.
+  do
+    local slots = panel.tabs.Slots
+    slots.scripts.OnClick(slots)
+    local bad
+    for i = 1, #panel.slotRows do
+      panel.slotRows[i].scripts.OnClick(panel.slotRows[i])
+      for _, r in ipairs(panel.slotListRows) do
+        local t = r:IsShown() and r.name._text or nil
+        if t and t:match("^item:%d+$") then bad = t end
+      end
+      if panel.slotHead:IsShown() then
+        local t = panel.slotHead.name._text
+        if t and t:match("^item:%d+$") then bad = t end
+      end
+    end
+    check("no row on the Slots page shows a raw item id", bad == nil, bad)
+  end
+
+  -- Post belongs to Current Drops only.
+  do
+    local loot = panel.tabs.Loot
+    loot.scripts.OnClick(loot)
+    -- Driven through the switch a person actually clicks, not a setter.
+    panel.swSource.scripts.OnClick(panel.swSource)
+    ns.Panel.Refresh()
+    check("Post is hidden on the Full Loot Table", not panel.post:IsShown())
+  end
+
+  -- Escape closes ONE window, the most recent.
+  do
+    for i = #ns.windowStack, 1, -1 do ns.EscapeTop() end
+    ns.Panel.Show()
+    ns.LoadWindow.Toggle()
+    ns.RecordWindow.Toggle()
+    ns.Settings.Toggle()
+    local depth = #ns.windowStack
+    check("all four windows are on the stack", depth == 4, depth)
+    local first = ns.EscapeTop()
+    check("Escape closes Settings first, not everything",
+          first == _G.HoDLootAdvisorConfigFrame and #ns.windowStack == 3,
+          ("closed %s, %d left"):format(tostring(first and first:GetName()), #ns.windowStack))
+    check("...then the Loot Log", ns.EscapeTop() == _G.HoDLootAdvisorLootLog)
+    check("...then the Import window", ns.EscapeTop() == _G.HoDLootAdvisorLoadFrame)
+    check("...then the panel", ns.EscapeTop() == panel)
+  end
+
+  -- The size setting governs every window, not just the panel.
+  do
+    check("all four windows are registered for scaling",
+          #ns.scaledWindows >= 4, #ns.scaledWindows)
+    ns.Settings.Set("panelScale", 80)
+    ns.ApplyWindowScale()
+    local missed = {}
+    for _, f in ipairs(ns.scaledWindows) do
+      local want = (f._baseScale or 1) * 0.8
+      if math.abs((f:GetScale() or 1) - want) > 0.001 then
+        missed[#missed + 1] = tostring(f:GetName())
+      end
+    end
+    check("...and every one of them took the new size", #missed == 0,
+          table.concat(missed, ", "))
+    ns.Settings.Set("panelScale", 100)
+    ns.ApplyWindowScale()
+  end
+
+  -- The settings window may not be taller than the addon window.
+  check("the Settings window is no taller than the panel",
+        ns.Settings.WindowHeight() <= 600, ns.Settings.WindowHeight())
+  check("...and its rows scroll", _G.HoDLootAdvisorConfigFrame.scroll ~= nil)
+  check("...because its content is genuinely taller than it fits",
+        ns.Settings.ContentHeight() > ns.Settings.WindowHeight() - 234,
+        ns.Settings.ContentHeight())
 end
 
 -- ── Report ─────────────────────────────────────────────────────────────────

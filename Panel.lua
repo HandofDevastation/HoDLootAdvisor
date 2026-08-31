@@ -348,9 +348,20 @@ local RAIL = {
   -- off the node: "#6" inherits the block's white, while the attendance "2" sits
   -- inside a blush run that also carries its "of 3" suffix.
   bigColor = { "white", nil, "body", nil },
-  -- Earned/Spent's two lines are 14px, not the 11px the other blocks use — they
-  -- are figures rather than captions.
-  lineSize = { nil, 14, nil, nil },
+
+  -- ⚠️ EVERY LINE'S OFFSET IS THE NODE'S OWN LEADING, NOT A DERIVED PITCH
+  -- (Jason, Session 258: "the spacing is eye-watering"). The four blocks do not
+  -- share a rhythm — Earned/Spent stacks two 14px figures at 21px leading while
+  -- Last Item Won stacks three 11px lines at 16.5 — so one `lineY + 16` ladder
+  -- spread one block out and crushed another. Offsets are from the top of the
+  -- block's own box; the mock centres a content box of exactly box height minus
+  -- 20, which is why every block starts at 10.
+  layout = {
+    { head = 10, big = 22, lines = { 56 },         lineSize = 11 },
+    { head = 10,           lines = { 24, 45 },     lineSize = 14 },
+    { head = 10, big = 22, lines = { 56 },         lineSize = 11 },
+    { head = 10,           lines = { 24, 40, 56 }, lineSize = 11 },
+  },
 }
 local ST_HEAD_Y = 132
 local ST_TOP, ST_PITCH = 157, 20
@@ -575,11 +586,19 @@ local function atRight(fs, right, y, width)
   return fs
 end
 
+--- A horizontal rule.
+---
+--- ⚠️ #AC7666 AT 30%, WHICH IS `rule` (Jason, Session 258). It was the RIM
+--- colour at 25% — #d9cee2, a cool lilac — and the design's rules are the warm
+--- blush the title gradient ends in. Two greys that are easy to mistake for one
+--- another on screen and are not the same value; the mock names the second, and
+--- it is the same colour the row rules, the MINOR badge and the footer wash all
+--- take. One warm colour running through the whole panel.
 local function divider(parent, x, y, w)
   local S = ns.Style
   local t
   if S then
-    t = S.Divider(parent, S.COLOR.rim, 0.25)
+    t = S.Divider(parent, S.COLOR.rule, 0.3)
   else
     t = parent:CreateTexture(nil, "ARTWORK")
     t:SetColorTexture(1, 1, 1, 0.15)
@@ -803,7 +822,7 @@ local function buildBossTile(parent, i)
   end)
   tile:SetScript("OnEnter", function(self)
     if not self.bossName then return end
-    ns.Tip:SetOwner(self, "ANCHOR_BOTTOM")
+    ns.Tip:SetOwner(self, "ANCHOR_CURSOR")
     ns.Tip:SetText(self.bossName, 1, 1, 1)
     if (self.bossBis or 0) > 0 then
       ns.Tip:AddLine(("%d best-in-slot for you here"):format(self.bossBis), 1, 0.957, 0.408)
@@ -926,15 +945,33 @@ local function buildRankRow(parent, i)
   -- ⚠️ IT MUST RE-SHOW THE ROW HIGHLIGHT. A mouse-enabled child takes the hover,
   -- so the row's OnLeave fires as the pointer crosses into this — leaving the
   -- highlight off while the pointer is still visibly on the row.
+  --- ⚠️ THE HIT AREA FOLLOWS THE BADGE, NOT THE OLD `upgrade` FONTSTRING
+  --- (Session 258). It was anchored to row.upgrade — which the redesign BLANKS,
+  --- and which is built with an explicit width of 0 — so the frame collapsed to
+  --- nothing and the breakdown tooltip became unreachable. It was still built,
+  --- still correct, and could not be pointed at; Jason reported it as gone.
+  ---
+  --- The badge moved into a CHIP when the panel was rebuilt, and nothing
+  --- re-pointed this at it. Re-anchored after every layout, because a chip's
+  --- width is its own label's and is only known once it is Set.
   row.scoreHit = CreateFrame("Frame", nil, row)
-  row.scoreHit:SetPoint("TOPLEFT", row.upgrade, "TOPLEFT", 0, 3)
-  row.scoreHit:SetPoint("BOTTOMRIGHT", row.upgrade, "BOTTOMRIGHT", 0, -3)
   row.scoreHit:EnableMouse(true)
+
+  function row:AnchorScoreHit()
+    local target = (self.chips[1] and self.chips[1]:IsShown()) and self.chips[1]
+      or self.upgrade
+    self.scoreHit:ClearAllPoints()
+    self.scoreHit:SetPoint("TOPLEFT", target, "TOPLEFT", 0, 3)
+    self.scoreHit:SetPoint("BOTTOMRIGHT", target, "BOTTOMRIGHT", 0, -3)
+    -- A zero-width target can still be pointed at nowhere; hide the hit frame
+    -- rather than leaving an invisible 0x20 catcher on the row.
+    self.scoreHit:SetShown((target:GetWidth() or 0) > 0)
+  end
   row.scoreHit:SetScript("OnEnter", function(self)
     local r = row.scoreInfo
     row.hl:Show()
     if not r then return end
-    ns.Tip:SetOwner(self, "ANCHOR_RIGHT")
+    ns.Tip:SetOwner(self, "ANCHOR_CURSOR")
     ns.Tip:AddLine("How this score was reached", 1, 1, 1)
 
     if not r.factors then
@@ -997,7 +1034,7 @@ local function buildRankRow(parent, i)
     -- near enough to explain itself — the sentence lives here.
     if not self.itemID then
       if self.srcHelp or self.splitHelp then
-        ns.Tip:SetOwner(self, "ANCHOR_RIGHT")
+        ns.Tip:SetOwner(self, "ANCHOR_CURSOR")
         if self.srcHelp then
           ns.Tip:AddLine(self.srcName or "", 1, 1, 1)
           ns.Tip:AddLine(self.srcHelp, 0.6, 0.6, 0.7, true)
@@ -1013,7 +1050,10 @@ local function buildRankRow(parent, i)
     end
     local link = self.link or ns.ItemLinkFor(self.itemID)
     if not link then return end
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    -- The other half of the exclusion in Tip:Show — whichever opens last wins,
+    -- and neither is ever left behind the other.
+    ns.Tip:Hide()
+    GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
     GameTooltip:SetHyperlink(link)
     GameTooltip:AddLine(ns.Targets and ns.Targets.Has(self.itemID)
       and "Right-click to stop targeting." or "Right-click to target.", 0.6, 0.6, 0.7)
@@ -1080,32 +1120,61 @@ end
 --- THE HEADING IS THE HEADING PURPLE (#9f50d4), NOT `railHead` (#936bff). Those
 --- are neighbours and easy to mistake for each other; the mock names the first,
 --- which is the same purple the table's column headers take.
-local function buildRailBlock(parent, y, compact, h)
+--- Pin a fontstring's box so a TOPLEFT anchor means what it says.
+---
+--- ⚠️ WITHOUT THIS A 34px STRING DRAWS WHEREVER ITS LINE BOX PUTS IT, which is
+--- most of what made the rail's spacing wrong: the anchor was right and the
+--- glyphs sat well below it, so every gap read as far larger than the design's.
+local function pinLine(f, y, w, h)
+  f:ClearAllPoints()
+  f:SetPoint("TOPLEFT", RAIL.pad, -y)
+  f:SetWidth(w)
+  f:SetHeight(h)
+  f:SetJustifyV("TOP")
+  return f
+end
+
+local function buildRailBlock(parent, y, index, h)
   local b = {}
+  local L = RAIL.layout[index]
 
   b.box = CreateFrame("Frame", nil, parent)
   b.box:SetSize(RAIL.w, h or 86)
   b.box:SetPoint("TOPLEFT", RAIL.x, -y)
+  -- A FILL, no border — the design separates the rail from the table with this
+  -- wash rather than with an edge.
   if ns.Style then ns.Style.Surface(b.box, ns.Style.COLOR.rule, 0.1) end
 
   local innerW = RAIL.w - RAIL.pad * 2
-  b.head = at(text(b.box, "bold", "head", "accent"), RAIL.pad, RAIL.pad, innerW)
+  b.head = pinLine(text(b.box, "bold", "head", "accent"), L.head, innerW, 14)
 
   -- 34px, and there is no token for it: it appears twice on this one tab and
   -- nowhere else, so it is fed per instance rather than added to the scale.
-  b.big = at(text(b.box, "bold", "title", "white"), RAIL.pad, RAIL.pad + 14, innerW)
+  b.big = text(b.box, "bold", "title", "white")
   if ns.Style then ns.Style.SetFont(b.big, ns.Style.FONT.bold, 34) end
-  -- Sits on the big figure's baseline, for the "of 3" in "2 of 3".
-  b.bigSuffix = at(text(b.box, "light", "rank", "body"), RAIL.pad, RAIL.pad + 36, innerW)
+  pinLine(b.big, L.big or L.head, innerW, 36)
+  b.big:SetShown(L.big ~= nil)
+  -- Rides on the figure's own baseline, for the "of 3" in "2 of 3".
+  b.bigSuffix = text(b.box, "light", "rank", "body")
+  b.bigSuffix:ClearAllPoints()
+  b.bigSuffix:SetPoint("BOTTOMLEFT", b.big, "BOTTOMLEFT", 0, 4)
 
-  -- 20 clears the 12px heading with a hair of breathing room; 52 clears the
-  -- heading AND the 34px figure. Line pitch is 16 either way.
-  local lineY = compact and 20 or 52
-  b.line1 = at(text(b.box, "light", "name", "white"), RAIL.pad, lineY, innerW)
-  b.line2 = at(text(b.box, "light", "name", "white"), RAIL.pad, lineY + 16, innerW)
-  -- The age line is the flat grey the mock names, not the white ramp: it is the
-  -- least important line on the tab and the only one given its own hue.
-  b.line3 = at(text(b.box, "light", "name", "grey"), RAIL.pad, lineY + 32, innerW)
+  local lines = {}
+  for i, ly in ipairs(L.lines) do
+    -- The third line is the flat grey the mock names for the age — the least
+    -- important line on the tab and the only one given its own hue.
+    local colour = (i == 3) and "grey" or "white"
+    lines[i] = pinLine(text(b.box, "light", "name", colour), ly, innerW,
+      L.lineSize + 5)
+    if ns.Style then ns.Style.SetFont(lines[i], ns.Style.FONT.light, L.lineSize) end
+  end
+  -- Blocks have two or three lines; the absent one is a real fontstring parked
+  -- off the layout so every call site can write to it without checking.
+  for i = #lines + 1, 3 do
+    lines[i] = pinLine(text(b.box, "light", "name", "white"), 0, innerW, 1)
+    lines[i]:Hide()
+  end
+  b.line1, b.line2, b.line3 = lines[1], lines[2], lines[3]
   return b
 end
 
@@ -1413,7 +1482,7 @@ local function buildLootControls()
   -- switch itself now that the pill it hung from is gone.
   if frame.swFilter then
     frame.swFilter:SetScript("OnEnter", function(self)
-      ns.Tip:SetOwner(self, "ANCHOR_RIGHT")
+      ns.Tip:SetOwner(self, "ANCHOR_CURSOR")
       ns.Tip:SetText("Usable Only", 1, 1, 1)
       ns.Tip:AddLine("Hides items your class cannot equip.", 0.8, 0.8, 0.8, true)
       ns.Tip:AddLine("Anything you have targeted stays visible either way — "
@@ -1491,9 +1560,10 @@ local function buildRunnerTab()
     local t = frame:CreateTexture(nil, "ARTWORK")
     t:SetSize(RN_COL_W, 1)
     t:SetPoint("TOPLEFT", RN_COL_X - 1, -y)
+    -- The same #AC7666 at 30% every other rule in the design uses.
     if ns.Style then
-      t:SetColorTexture(ns.Style.COLOR.rim.r, ns.Style.COLOR.rim.g,
-        ns.Style.COLOR.rim.b, 0.25)
+      t:SetColorTexture(ns.Style.COLOR.rule.r, ns.Style.COLOR.rule.g,
+        ns.Style.COLOR.rule.b, 0.3)
     end
     return t
   end
@@ -1549,14 +1619,10 @@ local function buildStandingsTab()
 
   frame.rail = {}
   for i, y in ipairs(RAIL.y) do
-    local b = buildRailBlock(frame, y, RAIL.compact[i], RAIL.h[i])
+    local b = buildRailBlock(frame, y, i, RAIL.h[i])
     local S = ns.Style
     if S and RAIL.bigColor[i] then
       b.big:SetTextColor(S.rgb(S.COLOR[RAIL.bigColor[i]]))
-    end
-    if S and RAIL.lineSize[i] then
-      S.SetFont(b.line1, S.FONT.light, RAIL.lineSize[i])
-      S.SetFont(b.line2, S.FONT.light, RAIL.lineSize[i])
     end
     frame.rail[i] = b
   end
@@ -1568,8 +1634,10 @@ local function buildStandingsTab()
     at(text(frame, "bold", "head", "accent"), ST_NAME, ST_HEAD_Y, 80),
     atRight(text(frame, "bold", "head", "accent"), ST_EP_R, ST_HEAD_Y, 40),
     atRight(text(frame, "bold", "head", "accent"), ST_GP_R, ST_HEAD_Y, 40),
-    atRight(text(frame, "bold", "head", "accent"), ST_PR_R, ST_HEAD_Y, 60),
-    atRight(text(frame, "bold", "head", "accent"), ST_LAST_R, ST_HEAD_Y, 60),
+    atRight(text(frame, "bold", "head", "accent"), ST_PR_R, ST_HEAD_Y, 80),
+    -- 90, not 60: "LAST ITEM" in Bold 12 does not fit 60 and was rendering as
+    -- "LAST IT…". Measured against the bundled face rather than nudged.
+    atRight(text(frame, "bold", "head", "accent"), ST_LAST_R, ST_HEAD_Y, 90),
   }
   frame.stHead[1]:SetText("RAIDER")
   frame.stHead[2]:SetText("EP")
@@ -1591,6 +1659,51 @@ local function buildStandingsTab()
   frame.stNote = at(text(frame, "body", "small", "textDim"), ST_NAME, ST_TOP + 8, 340)
   frame.stNote:SetWordWrap(true)
 
+end
+
+--- The three fontstrings a source line is made of: "From ", the BOSS, and the
+--- rest. Built as a group because the mock changes WEIGHT mid-line and a single
+--- fontstring cannot.
+---
+--- ⚠️ COLOUR IS NOT A SUBSTITUTE FOR WEIGHT, and treating it as one is what
+--- shipped first (Jason, Session 258: "you didn't honor the font weight I had
+--- applied to the location of the drop"). The mock sets the boss in Manrope
+--- BOLD white against Light blush; the first version kept one Light fontstring
+--- and only recoloured the boss, which loses the emphasis the design is
+--- actually made of. Three strings chained left-to-right costs two extra
+--- widgets and reproduces it exactly.
+local function buildSourceLine(parent, y, width)
+  local g = {}
+  g.pre  = at(text(parent, "light", "label", "body"), 0, y, 40)
+  g.boss = text(parent, "bold", "label", "white")
+  g.rest = text(parent, "light", "label", "body")
+  g.boss:ClearAllPoints()
+  g.boss:SetPoint("LEFT", g.pre, "LEFT", 0, 0)
+  g.rest:ClearAllPoints()
+  g.rest:SetPoint("LEFT", g.boss, "LEFT", 0, 0)
+  g.width = width
+
+  --- Lay the three runs end to end. Each anchor depends on the width of the run
+  --- before it, so this has to run AFTER the strings are set.
+  function g:Set(src)
+    if not src or not src.boss then
+      self.pre:SetText(""); self.boss:SetText(""); self.rest:SetText("")
+      return
+    end
+    self.pre:SetText("From ")
+    self.pre:SetWidth(0)
+    self.boss:SetText(src.boss)
+    self.rest:SetText(src.instance and (", " .. src.instance) or "")
+    self.boss:ClearAllPoints()
+    self.boss:SetPoint("LEFT", self.pre, "LEFT", (self.pre:GetStringWidth() or 0), 0)
+    self.rest:ClearAllPoints()
+    self.rest:SetPoint("LEFT", self.boss, "LEFT", (self.boss:GetStringWidth() or 0), 0)
+  end
+
+  function g:SetShown(on)
+    self.pre:SetShown(on); self.boss:SetShown(on); self.rest:SetShown(on)
+  end
+  return g
 end
 
 --- A right-aligned chip row: chips are laid out from the RIGHT edge inwards,
@@ -1628,15 +1741,12 @@ local function buildSlotListRow(parent, i)
   row.check:Hide()
 
   row.chips = {}
-  for ci = 1, 3 do
+  for ci = 1, 4 do
     row.chips[ci] = ns.Style and ns.Style.Chip(row, "filled")
   end
 
-  -- 10px, with the BOSS in bold white inside an otherwise blush line. Two
-  -- fontstrings would let the bold half drift, so this is one string coloured
-  -- inline — the weight difference the mock draws cannot survive in a single
-  -- fontstring, and colour is the half that carries the meaning.
-  row.source = at(text(row, "light", "label", "body"), 0, SL.listSourceY, SL.paneW)
+  -- 10px, "From " light blush, the BOSS bold white, then the instance.
+  row.source = buildSourceLine(row, SL.listSourceY, SL.paneW)
 
   row.rule = divider(row, 0, SL.listPitch - 1, SL.paneW)
 
@@ -1651,8 +1761,7 @@ local function buildSlotRoute(parent, i)
 
   r.name = at(text(r, "regular", "row", "body"), 0, 0, 300)
   r.chip = ns.Style and ns.Style.Chip(r, "filled")
-  r.source = at(text(r, "light", "label", "body"), 0, SL.routeLineY,
-    SL.paneW - SL.panelPadX * 2)
+  r.source = buildSourceLine(r, SL.routeLineY, SL.paneW - SL.panelPadX * 2)
 
   r:Hide()
   return r
@@ -1687,17 +1796,27 @@ local function buildSlotsTab()
     end
     row.bg:Hide()
 
-    row.label = atRight(text(row, "light", "head", "body"), SL.labelR, 1, 80)
+    -- ⚠️ CENTRED IN THE ROW, NOT ANCHORED TO ITS TOP (Jason, Session 258:
+    -- "the gear slot names aren't vertically centered"). The mock's rows are
+    -- 29 tall with a 26-tall text box in them, so the label sits on the row's
+    -- middle beside a 20px icon that is itself centred. A TOPLEFT anchor at
+    -- y=1 put the text above the icon's centre line on every row.
+    row.label = text(row, "light", "head", "body", "RIGHT")
+    row.label:ClearAllPoints()
+    row.label:SetPoint("RIGHT", row, "LEFT", SL.labelR, 0)
+    row.label:SetWidth(80)
 
     row.icon = row:CreateTexture(nil, "ARTWORK")
     row.icon:SetSize(SL.iconSize, SL.iconSize)
-    row.icon:SetPoint("TOPLEFT", SL.iconX, -4)
+    -- Centred for the same reason: the last row is 26 tall and the rest 29, so
+    -- one constant top inset cannot centre the icon in both.
+    row.icon:SetPoint("LEFT", row, "LEFT", SL.iconX, 0)
     local tex = ns.SlotIcon and ns.SlotIcon(def)
     if tex then row.icon:SetTexture(tex) end
 
     row.check = row:CreateTexture(nil, "OVERLAY")
     row.check:SetSize(SL.checkW, SL.checkH)
-    row.check:SetPoint("TOPLEFT", SL.checkX, -((h - SL.checkH) / 2))
+    row.check:SetPoint("LEFT", row, "LEFT", SL.checkX, 0)
     row.check:SetTexture(SLOT_CHECK_TEX)
     row.check:Hide()
 
@@ -1772,8 +1891,12 @@ local function buildSlotsTab()
   frame.slotHead:SetSize(SL.paneW, SL.headNameH)
   frame.slotHead.name = at(text(frame.slotHead, "regular", "detail", "body"),
     0, 0, 300)
+  -- ⚠️ FOUR, NOT THREE (Jason, Session 258). Three BIS contexts can all apply
+  -- at once, and the classification chip (TIER PIECE) comes AFTER them — so on
+  -- a three-context item the purple chip was written into chips[4], which did
+  -- not exist, and silently vanished. The mock shows both kinds together.
   frame.slotHead.chips = {}
-  for ci = 1, 3 do
+  for ci = 1, 4 do
     frame.slotHead.chips[ci] = ns.Style and ns.Style.Chip(frame.slotHead, "filled")
   end
   -- ⚠️ WHITE OVER BLUSH HERE, the opposite way round from the rail's cards. Read
@@ -1895,7 +2018,10 @@ local function buildDetailPane()
     local itemID = Panel.CurrentItemID()
     local link = self.link or (itemID and ns.ItemLinkFor(itemID))
     if not link then return end
-    GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT")
+    -- The other half of the exclusion in Tip:Show — whichever opens last wins,
+    -- and neither is ever left behind the other.
+    ns.Tip:Hide()
+    GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
     GameTooltip:SetHyperlink(link)
     -- ⚠️ THE TARGETING HINT RIDES HERE. Nothing else in the panel says a row can
     -- be right-clicked, so this is the only place targeting is explained.
@@ -1984,10 +2110,16 @@ local function buildFooter()
   frame.foot:SetHeight(FOOT_H)
   if ns.Style then
     local S = ns.Style
+    -- ⚠️ #AC7666 AT 10%, AND NO BORDER (Jason, Session 258). Read out of the
+    -- footer's own SVG — `fill="#AC7666" fill-opacity="0.1"` — which is the
+    -- SAME treatment as the Standings rail's blocks and the Slots page's
+    -- OBTAINED BY panel: one lightening wash used everywhere the design wants a
+    -- band to sit above the ground. What was here instead painted the footer
+    -- the SAME colour as the window and then drew a rim on top, which is the
+    -- separation done backwards — a line where the design has a surface.
     local bg = frame.foot:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
-    bg:SetColorTexture(S.rgb(S.COLOR.ground))
-    S.Rim(frame.foot, S.COLOR.rim, 0.4)
+    bg:SetColorTexture(S.COLOR.rule.r, S.COLOR.rule.g, S.COLOR.rule.b, 0.1)
   end
 
   frame.gearLine1 = at(text(frame.foot, "body", "label", "body"), FOOT.textX, FOOT.line1Y, 240)
@@ -2024,7 +2156,7 @@ local function buildFooter()
   end
 
   frame.load:SetScript("OnEnter", function(self)
-    ns.Tip:SetOwner(self, "ANCHOR_TOP")
+    ns.Tip:SetOwner(self, "ANCHOR_CURSOR")
     ns.Tip:SetText("Import Raid Night", 1, 1, 1)
     ns.Tip:AddLine("Paste the export from the Loot Advisor page on the website.", 0.8, 0.8, 0.8, true)
     ns.Tip:AddLine("This is what supplies everyone's gear — the rankings need it.", 0.8, 0.8, 0.8, true)
@@ -2032,7 +2164,7 @@ local function buildFooter()
   end)
   frame.load:SetScript("OnLeave", function() ns.Tip:Hide() end)
   frame.log:SetScript("OnEnter", function(self)
-    ns.Tip:SetOwner(self, "ANCHOR_TOP")
+    ns.Tip:SetOwner(self, "ANCHOR_CURSOR")
     ns.Tip:SetText("Loot Log", 1, 1, 1)
     ns.Tip:AddLine("Every drop and every roll, recorded automatically. Review a night, "
       .. "tag a run Guild or Personal, and export for the website.", 0.8, 0.8, 0.8, true)
@@ -2061,7 +2193,7 @@ local function buildTabControls()
   frame.post:SetScript("OnEnter", function(self)
     local id = Panel.CurrentItemID()
     if not id then return end
-    ns.Tip:SetOwner(self, "ANCHOR_LEFT")
+    ns.Tip:SetOwner(self, "ANCHOR_CURSOR")
     ns.Tip:SetText("Post to chat", 1, 1, 1)
     for _, line in ipairs(ns.Loot.ChatLines(id)) do
       ns.Tip:AddLine(line, 0.8, 0.8, 0.8, true)
@@ -2107,7 +2239,7 @@ local function buildTabControls()
     Panel.Refresh()
   end)
   frame.autoPost:SetScript("OnEnter", function(self)
-    ns.Tip:SetOwner(self, "ANCHOR_LEFT")
+    ns.Tip:SetOwner(self, "ANCHOR_CURSOR")
     ns.Tip:SetText("Auto-Post Drops To Chat", 1, 1, 1)
     ns.Tip:AddLine("Posts each drop's shortlist to chat automatically, "
       .. "so the raid sees it without you pressing anything.", 0.8, 0.8, 0.8, true)
@@ -3158,6 +3290,7 @@ local function renderRanking(itemID)
         S and S.COLOR.body or nil)
     end
     row:LayoutChips()
+    row:AnchorScoreHit()
     row.upgrade:SetText("")
 
     -- One field on both paths (Loot.RankRaiders sets it, the wire carries it).
@@ -3422,7 +3555,13 @@ local function renderStandingsList()
       -- Shown BEFORE anything is written into it — see setTextForce (S254).
       row:Show()
       row.rank:SetText(tostring(r.rank))
-      row.rank:SetTextColor(unpack(MUTED))
+      -- ⚠️ BLUSH, NOT MUTED (Jason, Session 258: "the rank numbers aren't
+      -- colored or weighted properly"). The row was BUILT bold-14-blush from
+      -- node 587:1650 and then repainted grey here on every render — the build
+      -- was right and the render undid it, which is why reading either one
+      -- alone looked correct. It is the column you scan down, and the design
+      -- gives it the only weight in the table.
+      if ns.Style then row.rank:SetTextColor(ns.Style.rgb(ns.Style.COLOR.body)) end
 
       setTextForce(row.name, r.name or "?")
       local cc = CLASS_COLOR[r.class or ""] or WHITE
@@ -3506,19 +3645,6 @@ local function renderTargetsView()
       state.rankScroll + 1, math.min(total, state.rankScroll + RANK_ROWS), total) or "")
 end
 
---- "From <boss>, <instance>", with the boss carrying the emphasis.
----
---- ⚠️ THE MOCK BOLDS THE BOSS AND A FONTSTRING CANNOT CHANGE WEIGHT MID-STRING,
---- so the emphasis is carried in COLOUR instead: the boss goes white against an
---- otherwise blush line. That is a deliberate substitution, not an oversight —
---- of the two signals the design uses, colour is the one this widget has.
-local function sourceLine(src)
-  if not src or not src.boss then return "" end
-  local S = ns.Style
-  local boss = S and (S.code(S.COLOR.white) .. src.boss .. "|r") or src.boss
-  if src.instance then return "From " .. boss .. ", " .. src.instance end
-  return "From " .. boss
-end
 
 --- The chips one pick carries, in the mock's order: the BIS contexts first,
 --- then what the item IS.
@@ -3593,6 +3719,10 @@ local function renderSlots()
     local char = ns.ResolveCharacter and ns.ResolveCharacter()
     routes = ns.ObtainRoutes(single.itemID, sel.key, char) or {}
   end
+  if #routes > 0 then
+    ns.FillItemNames(routes)
+    ns.WarmItemNames(routes)
+  end
   local useSingle = (#routes > 0)
 
   frame.slotHead:SetShown(useSingle)
@@ -3604,7 +3734,10 @@ local function renderSlots()
     frame.slotHead.name:SetText(single.name or "")
     fillPickChips(frame.slotHead.chips, single)
     layoutChipsRight(frame.slotHead.chips, frame.slotHead, SL.paneW, SL.chipY - SL.headY)
-    frame.slotHead.slot:SetText(sel.label .. (single.tierPiece and ", Tier Piece" or ""))
+    -- ⚠️ THE KIND ALONE. The mock's second line reads "Tier Piece"; naming the
+    -- slot again repeats what the selected rail row already says, an arm's
+    -- length to the left.
+    frame.slotHead.slot:SetText(single.tierPiece and "Tier Piece" or sel.label)
 
     local shown = 0
     for i, r in ipairs(frame.slotRoutes) do
@@ -3615,13 +3748,13 @@ local function renderSlots()
         r:SetPoint("TOPLEFT", SL.panelPadX,
           -(SL.panelPadT + SL.headingH + SL.blockGap
             + (i - 1) * (SL.blockH + SL.blockGap)))
-        r.name:SetText(route.name or ("item:" .. tostring(route.itemID)))
+        r.name:SetText(route.name or ns.LOADING_NAME)
         if r.chip then
           r.chip:Set(route.kind, ns.Style and ns.Style.COLOR.accent)
           r.chip:ClearAllPoints()
           r.chip:SetPoint("TOPRIGHT", r, "TOPRIGHT", 0, -1)
         end
-        r.source:SetText(sourceLine(route.source))
+        r.source:Set(route.source)
         r:Show()
       else
         r:Hide()
@@ -3649,7 +3782,7 @@ local function renderSlots()
         end
         fillPickChips(row.chips, pick)
         layoutChipsRight(row.chips, row, SL.paneW, SL.listNameY + 1)
-        row.source:SetText(sourceLine(pick.source))
+        row.source:Set(pick.source)
         -- Last visible row drops its rule, the same tell the rail uses.
         if row.rule then row.rule:SetShown(picks[i + 1] ~= nil) end
         row:Show()
@@ -4135,7 +4268,13 @@ function Panel.Refresh()
 
   -- POST IS RUNNER-ONLY. Two people posting puts two different lists in raid
   -- chat for one item, and chat is the only thing a non-installer ever sees.
-  frame.post:SetShown(onLoot and (ns.Comms and ns.Comms.IsRunner and ns.Comms.IsRunner())
+  -- ⚠️ CURRENT DROPS ONLY (Jason, Session 258). Post writes a shortlist for an
+  -- item that JUST DROPPED into raid chat; on the Full Loot Table it would
+  -- announce something nobody has won and nobody is rolling on — a list for a
+  -- decision that is not being made. The runner and item-selected conditions
+  -- were already right; the view was never checked at all.
+  frame.post:SetShown(onLoot and state.source == "drops"
+    and (ns.Comms and ns.Comms.IsRunner and ns.Comms.IsRunner())
     and Panel.CurrentItemID() ~= nil)
 
   frame.runToggle:SetShown(onRunner)
@@ -4171,12 +4310,12 @@ end
 --- have snapped the window onto whole pixels, and replacing that outright would
 --- undo the crispness it bought. The baseline is remembered on first call so
 --- repeated changes compound from the same place rather than from each other.
+--- ⚠️ NOW A THIN WRAPPER OVER ns.ApplyWindowScale, WHICH DOES ALL FOUR WINDOWS.
+--- This used to scale the panel and nothing else, so the setting appeared to do
+--- nothing from inside the Settings window it was being changed in. Kept as a
+--- name because Settings' apply hook and two call sites here use it.
 function Panel.ApplyScale()
-  if not frame or not frame.SetScale then return end
-  frame._baseScale = frame._baseScale or (frame.GetScale and frame:GetScale()) or 1
-  local pct = tonumber(ns.Settings and ns.Settings.Get("panelScale")) or 100
-  if pct < 50 then pct = 50 elseif pct > 200 then pct = 200 end
-  pcall(frame.SetScale, frame, frame._baseScale * pct / 100)
+  ns.ApplyWindowScale()
 end
 
 function Panel.Show()

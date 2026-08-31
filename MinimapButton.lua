@@ -115,7 +115,7 @@ local function build()
   btn:SetScript("OnDragStop", function() btn:SetScript("OnUpdate", nil) end)
 
   btn:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+    GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
     GameTooltip:SetText("Loot Advisor", 1, 1, 1)
     GameTooltip:AddLine("Left-click: open", 0.8, 0.8, 0.8)
     GameTooltip:AddLine("Right-click: loot log", 0.8, 0.8, 0.8)

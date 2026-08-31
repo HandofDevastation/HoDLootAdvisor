@@ -80,8 +80,8 @@ local function build()
     if frame.bgTex then frame.bgTex:Hide() end
     if frame.headTex then frame.headTex:Hide() end
     if frame.headLine then frame.headLine:Hide() end
+    -- No rim: the fill is the window, exactly as on the panel.
     S.Surface(frame, S.COLOR.windowGround, 1)
-    S.Rim(frame, S.COLOR.rim, 0.4)
     S.Lockup(frame, IW.logoX, IW.logoY)
   end
 

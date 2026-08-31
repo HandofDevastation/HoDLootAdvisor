@@ -99,7 +99,10 @@ end
 
 function Tip:SetOwner(owner, anchor)
   if not frame then build() end
-  pending.owner, pending.anchor = owner, anchor or "ANCHOR_RIGHT"
+  -- ⚠️ THE DEFAULT IS THE CURSOR NOW. A call site that wants the popup pinned
+  -- to its own frame still says so; most of them never cared and only ever
+  -- wanted "near the thing I am pointing at".
+  pending.owner, pending.anchor = owner, anchor or "ANCHOR_CURSOR"
   pending.title, pending.titleColor = nil, nil
   pending.lines = {}
   return self
@@ -150,9 +153,36 @@ end
 --- Where the box goes, given the anchor the caller asked for. Clamped to the
 --- screen afterwards, because a tooltip that explains something off the edge
 --- explains nothing.
+-- How far the cursor-anchored box sits from the pointer. Right and slightly
+-- above, which is where the game's own tooltips sit and therefore where the eye
+-- already looks.
+local CURSOR_DX, CURSOR_DY = 16, -8
+
 local function place(owner, anchor, w, h)
   frame:ClearAllPoints()
-  if anchor == "ANCHOR_LEFT" then
+
+  -- ⚠️ AT THE CURSOR BY DEFAULT (Jason, Session 258: "they're not spawning at
+  -- the cursor location"). Every anchor below pins the tooltip to a FRAME, which
+  -- is what GameTooltip's ANCHOR_* names mean — and on a dense list that puts
+  -- the popup at the row's edge rather than where the pointer is, so it reads as
+  -- belonging to nothing in particular and can land half a window away from what
+  -- you are pointing at.
+  --
+  -- GetCursorPosition returns coordinates in the CURRENT UI scale, so both are
+  -- divided by UIParent's effective scale before being used as offsets from its
+  -- bottom-left. Forgetting that is the classic version of this bug: the
+  -- tooltip tracks the cursor at 100% UI scale and drifts at any other.
+  if anchor == "ANCHOR_CURSOR" or anchor == nil then
+    local ui = UIParent
+    local cx, cy = GetCursorPosition()
+    local scale = (ui and ui.GetEffectiveScale and ui:GetEffectiveScale()) or 1
+    if cx and cy and scale > 0 then
+      frame:SetPoint("BOTTOMLEFT", ui, "BOTTOMLEFT",
+        (cx / scale) + CURSOR_DX, (cy / scale) + CURSOR_DY)
+    else
+      frame:SetPoint("TOPLEFT", owner, "TOPRIGHT", 8, 0)
+    end
+  elseif anchor == "ANCHOR_LEFT" then
     frame:SetPoint("TOPRIGHT", owner, "TOPLEFT", -8, 0)
   elseif anchor == "ANCHOR_TOP" then
     frame:SetPoint("BOTTOM", owner, "TOP", 0, 8)
@@ -182,6 +212,16 @@ end
 
 function Tip:Show()
   if not frame or not pending.owner then return end
+
+  -- ⚠️ NEVER BOTH AT ONCE (Jason, Session 258: "the equipment tooltip coincides
+  -- with the addon's custom tooltips"). Ours and the game's item card are two
+  -- boxes answering two different questions, and with both anchored to the
+  -- cursor they land on the same pixels. If ours is opening, the pointer is over
+  -- one of our frames — so a GameTooltip still up belongs to the hover we are
+  -- replacing, and closing it is right rather than rude.
+  if GameTooltip and GameTooltip.IsShown and GameTooltip:IsShown() then
+    GameTooltip:Hide()
+  end
 
   -- MEASURE FIRST, LAY OUT SECOND. Every width below is what the font actually
   -- reports for that string, never an estimate — the rule this project wrote

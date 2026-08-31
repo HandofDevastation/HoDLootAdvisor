@@ -473,16 +473,52 @@ end
 ---
 --- Lives HERE rather than in Panel.lua because the harness does not load window
 --- files, and a rule this project already wrote says logic must be testable.
+--- What a row shows while the client is still fetching an item's name.
+---
+--- ⚠️ NOT THE ITEM ID (Jason, Session 258). "item:251222" is a debugging
+--- string that reached the Slots page and was the ONLY thing on it — see
+--- ns.ItemName for why. A blank row is invisible and an id is meaningless to a
+--- raider; a word that says what is happening is neither.
+---
+--- ⚠️ THE RECORDER STILL WRITES "item:<id>" AND MUST. That placeholder goes
+--- into SavedVariables and then into the export, where the SITE matches loot on
+--- item_name — so it has to stay a value Record.ResolveItemInfo can recognise
+--- and replace later. This constant is for DISPLAY only; the two are different
+--- jobs and were never the same string by design.
+ns.LOADING_NAME = "Loading…"
+
+--- An item's name, asked of every source in turn.
+---
+--- ⚠️ OUR CATALOGUE IS NOT ENOUGH AND THIS IS THE WHOLE BUG. 232 BIS items are
+--- absent from loot_items — they do not drop from a boss — so `items[id]` has
+--- nothing for them, and FillItemNames used to stop there and write the id.
+--- On the Loot tab that never showed, because entries arrive from the Encounter
+--- Journal already carrying names; on the Slots page, which is built entirely
+--- from `rankings`, it meant EVERY row read "item:251222".
+---
+--- The client knows these names. Asking it is one call, and a cold answer of nil
+--- is what WarmItemNames exists to come back from.
+function ns.ItemName(itemID, catalogue)
+  if not itemID then return nil end
+  catalogue = catalogue or ((ns.Data() or {}).items or {})
+  local rec = catalogue[itemID]
+  local fromUs = rec and ns.NonEmpty(rec.name)
+  if fromUs then return fromUs end
+
+  local getInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+  if type(getInfo) ~= "function" then return nil end
+  local ok, name = pcall(getInfo, itemID)
+  if not ok then return nil end
+  return ns.NonEmpty(name)
+end
+
 function ns.FillItemNames(entries, catalogue)
   catalogue = catalogue or ((ns.Data() or {}).items or {})
   local filled = 0
   for _, e in ipairs(entries or {}) do
     if e and (e.name == nil or e.name == "") then
-      local rec = catalogue[e.itemID]
-      local fromUs = rec and rec.name
-      if fromUs == "" then fromUs = nil end
-      -- A visible "item:270160" is a bad name; a blank row is an invisible one.
-      e.name = fromUs or ("item:" .. tostring(e.itemID))
+      -- Our catalogue, then the CLIENT, then a word rather than an id.
+      e.name = ns.ItemName(e.itemID, catalogue) or ns.LOADING_NAME
       filled = filled + 1
     end
   end
@@ -522,7 +558,10 @@ function ns.WarmItemNames(entries)
   for _, e in ipairs(entries or {}) do
     local id = e and e.itemID
     -- A name that is still the id placeholder is not a name.
-    local unnamed = (not e.name) or e.name == ""
+    -- BOTH placeholders count as unnamed: the display one this session
+    -- introduced, and the recorder's id form, which still arrives from stored
+    -- drops and is exactly what Record.ResolveItemInfo goes back for.
+    local unnamed = (not e.name) or e.name == "" or e.name == ns.LOADING_NAME
       or (id and e.name == ("item:" .. tostring(id)))
     if id and unnamed then unresolved[#unresolved + 1] = id end
   end
@@ -810,7 +849,7 @@ function ns.ObtainRoutes(itemID, slotKey, char)
     if rec.slot == "TOKEN" and ns.ItemSlot(rec) == slotKey
       and (not char or ns.CanUse(rec, char.className, char.specName)) then
       out[#out + 1] = {
-        itemID = tokenID, name = ns.NonEmpty(rec.name), kind = "TIER TOKEN",
+        itemID = tokenID, name = ns.ItemName(tokenID), kind = "TIER TOKEN",
         source = ns.ItemSource(tokenID, rec),
       }
     end
@@ -823,7 +862,7 @@ function ns.ObtainRoutes(itemID, slotKey, char)
       if q and q.catalysesInto == itemID then
         local rec = data.items[srcID]
         out[#out + 1] = {
-          itemID = srcID, name = rec and ns.NonEmpty(rec.name),
+          itemID = srcID, name = ns.ItemName(srcID),
           kind = "CATALYZE TARGET", source = ns.ItemSource(srcID, rec),
         }
       end
@@ -887,7 +926,9 @@ function ns.SlotsReport(view)
             if ns.EquippedCopy then owned = ns.EquippedCopy(slotKey, itemID) end
             bySlot[slotKey][#bySlot[slotKey] + 1] = {
               itemID = itemID,
-              name = rec and ns.NonEmpty(rec.name),
+              -- Through ns.ItemName, not rec.name: a BIS pick is usually one of
+              -- the 232 items our payload has no record of at all.
+              name = ns.ItemName(itemID),
               contexts = contexts,
               source = ns.ItemSource(itemID, rec),
               owned = owned,
@@ -2075,24 +2116,136 @@ function ns.MakeWindow(frame)
     end)
   end
 
-  -- ESCAPE CLOSES IT, the way every other window in WoW works. Blizzard's
-  -- CloseSpecialWindows() walks UISpecialFrames and hides every shown frame in
-  -- it, so ONE press closes the whole addon rather than one window per press.
+  -- ⚠️ ESCAPE CLOSES ONE WINDOW, THE MOST RECENTLY OPENED (Jason, Session 258:
+  -- "the Esc key should close them one at a time in reverse order").
   --
-  -- ⚠️ The list holds GLOBAL NAMES, not frame references, so an anonymous frame
-  -- registers nothing and fails silently. Every window here is deliberately
-  -- named for this reason — check GetName() before adding a new one.
+  -- THIS REPLACES UISpecialFrames, WHICH CANNOT DO THAT. Blizzard's
+  -- CloseSpecialWindows() walks the whole list and hides EVERY shown frame in
+  -- it, so with the panel, the import window, the loot log and settings all
+  -- open, one press closed the entire addon. That was written here as though it
+  -- were the desirable behaviour ("ONE press closes the whole addon rather than
+  -- one window per press") — it is simply what the mechanism does, and it is
+  -- not what a stack of windows should do.
   --
-  -- Registering is idempotent: MakeWindow runs once per frame at build time, but
-  -- a duplicate entry would make Blizzard hide the same frame twice per press,
-  -- and that is the kind of thing that only shows up as a weird interaction with
-  -- someone else's addon months later.
-  local name = frame.GetName and frame:GetName()
-  if not (name and UISpecialFrames) then return end
-  for _, existing in ipairs(UISpecialFrames) do
-    if existing == name then return end
+  -- The stack is ours instead, ordered by when each window was SHOWN, and the
+  -- key handler below takes the top one off.
+  ns.TrackWindow(frame)
+  -- Every window routes through here, which makes it the one place that can
+  -- know about all of them.
+  ns.RegisterScaledWindow(frame)
+end
+
+-- ---------------------------------------------------------------------------
+-- The window stack, and Escape
+-- ---------------------------------------------------------------------------
+
+--- Windows currently open, oldest first. The LAST entry is what Escape closes.
+ns.windowStack = {}
+
+local function stackRemove(frame)
+  for i = #ns.windowStack, 1, -1 do
+    if ns.windowStack[i] == frame then table.remove(ns.windowStack, i) end
   end
-  table.insert(UISpecialFrames, name)
+end
+
+--- The one frame that listens for Escape.
+---
+--- ⚠️ KEYBOARD IS ENABLED ONLY WHILE ONE OF OUR WINDOWS IS OPEN, and the handler
+--- PROPAGATES everything that is not Escape. A frame that swallows keys
+--- permanently eats movement keys and hotbars, which is the standard way this
+--- gets done wrong. An EditBox with focus still receives keys first, so typing
+--- into the import box is unaffected — and Escape there clears its focus before
+--- any of this sees it, which is the right order.
+local escCatcher
+
+local function ensureCatcher()
+  if escCatcher then return escCatcher end
+  escCatcher = CreateFrame("Frame", nil, UIParent)
+  escCatcher:SetFrameStrata("TOOLTIP")
+  escCatcher:EnableKeyboard(false)
+  if escCatcher.SetPropagateKeyboardInput then
+    escCatcher:SetPropagateKeyboardInput(true)
+  end
+  escCatcher:SetScript("OnKeyDown", function(self, key)
+    if key ~= "ESCAPE" or #ns.windowStack == 0 then
+      if self.SetPropagateKeyboardInput then self:SetPropagateKeyboardInput(true) end
+      return
+    end
+    if self.SetPropagateKeyboardInput then self:SetPropagateKeyboardInput(false) end
+    ns.EscapeTop()
+    self:EnableKeyboard(#ns.windowStack > 0)
+  end)
+  return escCatcher
+end
+
+--- Close the most recently opened window. The whole of what Escape does, split
+--- out so the headless harness can drive it — a key handler is the one part of
+--- this that no test can press.
+---
+--- Returns the frame it closed, or nil when nothing was open.
+function ns.EscapeTop()
+  local top = table.remove(ns.windowStack)
+  if top and top.Hide then top:Hide() end
+  return top
+end
+
+--- Every window the size setting governs, registered as it is built.
+---
+--- ⚠️ IT IS NOT "PANEL SIZE", IT IS ADDON SIZE (Jason, Session 258: "the
+--- scaling setting doesn't seem to impact the settings window itself. It should
+--- apply to the main addon window, the raid data import window, the loot log
+--- window and the settings window"). The setting existed to fix a mismatch
+--- between WoW's UI units and the design's pixels — that mismatch is a property
+--- of the MONITOR, so it applies to every window this addon draws, not to the
+--- one that happened to be open when the control was written.
+ns.scaledWindows = {}
+
+function ns.RegisterScaledWindow(frame)
+  if not frame then return end
+  for _, f in ipairs(ns.scaledWindows) do if f == frame then return end end
+  ns.scaledWindows[#ns.scaledWindows + 1] = frame
+  ns.ApplyWindowScale(frame)
+end
+
+--- The stored size, as a multiplier on whatever the client gave the window.
+--- Clamped here rather than at each call site so the slash command, the slider
+--- and a hand-edited SavedVariables all land in the same range.
+function ns.WindowScale()
+  local pct = tonumber(ns.Settings and ns.Settings.Get("panelScale")) or 100
+  if pct < 50 then pct = 50 elseif pct > 200 then pct = 200 end
+  return pct / 100
+end
+
+--- Apply it to one window, or to all of them.
+---
+--- ⚠️ AGAINST THE WINDOW'S OWN BASELINE, remembered the first time it is seen.
+--- MakeWindow has already pixel-snapped each frame to its own value, so scaling
+--- from a shared constant would undo that — and re-reading GetScale each time
+--- would compound the multiplier on every call.
+function ns.ApplyWindowScale(frame)
+  local list = frame and { frame } or ns.scaledWindows
+  local mult = ns.WindowScale()
+  for _, f in ipairs(list) do
+    if f and f.SetScale then
+      f._baseScale = f._baseScale or (f.GetScale and f:GetScale()) or 1
+      pcall(f.SetScale, f, f._baseScale * mult)
+    end
+  end
+end
+
+--- Put a window on the stack when it opens and take it off when it closes,
+--- however it closes — a button, a slash command or Escape itself.
+function ns.TrackWindow(frame)
+  if not (frame and frame.HookScript) then return end
+  frame:HookScript("OnShow", function(self)
+    stackRemove(self)
+    ns.windowStack[#ns.windowStack + 1] = self
+    ensureCatcher():EnableKeyboard(true)
+  end)
+  frame:HookScript("OnHide", function(self)
+    stackRemove(self)
+    if escCatcher then escCatcher:EnableKeyboard(#ns.windowStack > 0) end
+  end)
 end
 
 -- ---------------------------------------------------------------------------

@@ -427,13 +427,27 @@ end
 --- honest translation is a near-opaque dark fill at the same colour the blur
 --- resolves to, rather than a transparency that would show the game world
 --- through a data panel and make it unreadable mid-raid.
-function Style.Surface(frame, color, alpha)
+--- A flat fill, and — only if asked — a border.
+---
+--- ⚠️ THE RIM IS NOW OPT-IN, AND IT USED TO BE UNCONDITIONAL (Jason, Session
+--- 258: "you've randomly added an extra border around it for some reason").
+--- Every caller of this got a #2a2a45 border whether the design had one or not,
+--- which is where the outline around the Standings rail's four blocks, around
+--- the Slots page's OBTAINED BY panel and around all three secondary windows
+--- came from. None of those are bordered in Figma — they are FILLS, and the
+--- fill is what separates them from the ground.
+---
+--- A function called Surface should paint a surface. Callers that genuinely
+--- want an edge ask for one, and the two that did are unchanged.
+function Style.Surface(frame, color, alpha, rimColor, rimAlpha)
   local c = color or Style.COLOR.bg
   local bg = frame:CreateTexture(nil, "BACKGROUND")
   bg:SetAllPoints()
   bg:SetColorTexture(c.r, c.g, c.b, alpha or 0.96)
   frame.bgTex = bg
-  frame.rim = Style.Rim(frame, Style.COLOR.border, 1)
+  if rimColor then
+    frame.rim = Style.Rim(frame, rimColor, rimAlpha or 1)
+  end
   return frame
 end
 
@@ -510,7 +524,13 @@ function Style.PanelGround(frame, height)
   -- that replaced the surface it was painted on. Removed rather than retuned.
   frame.glowTex = nil
 
-  frame.rim = Style.Rim(frame, C.rim, 0.4)
+  -- ⚠️ NO OUTER BORDER (Jason, Session 258: "some kind of border all the way
+  -- around the outside of the addon window that's not part of the design").
+  -- Every frame in the Figma file is a flat fill to its own edge — the window
+  -- reads as a shape because of its GROUND, not because of a line drawn round
+  -- it. This was inherited from the pre-redesign window, where the hairline was
+  -- the only thing separating a near-black panel from a near-black screen.
+  frame.rim = nil
   return frame
 end
 

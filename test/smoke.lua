@@ -1037,9 +1037,18 @@ do
 
   check("an empty name is treated as missing, not as a name",
         entries[1].name == "Catalogued Item", tostring(entries[1].name))
+  -- ⚠️ THE CHAIN GAINED THE CLIENT AND LOST THE ID (Session 258). Our catalogue
+  -- is not the last word: 232 BIS items are absent from loot_items entirely, so
+  -- the CLIENT is asked next — and only then a placeholder. The placeholder is
+  -- no longer "item:<id>", which is a debugging string that reached the Slots
+  -- page and was the only thing on it.
+  --
+  -- The stub answers nothing for these ids, so both fall through to the word.
   check("...and an empty name in OUR catalogue is not swapped in either",
-        entries[2].name == "item:222", tostring(entries[2].name))
-  check("...with the id as the last resort", entries[3].name == "item:333",
+        entries[2].name == ns.LOADING_NAME, tostring(entries[2].name))
+  check("...with a WORD as the last resort, never the item id",
+        entries[3].name == ns.LOADING_NAME
+          and not entries[3].name:match("^item:"),
         tostring(entries[3].name))
   check("a real name is left alone", entries[4].name == "Real Name")
   check("...and the count reflects only what had to be filled", filled == 3, filled)
@@ -1763,19 +1772,34 @@ ns.MakeWindow(win)
 check("a window is raised above its siblings when clicked", win.toplevel == true)
 check("...and cannot be dragged off screen", win.clamped == true)
 
-local registered = 0
-for _, n in ipairs(UISpecialFrames) do
-  if n == "HoDLootAdvisorTestWindow" then registered = registered + 1 end
-end
-check("...and Escape closes it, via UISpecialFrames", registered == 1)
+-- ⚠️ NOT UISpecialFrames ANY MORE (Session 258). That list closes EVERY shown
+-- frame in it on one press, so with four windows open one Escape closed the
+-- whole addon. The stack below is ours and Escape takes one off the top.
+check("a window is not handed to UISpecialFrames", (function()
+  for _, n in ipairs(UISpecialFrames or {}) do
+    if n == "HoDLootAdvisorTestWindow" then return false end
+  end
+  return true
+end)())
 
--- A duplicate entry would have Blizzard hide the same frame twice per press.
+-- Showing pushes, hiding pops, and the LAST one shown is what Escape closes.
+local stackBefore = #ns.windowStack
+win:Show()
+check("showing a window puts it on the stack", #ns.windowStack == stackBefore + 1,
+      #ns.windowStack)
+check("...and Escape closes that one", ns.EscapeTop() == win)
+check("...leaving the stack as it was", #ns.windowStack == stackBefore,
+      #ns.windowStack)
+
+-- A window shown twice must not sit on the stack twice, or the second Escape
+-- would close something already gone.
 ns.MakeWindow(win)
-registered = 0
-for _, n in ipairs(UISpecialFrames) do
-  if n == "HoDLootAdvisorTestWindow" then registered = registered + 1 end
-end
-check("registering twice does not duplicate the entry", registered == 1)
+win:Show()
+win:Show()
+local dupes = 0
+for _, f in ipairs(ns.windowStack) do if f == win then dupes = dupes + 1 end end
+check("showing twice does not duplicate the entry", dupes == 1, dupes)
+ns.EscapeTop()
 
 local anon = CreateFrame("Frame")
 local before = #UISpecialFrames
@@ -4019,13 +4043,23 @@ header("Pixel alignment — the arithmetic behind a blurry panel")
   -- given no band in the window height, and WoW frames do not clip children, so
   -- nothing errored — it simply drew on top. Height is derived, so assert that
   -- every band is in the sum and that adding a setting still moves it.
+  -- ⚠️ THE HEIGHT IS CAPPED NOW AND THE CONTENT SCROLLS (Jason, Session 258:
+  -- "the settings page is comically large… I just built it that height in Figma
+  -- to show all the pieces"). So the old assertion — that the window grows with
+  -- the settings and still leaves a band for the readout — describes a window
+  -- that no longer exists. What has to hold instead is that the CONTENT grows
+  -- while the WINDOW stays inside the panel's own height.
   local h = ns.Settings.WindowHeight()
+  local content = ns.Settings.ContentHeight()
   local rows = #ns.Settings.SPEC
-  check("the window height grows with the number of settings",
-        h > rows * 40, h)
-  check("...and reserves room for the display readout on top of the footer",
-        h - (rows * 54) - 40 - 48 >= 50,
-        ("leftover band: %d"):format(h - (rows * 54) - 40 - 48))
+  check("the content height grows with the number of settings",
+        content > rows * 40, content)
+  check("...while the window never exceeds the addon window's 600", h <= 600, h)
+  check("...and the readout and footer still have their bands",
+        h - 128 - 58 - 48 > 0, h)
+  -- The cap only means something if there is genuinely more content than room.
+  check("...with more content than fits, so the scroll is load-bearing",
+        content > h - 128 - 58 - 48, ("content %d, room %d"):format(content, h - 234))
 
   -- ── Snapping to whole pixels ──────────────────────────────────────────────
   -- The fix, not just the diagnosis. Every window routes through MakeWindow,

@@ -35,6 +35,18 @@ stub.instance = {
 
 -- Item data for things that are NOT equipped — the drops a test hands to the
 -- recorder. Keyed by itemID: { name, quality, ilvl, itemType }.
+-- ⚠️ `unpack` IS A GLOBAL IN THE GAME AND NOT IN 5.4 (Session 258). WoW runs
+-- Lua 5.1, whose base library defines it; 5.2 moved it to table.unpack and the
+-- harness runs under 5.4 or 5.5. So an addon line that is perfectly correct in
+-- the client — and has been for years — dies in the harness with "attempt to
+-- call a nil value (global 'unpack')".
+--
+-- This is the S257 rule pointing the other way: usually the danger is a stub
+-- being MORE permissive than the runtime. Here it was less, and the cost is a
+-- false failure in working code, which is just as expensive to chase. Fake what
+-- the runtime HAS.
+if type(_G.unpack) ~= "function" then _G.unpack = table.unpack end
+
 stub.items = {}
 -- itemID -> INVTYPE_*, for the items whose slot the CLIENT is the authority on.
 -- Empty by default: a test that needs a slot stages it, rather than inheriting
@@ -152,6 +164,37 @@ frameMeta.__index = {
   Raise = function(self) self.raised = (self.raised or 0) + 1 end,
   SetToplevel = function(self, v) self.toplevel = v end,
   SetClampedToScreen = function(self, v) self.clamped = v end,
+  -- ⚠️ Show/Hide FIRE THEIR SCRIPTS, AS THE CLIENT'S DO (Session 258). The
+  -- addon keeps its window stack by hooking OnShow and OnHide, and a stub whose
+  -- Show only flips a flag tells it nothing ever opened — so Escape had an
+  -- empty stack and closed nothing. Fake what the runtime DOES, not just what
+  -- it stores.
+  Show = function(self)
+    local was = self.shown
+    self.shown = true
+    if not was and self.scripts.OnShow then self.scripts.OnShow(self) end
+  end,
+  Hide = function(self)
+    local was = self.shown
+    self.shown = false
+    if was and self.scripts.OnHide then self.scripts.OnHide(self) end
+  end,
+  IsShown = function(self) return self.shown and true or false end,
+  -- The Escape catcher sets these; the base stub had no need for them until it
+  -- gained a frame of its own.
+  SetFrameStrata = function(self, v) self.strata = v end,
+  EnableKeyboard = function(self, v) self.keyboard = v and true or false end,
+  SetPropagateKeyboardInput = function(self, v) self.propagate = v and true or false end,
+  SetShown = function(self, v)
+    if v then self:Show() else self:Hide() end
+  end,
+  HookScript = function(self, which, fn)
+    local prev = self.scripts[which]
+    self.scripts[which] = function(...)
+      if prev then prev(...) end
+      return fn(...)
+    end
+  end,
 }
 
 --- Deliver an event to the ACTIVE client's frames only. With two clients

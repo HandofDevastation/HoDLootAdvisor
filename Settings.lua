@@ -292,6 +292,9 @@ local frame
 -- long rows or leave a gap under every short one, so the layout MEASURES which
 -- it is rather than assuming.
 local FRAME_W  = 600
+-- The panel's own height. The settings window may be shorter than this and must
+-- never be taller.
+local FRAME_H_MAX = 600
 local HEADER_H = 128            -- the first row's top; lockup and title sit above
 local ROW_H    = 30             -- a one-line row; a wrapping one is ROW_H_TALL
 local ROW_H_TALL = 44
@@ -325,12 +328,28 @@ function Settings.RowHeight(spec)
   return (#(spec.help or "") > 90) and ROW_H_TALL or ROW_H
 end
 
-function Settings.WindowHeight()
-  local h = HEADER_H
+--- How tall the ROWS are, all together.
+function Settings.ContentHeight()
+  local h = 0
   for _, spec in ipairs(Settings.SPEC) do
     h = h + Settings.RowHeight(spec) + ROW_GAP
   end
-  return h + READOUT_H + FOOTER_H
+  return h
+end
+
+--- ⚠️ CAPPED AT THE ADDON WINDOW'S OWN HEIGHT (Jason, Session 258: "the
+--- settings page is comically large. It shouldn't be taller than the addon
+--- window itself — it needs to scroll. I just built it that height in Figma to
+--- show all the pieces").
+---
+--- The mock is 760 tall because a drawing has to show every row at once; a
+--- WINDOW does not, and one taller than the panel it configures is absurd on a
+--- laptop. So the natural height is computed and then clamped, and the rows
+--- scroll inside whatever is left. Reading the mock's height as a specification
+--- was the mistake — it is a canvas, not a constraint.
+function Settings.WindowHeight()
+  local natural = HEADER_H + Settings.ContentHeight() + READOUT_H + FOOTER_H
+  return math.min(natural, FRAME_H_MAX)
 end
 
 local function build()
@@ -356,8 +375,8 @@ local function build()
     if frame.bgTex then frame.bgTex:Hide() end
     if frame.headTex then frame.headTex:Hide() end
     if frame.headLine then frame.headLine:Hide() end
+    -- No rim: the fill is the window, exactly as on the panel.
     S.Surface(frame, S.COLOR.windowGround, 1)
-    S.Rim(frame, S.COLOR.rim, 0.4)
     S.Lockup(frame, SET_X, 30)
   end
 
@@ -368,22 +387,35 @@ local function build()
   frame.heading:SetPoint("TOPLEFT", SET_X, -86)
   frame.heading:SetText("SETTINGS")
 
+  -- ── The scrolling body ────────────────────────────────────────────────────
+  -- The rows live in a scroll child rather than on the window, so the window
+  -- can be shorter than its own content. Everything below places rows at
+  -- offsets from the CONTENT's top; the scroll frame supplies the rest.
+  frame.scroll = CreateFrame("ScrollFrame", "$parentRows", frame,
+    "UIPanelScrollFrameTemplate")
+  frame.scroll:SetPoint("TOPLEFT", 0, -HEADER_H)
+  frame.scroll:SetPoint("BOTTOMRIGHT", -26, FOOTER_H + READOUT_H)
+
+  frame.content = CreateFrame("Frame", nil, frame.scroll)
+  frame.content:SetSize(FRAME_W - 26, math.max(1, Settings.ContentHeight()))
+  frame.scroll:SetScrollChild(frame.content)
+
   frame.rows = {}
-  local y = -HEADER_H
+  local y = 0
 
   for _, spec in ipairs(Settings.SPEC) do
     -- ⚠️ UPPERCASE, IN THE HEADING PURPLE — the same treatment every heading in
     -- the redesign takes, from the Standings rail to the Runner's sections.
-    local label = S and S.Text(frame, "bold", "head", S.COLOR.accent, "LEFT")
-      or frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local label = S and S.Text(frame.content, "bold", "head", S.COLOR.accent, "LEFT")
+      or frame.content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     label:ClearAllPoints()
-    label:SetPoint("TOPLEFT", SET_X, y + SET_LABEL_Y)
+    label:SetPoint("TOPLEFT", SET_X, -(y + SET_LABEL_Y))
     label:SetText((spec.label or ""):upper())
 
-    local help = S and S.Text(frame, "light", "name", S.COLOR.white, "LEFT")
-      or frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local help = S and S.Text(frame.content, "light", "name", S.COLOR.white, "LEFT")
+      or frame.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     help:ClearAllPoints()
-    help:SetPoint("TOPLEFT", SET_X, y - SET_HELP_Y)
+    help:SetPoint("TOPLEFT", SET_X, -(y + SET_HELP_Y))
     -- Stops short of the control column rather than running the full width, so
     -- a long sentence wraps instead of sliding under a checkbox.
     help:SetWidth(SET_CHECK_X - SET_X - 16)
@@ -399,10 +431,10 @@ local function build()
       -- control's gradient rim and the mock's 10x7 tick, which is what
       -- Style.Check already draws for the Loot tab's Vault control. Passing an
       -- EMPTY label because this row has drawn its own above the help text.
-      control = S and S.Check(frame, "", SET_CHECK_SZ)
-        or CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
+      control = S and S.Check(frame.content, "", SET_CHECK_SZ)
+        or CreateFrame("CheckButton", nil, frame.content, "UICheckButtonTemplate")
       control:SetSize(SET_CHECK_SZ, SET_CHECK_SZ)
-      control:SetPoint("TOPLEFT", SET_CHECK_X, y + 4)
+      control:SetPoint("TOPLEFT", SET_CHECK_X, -(y + 4))
       control:SetScript("OnClick", function(self)
         -- ⚠️ Style.Check DOES NOT TOGGLE ITSELF. It is a plain Button with
         -- SetChecked/GetChecked bolted on, so its state only moves when someone
@@ -418,9 +450,9 @@ local function build()
       end)
 
     elseif spec.kind == "slider" then
-      control = ns.Style and ns.Style.Slider(frame, 150, spec.min, spec.max, spec.step)
+      control = ns.Style and ns.Style.Slider(frame.content, 150, spec.min, spec.max, spec.step)
       if control then
-        control:SetPoint("TOPRIGHT", -60, y)
+        control:SetPoint("TOPRIGHT", -60, -y)
         control:Wire(spec.suffix, function(v)
           -- Only write when it actually moved: OnValueChanged fires while the
           -- window is being POPULATED too, and storing there would rewrite the
@@ -430,9 +462,9 @@ local function build()
       end
 
     elseif spec.kind == "number" then
-      control = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
+      control = CreateFrame("EditBox", nil, frame.content, "InputBoxTemplate")
       control:SetSize(SET_INPUT_W, SET_INPUT_H)
-      control:SetPoint("TOPLEFT", SET_INPUT_X, y)
+      control:SetPoint("TOPLEFT", SET_INPUT_X, -y)
       control:SetAutoFocus(false)
       control:SetNumeric(true)
       -- Committed on ENTER *and* on losing focus. Enter-only is why "Close"
@@ -464,10 +496,10 @@ local function build()
       -- The mock draws these as the panel's filled dropdown control, so they
       -- take the same primitive as the Loot tab's difficulty picker rather than
       -- a stock button. Still a CYCLER underneath — five values, one click each.
-      control = S and S.Control(frame, "", "head")
-        or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+      control = S and S.Control(frame.content, "", "head")
+        or CreateFrame("Button", nil, frame.content, "UIPanelButtonTemplate")
       control:SetSize(SET_DROP_W, SET_INPUT_H)
-      control:SetPoint("TOPLEFT", FRAME_W - SET_X - SET_DROP_W, y)
+      control:SetPoint("TOPLEFT", FRAME_W - SET_X - SET_DROP_W - 26, -y)
       if control.SetActive then control:SetActive(true) end
       control:SetScript("OnClick", function(self)
         local cur = Settings.Get(spec.key)
@@ -480,7 +512,7 @@ local function build()
     end
 
     frame.rows[#frame.rows + 1] = { spec = spec, control = control }
-    y = y - (Settings.RowHeight(spec) + ROW_GAP)
+    y = y + Settings.RowHeight(spec) + ROW_GAP
   end
 
   -- ⚠️ THE TWO CONTROLS TAKE THE REDESIGN'S BUTTON PRIMITIVE, at the mock's own
