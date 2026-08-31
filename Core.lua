@@ -885,6 +885,29 @@ function ns.SourceFor(itemID, rec, q)
     or ns.CraftedSource(q)
 end
 
+--- Is there a tier token for this slot that this character could use?
+---
+--- ⚠️ THE POSITIVE HALF OF THE TIER TEST (Session 260, Jason: a WRIST showed a
+--- TIER PIECE chip). Tier exists in five slots — head, shoulder, chest, hands,
+--- legs — and nothing else, ever. The previous test was pure elimination: no
+--- source found, therefore tier. That labels every unsourced item a tier piece,
+--- including bracers, rings and weapons, which is nonsense on its face.
+---
+--- This asks the payload a question it can actually answer, using the SAME
+--- derivation ObtainRoutes uses to name the token: a token whose own slot is
+--- this slot and whose class gate admits you. No token for the slot, no tier.
+function ns.HasTierToken(slotKey, char)
+  local data = ns.Data()
+  if not (data and data.items and slotKey) then return false end
+  for _, rec in pairs(data.items) do
+    if rec.slot == "TOKEN" and ns.ItemSlot(rec) == slotKey
+      and (not char or ns.CanUse(rec, char.className, char.specName)) then
+      return true
+    end
+  end
+  return false
+end
+
 --- Every way to end up holding one item.
 ---
 --- ⚠️ THE TIER TOKEN CARRIES NO BIS ROW and never has, so it cannot be found by
@@ -1009,14 +1032,21 @@ function ns.SlotsReport(view)
               -- the TIER PIECE chip, the tier layout, and an OBTAINED BY panel
               -- offering a token that does not produce it.
               --
-              -- ⚠️ THIS IS A NARROWING, NOT THE POSITIVE TEST. A source we can
-              -- actually name REFUTES the tier claim; absence of one still only
-              -- means we do not know. The real answer is Blizzard's own item-set
-              -- membership, which the SITE can already resolve and the emitter
-              -- should ship as a flag — the same "emit the answer, never infer
-              -- it in Lua" move that fixed the item level and the crafted line.
-              -- Until then a genuine tier piece is the residue, not a claim.
-              tierPiece = (rec == nil) and (src == nil),
+              -- ⚠️ AND IT NEEDS A SLOT THAT TIER EXISTS IN (Session 260, Jason:
+              -- a WRIST carrying a TIER PIECE chip). Absence of a source was
+              -- still pure elimination, so every unsourced pick — bracers,
+              -- rings, weapons — was labelled tier. ns.HasTierToken asks the
+              -- payload a question it can answer, and there is no wrist token
+              -- in any season.
+              --
+              -- ⚠️ STILL NOT THE WHOLE POSITIVE TEST. The real answer is
+              -- Blizzard's own item-set membership, which the SITE can resolve
+              -- and the emitter should ship as a flag — the "emit the answer,
+              -- never infer it in Lua" move that settled the item level and the
+              -- crafted line. This bounds the damage to the five slots where a
+              -- wrong answer is at least possible.
+              tierPiece = (rec == nil) and (src == nil)
+                and ns.HasTierToken(slotKey, char),
             }
           end
         end

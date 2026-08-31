@@ -1459,6 +1459,71 @@ do
     check("Post is hidden on the Full Loot Table", not panel.post:IsShown())
   end
 
+  -- ⚠️ THE ROW'S TOOLTIP IS GONE; THE DIAMOND'S IS NOT (Jason, Session 260:
+  -- the row tooltip "serves no purpose but to be in the way"). It restated the
+  -- boss's name, which is already printed larger an inch to the left, while
+  -- covering the neighbouring rows. The count moves to the diamond, which is
+  -- the one thing on that row that does not explain itself.
+  do
+    local loot = panel.tabs.Loot
+    loot.scripts.OnClick(loot)
+    local tile = panel.bossTiles[1]
+    check("a boss row has no tooltip of its own", tile.scripts.OnEnter == nil)
+    check("...and the diamond carries its own hover target", tile.bisHit ~= nil)
+
+    local said
+    local realSet, realShow, realOwner =
+      ns.Tip.SetText, ns.Tip.Show, ns.Tip.SetOwner
+    ns.Tip.SetText = function(_, s) said = s end
+    ns.Tip.Show, ns.Tip.SetOwner = function() end, function() end
+
+    tile.bossBis = 1
+    tile.bisHit.scripts.OnEnter(tile.bisHit)
+    check("hovering the diamond gives the count, singular", said == "1 BIS ITEM", said)
+    tile.bossBis = 3
+    tile.bisHit.scripts.OnEnter(tile.bisHit)
+    check("...and plural above one", said == "3 BIS ITEMS", said)
+    said = nil
+    tile.bossBis = 0
+    tile.bisHit.scripts.OnEnter(tile.bisHit)
+    check("...and says nothing when the boss has none", said == nil, said)
+
+    ns.Tip.SetText, ns.Tip.Show, ns.Tip.SetOwner = realSet, realShow, realOwner
+
+    -- ⚠️ THE HIT FRAME SITS ON TOP OF THE ROW, so only IT receives the press.
+    -- Without the explicit forward, clicking the diamond would look dead —
+    -- the S252 rule about two mouse-enabled frames on one set of pixels.
+    -- Asserted through the pane's own empty message, which is what a viewer
+    -- would see change.
+    --
+    -- Asserted as EQUIVALENCE rather than against a known screen: press the
+    -- row, record what the pane becomes, collapse, then press the diamond and
+    -- require the same. A first attempt read the pane's empty message and
+    -- failed for the wrong reason — expanding a boss also selects its first
+    -- item, so that message is never rewritten. Comparing the two presses needs
+    -- no theory about what expansion looks like.
+    local COLLAPSED = "true|CHOOSE A BOSS TO VIEW LOOT"
+    local function sig()
+      return tostring(panel.paneEmpty:IsShown()) .. "|" .. tostring(panel.paneEmpty._text)
+    end
+    for _ = 1, 3 do
+      if sig() == COLLAPSED then break end
+      tile.scripts.OnClick(tile)
+    end
+    check("the boss list starts collapsed, so the presses below mean something",
+          sig() == COLLAPSED, sig())
+
+    tile.scripts.OnClick(tile)
+    local viaRow = sig()
+    check("...and pressing the row opens something", viaRow ~= COLLAPSED, viaRow)
+
+    tile.scripts.OnClick(tile)
+    tile.bisHit.scripts.OnClick(tile.bisHit)
+    check("clicking the diamond opens the boss, exactly as the row does",
+          sig() == viaRow, ("row=%s diamond=%s"):format(viaRow, sig()))
+    tile.scripts.OnClick(tile)   -- collapse again for whatever runs next
+  end
+
   -- Escape closes ONE window, the most recent.
   do
     for i = #ns.windowStack, 1, -1 do ns.EscapeTop() end

@@ -3570,6 +3570,28 @@ header("Dungeons as a content mode — tiles, pooled loot, and scoring")
             found and found.tierPiece == false,
             found and tostring(found.tierPiece))
 
+      -- ⚠️ AND A SLOT TIER DOES NOT EXIST IN IS NEVER TIER (Session 260, Jason:
+      -- a WRIST showed a TIER PIECE chip). Absence of a source was still pure
+      -- elimination, so any unsourced pick got the label — bracers, rings,
+      -- weapons alike. Staged as the wrist case exactly: an item nothing can
+      -- name a source for, in a slot with no token in any season.
+      data.rankings[dungeonId][key] = { b = "overall", bx = { "overall" } }
+      stub.itemEquipLoc[dungeonId] = "INVTYPE_WRIST"
+      local wristIdx = ns.Journal.SourceIndex()[dungeonId]
+      local savedSrc = wristIdx and wristIdx.boss
+      if wristIdx then wristIdx.boss = nil end   -- nothing can name it
+      local rep2 = ns.SlotsReport("overall")
+      local wrist
+      for _, row in ipairs(rep2.rows) do
+        for _, p in ipairs(row.picks) do if p.itemID == dungeonId then wrist = p end end
+      end
+      check("an unsourced pick in a WRIST slot is not called a tier piece",
+            wrist and wrist.tierPiece == false,
+            wrist and tostring(wrist.tierPiece) or "no pick")
+      if wristIdx then wristIdx.boss = savedSrc end
+      stub.itemEquipLoc[dungeonId] = "INVTYPE_FINGER"
+      data.rankings[dungeonId] = { [key] = { b = "overall", bx = { "overall" } } }
+
       -- ⚠️ AND A ROUTE INSIDE THE OBTAINED BY PANEL GETS THE SAME LADDER
       -- (Session 260, Jason: "a piece listed as a catalyze target that has NO
       -- location/source showing"). The panel drew a line for one route and

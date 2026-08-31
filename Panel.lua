@@ -830,6 +830,22 @@ local function buildBossTile(parent, i)
   if S and S.COLOR.accent then tile.bis:SetVertexColor(S.rgb(S.COLOR.accent)) end
   tile.bis:Hide()
 
+  -- The diamond's own hover target (Jason, Session 260). A texture cannot take
+  -- scripts, so the count needs a frame sitting exactly on it.
+  --
+  -- ⚠️ IT FORWARDS THE CLICK, EXPLICITLY. Two mouse-enabled frames on the same
+  -- pixels means only one receives the press (the S252 rule), and this one sits
+  -- on top — so without forwarding, clicking the diamond would silently fail to
+  -- expand the boss. SetPropagateMouseClicks is a PROTECTED function and is not
+  -- ours to rely on; calling the same handler is, and it is visible here rather
+  -- than depending on what the client permits.
+  --
+  -- Sized to the diamond and no larger, so it never covers the boss's name.
+  tile.bisHit = CreateFrame("Button", nil, tile)
+  tile.bisHit:SetAllPoints(tile.bis)
+  tile.bisHit:EnableMouse(true)
+  tile.bisHit:Hide()
+
   -- The row rule. DROPPED ON THE SELECTED ROW, which is how the mock joins a
   -- boss to the loot listed beneath it — and why its expanded row measures one
   -- pixel shorter than the others.
@@ -870,7 +886,9 @@ local function buildBossTile(parent, i)
   -- because a 32px portrait had no free edge to mark, and the question does not
   -- arise on a full-width row in an accordion.
 
-  tile:SetScript("OnClick", function(self)
+  -- ONE HANDLER, TWO PRESSES. The diamond's hit frame calls this too, so the
+  -- row and the mark cannot come to disagree about what a click does.
+  local function toggleBoss(self)
     if not self.bossIndex then return end
     -- ⚠️ A SECOND CLICK COLLAPSES. Without it there is no way BACK to the full
     -- list once you have opened anything, and the state Jason asked for would
@@ -882,17 +900,28 @@ local function buildBossTile(parent, i)
     end
     state.sel, state.colScroll, state.rankScroll = 1, 0, 0
     Panel.Refresh()
-  end)
-  tile:SetScript("OnEnter", function(self)
-    if not self.bossName then return end
+  end
+
+  tile:SetScript("OnClick", toggleBoss)
+  tile.bisHit:SetScript("OnClick", function() toggleBoss(tile) end)
+
+  -- ⚠️ NO TOOLTIP ON THE ROW ITSELF (Jason, Session 260: it "serves no purpose
+  -- but to be in the way"). It repeated the boss's name, which is already
+  -- printed an inch to the left in a larger face — a tooltip that restates what
+  -- it covers is worse than none, because it hides the neighbouring rows while
+  -- telling you nothing.
+  --
+  -- The count moves to the DIAMOND, which is the one thing on the row that does
+  -- NOT explain itself. Nothing else is added: the mark says "there is
+  -- best-in-slot here", and the only question it leaves open is how much.
+  tile.bisHit:SetScript("OnEnter", function(self)
+    local n = tile.bossBis or 0
+    if n <= 0 then return end
     ns.Tip:SetOwner(self, "ANCHOR_CURSOR")
-    ns.Tip:SetText(self.bossName, 1, 1, 1)
-    if (self.bossBis or 0) > 0 then
-      ns.Tip:AddLine(("%d best-in-slot for you here"):format(self.bossBis), 1, 0.957, 0.408)
-    end
+    ns.Tip:SetText(("%d BIS ITEM%s"):format(n, n == 1 and "" or "S"), 1, 1, 1)
     ns.Tip:Show()
   end)
-  tile:SetScript("OnLeave", function() ns.Tip:Hide() end)
+  tile.bisHit:SetScript("OnLeave", function() ns.Tip:Hide() end)
   return tile
 end
 
@@ -3203,7 +3232,10 @@ function fillBossTile(tile, en)
   -- boss holding something best-in-slot FOR YOU, which is the whole reason to
   -- scan the list — the count used to live in the retired context line, where
   -- it told you a number without telling you which boss it belonged to.
+  -- The hit frame tracks the mark: no diamond, nothing to hover, and no
+  -- invisible target sitting on the row's right edge swallowing clicks.
   tile.bis:SetShown((b.bis or 0) > 0)
+  tile.bisHit:SetShown((b.bis or 0) > 0)
 
   -- The rule is DROPPED on the expanded row, which is what joins a boss to the
   -- loot listed beneath it — and is why the mock's expanded row measures one
