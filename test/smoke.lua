@@ -1724,15 +1724,17 @@ check("...resolving loot through the namespace it actually lives in",
 -- A CLIENT WITH NONE OF IT. Still the property that makes the probe safe to run
 -- anywhere, so it is tested by taking the API away rather than by never having
 -- provided it.
+-- ⚠️ EVERY EJ_ GLOBAL, NOT A HAND-KEPT LIST (Session 260). This was a literal
+-- roll-call of thirteen names, and the moment the stub gained three more the
+-- scenario stopped being "a client with none of the API" — it became "a client
+-- missing the thirteen we remembered", which reported 3 present and failed a
+-- check that was testing the right thing all along. A set defined by
+-- enumeration goes stale silently; one defined by its RULE cannot.
 local savedEJ = {}
-for _, name in ipairs({
-  "EJ_GetNumTiers", "EJ_GetCurrentTier", "EJ_SelectTier", "EJ_GetInstanceByIndex",
-  "EJ_SelectInstance", "EJ_GetEncounterInfoByIndex", "EJ_SelectEncounter",
-  "EJ_GetNumLoot", "EJ_SetLootFilter", "EJ_GetLootFilter", "EJ_ResetLootFilter",
-  "EJ_GetTierInfo", "EJ_GetInstanceInfo",
-}) do
-  savedEJ[name], _G[name] = _G[name], nil
+for name in pairs(_G) do
+  if type(name) == "string" and name:match("^EJ_") then savedEJ[name] = _G[name] end
 end
+for name in pairs(savedEJ) do _G[name] = nil end
 local savedNS = _G.C_EncounterJournal
 _G.C_EncounterJournal = nil
 
@@ -3454,6 +3456,45 @@ header("Dungeons as a content mode — tiles, pooled loot, and scoring")
     end
     check("an item the guide has never heard of gets no line invented for it",
           ns.JournalSource(880999) == nil)
+
+    -- ── THE PLAYER'S OWN GUIDE SETTINGS ARE NOT OUR INPUT (Session 260) ─────
+    --
+    -- Journal.Loot's own header already says ambient selection state is a race,
+    -- and then two pieces of ambient state were left outside it. Both belong to
+    -- the PLAYER and both silently narrow what we read: the slot dropdown, and
+    -- the difficulty. Jason's guide was on "Chest" and "(5) Mythic" when he
+    -- checked, which is exactly how sticky they are.
+    do
+      ns.Journal.Invalidate()
+      stub.journal.slotFilter = "Finger"      -- as if the player left it there
+      stub.journal.difficulty = 1             -- DungeonNormal
+      local idx2 = ns.Journal.SourceIndex()
+
+      -- The bug as reported: an item the guide lists only at Mythic.
+      local hit = idx2 and idx2[880042]
+      check("an item listed only at Mythic still reaches the source index",
+            hit ~= nil, "the difficulty the PLAYER left selected decided it")
+      check("...naming the boss that drops it",
+            hit and hit.boss == "The Brood Matron", hit and hit.boss)
+      check("...and the dungeon it sits in",
+            hit and hit.instance == "Altar of Fangs", hit and hit.instance)
+
+      -- A slot filter of Finger would have hidden every one of these.
+      check("a player's slot filter does not truncate what we index",
+            idx2 and idx2[880001] ~= nil and idx2[880002] ~= nil,
+            "a Head and a Two-Hand item, read while the filter said Finger")
+
+      -- ⚠️ AND WE PUT BOTH BACK. Leaving someone's Adventure Guide on a
+      -- different slot or difficulty than they left it is our bug, not a
+      -- detail — the addon reads this on every login, unprompted.
+      check("the player's slot filter is restored afterwards",
+            stub.journal.slotFilter == "Finger", tostring(stub.journal.slotFilter))
+      check("...and so is their difficulty",
+            stub.journal.difficulty == 1, tostring(stub.journal.difficulty))
+
+      stub.journal.slotFilter, stub.journal.difficulty = nil, nil
+      ns.Journal.Invalidate()
+    end
 
     -- ⚠️ AND THROUGH THE REPORT, WHICH IS THE BUG AS REPORTED. Testing
     -- ns.JournalSource on its own passed with the call site deleted — the probe

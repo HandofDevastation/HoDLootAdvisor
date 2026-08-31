@@ -486,6 +486,14 @@ function stub.Install()
         -- SHARED with the other boss. Pooling must not double it.
         { itemID = 880002, name = "Broodfang Cleaver", icon = 12, slot = "Two-Hand",
           armorType = "Axe", itemQuality = 4 },
+        -- ⚠️ LISTED ONLY AT MYTHIC, which is the shape of the live bug (Session
+        -- 260). The season's revamped dungeons carry two item-id families and
+        -- the guide names them at different difficulties, so a source lookup
+        -- that reads whatever difficulty the PLAYER left selected can only ever
+        -- find half of them. Jason hit it as a catalyse route with no source
+        -- line beneath it. Invented name; 23 is Blizzard's DungeonMythic.
+        { itemID = 880042, name = "Sunbaked Guardian's Breastplate", icon = 21,
+          slot = "Chest", armorType = "Plate", itemQuality = 4, difficulty = 23 },
       },
     },
   }
@@ -533,6 +541,35 @@ function stub.Install()
     J.selectedEncounter = belongs and id or nil
     -- THE ORDERING RULE: the filter in force at SELECT time is the one applied.
     J.appliedFilter = J.filter
+    J.appliedSlot = J.slotFilter
+    J.appliedDifficulty = J.difficulty
+  end
+
+  -- ── The two pieces of state the addon was reading THROUGH (Session 260) ────
+  --
+  -- ⚠️ NEITHER OF THESE EXISTED IN THIS STUB, so every check that touched the
+  -- guide passed vacuously: the addon asked for functions the double did not
+  -- define, got nil, skipped the call, and the harness reported green on a read
+  -- the live client narrows. That is the S257 rule — a double must never be
+  -- quieter than the thing it stands in for.
+  --
+  -- THE SLOT FILTER is the guide's own equipment-slot dropdown. It is sticky
+  -- across sessions and belongs to the PLAYER, so whatever they last browsed
+  -- silently truncated every list we read. Its three functions live on the
+  -- C_EncounterJournal table below, where the client puts them.
+  --
+  -- THE DIFFICULTY decides WHICH ITEMS a dungeon lists. Values are Blizzard's
+  -- own, read out of Interface/AddOns/Blizzard_FrameXMLUtil/DifficultyUtil.lua
+  -- rather than recalled, and the addon reads them from this table rather than
+  -- hardcoding numbers of its own.
+  _G.DifficultyUtil = { ID = {
+    DungeonNormal = 1, DungeonHeroic = 2, DungeonChallenge = 8, DungeonMythic = 23,
+  } }
+  J.validDifficulties = { [1] = true, [2] = true, [23] = true }
+  _G.EJ_SetDifficulty = function(d) J.difficulty = d end
+  _G.EJ_GetDifficulty = function() return J.difficulty end
+  _G.EJ_IsValidInstanceDifficulty = function(d)
+    return J.validDifficulties[d] and true or false
   end
   _G.EJ_SetLootFilter = function(classID, specID)
     J.filter = { classID = classID, specID = specID }
@@ -553,10 +590,24 @@ function stub.Install()
   local function visibleLoot()
     local all = J.loot[J.selectedEncounter] or {}
     local f = J.appliedFilter
-    if not (f and f.classID) then return all end
     local out = {}
     for _, it in ipairs(all) do
-      if it.classID == nil or it.classID == f.classID then out[#out + 1] = it end
+      local ok = true
+      -- The class/spec filter, unchanged.
+      if f and f.classID and it.classID ~= nil and it.classID ~= f.classID then
+        ok = false
+      end
+      -- ⚠️ THE SLOT FILTER NARROWS TO ONE SLOT, and an entry with no slot is
+      -- still hidden by it — the guide filters on the item's own slot, so
+      -- "we did not model a slot" must not read as "shows in every filter".
+      -- A double that fails OPEN here would report green on exactly the bug
+      -- this models.
+      if J.appliedSlot and it.slot ~= J.appliedSlot then ok = false end
+      -- An entry may declare the difficulty it is listed at; one that declares
+      -- none is listed at every difficulty, which is the common case.
+      if it.difficulty and J.appliedDifficulty
+        and it.difficulty ~= J.appliedDifficulty then ok = false end
+      if ok then out[#out + 1] = it end
     end
     return out
   end
@@ -585,6 +636,10 @@ function stub.Install()
     -- loot. Modelled here so the strip's filter is tested against the case it
     -- exists for rather than against a list where everything has loot.
     InstanceHasLoot = function(id) return stub.journal.noLoot[id] ~= true end,
+    -- The player's own equipment-slot dropdown — see the note above.
+    GetSlotFilter = function() return J.slotFilter end,
+    SetSlotFilter = function(slot) J.slotFilter = slot end,
+    ResetSlotFilter = function() J.slotFilter = nil end,
   }
 
   -- Items the addon asked the client to load. Item data is eventually

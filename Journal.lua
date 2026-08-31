@@ -217,6 +217,29 @@ local function saveState()
   -- silent corruption. Restore only what can actually be read.
   local priorInstance = one(api("EJ_GetCurrentInstance"))
 
+  -- ⚠️ THE SLOT FILTER AND THE DIFFICULTY ARE THE PLAYER'S, AND WE WERE READING
+  -- THROUGH BOTH (Session 260). This function's own header says ambient
+  -- selection state is not an input, it is a race — and then two pieces of
+  -- ambient state were left out of it.
+  --
+  -- The SLOT FILTER narrows the guide to one equipment slot. It is sticky
+  -- across sessions and it is set from the guide's own dropdown, so whatever a
+  -- player last looked at silently truncated every list we read. Nothing about
+  -- our reads wants a partial slot list, ever.
+  --
+  -- The DIFFICULTY decides WHICH ITEMS a dungeon lists, and this season that is
+  -- load-bearing: the revamped Zandalar dungeons carry TWO id families — the
+  -- original Battle-for-Azeroth ids and re-itemised current ones — and our BIS
+  -- table holds both. Desert Guardian's Breastplate (239036) is listed under
+  -- Mythic; read at another difficulty the guide does not name it at all, which
+  -- is why it reached Jason as a catalyse route with no source line.
+  --
+  -- BOTH ARE RESTORED, because they belong to the player. Leaving their guide
+  -- on a different slot or difficulty than they left it is our bug, not a
+  -- cosmetic detail.
+  local priorDifficulty = one(api("EJ_GetDifficulty"))
+  local priorSlot = one(api("GetSlotFilter"))
+
   return function()
     local selectTier = api("EJ_SelectTier")
     if priorTier and selectTier then call(selectTier, priorTier) end
@@ -224,6 +247,19 @@ local function saveState()
     if priorInstance and selectInstance then call(selectInstance, priorInstance) end
     local reset = api("EJ_ResetLootFilter")
     if reset then call(reset) end
+
+    local setDiff, validDiff = api("EJ_SetDifficulty"), api("EJ_IsValidInstanceDifficulty")
+    -- Guarded by the client's OWN validity test, exactly as Blizzard's guide
+    -- guards its dropdown — restoring a difficulty the current instance cannot
+    -- take is how the tier/instance restore corrupted itself once already.
+    if priorDifficulty and setDiff
+      and (not validDiff or one(validDiff, priorDifficulty)) then
+      call(setDiff, priorDifficulty)
+    end
+
+    local setSlot, resetSlot = api("SetSlotFilter"), api("ResetSlotFilter")
+    if priorSlot and setSlot then call(setSlot, priorSlot)
+    elseif resetSlot then call(resetSlot) end
   end
 end
 
@@ -376,6 +412,22 @@ function Journal.Loot(encounterID, opts)
   if setFilter and opts.classID then
     call(setFilter, opts.classID, opts.specID or 0)
   end
+
+  -- ⚠️ CLEAR THE PLAYER'S SLOT FILTER. Sticky, cross-session, and it truncates
+  -- every list we read to whichever slot they last browsed. saveState puts it
+  -- back. Same ordering rule as the class filter: before the select.
+  local resetSlot = api("ResetSlotFilter")
+  if resetSlot then call(resetSlot) end
+
+  -- The difficulty a dungeon is read at decides which item ids it lists —
+  -- see the saveState note. nil means "whatever the player had", which is the
+  -- old behaviour and still right for a caller that has no opinion.
+  local setDiff, validDiff = api("EJ_SetDifficulty"), api("EJ_IsValidInstanceDifficulty")
+  if opts.difficulty and setDiff
+    and (not validDiff or one(validDiff, opts.difficulty)) then
+    call(setDiff, opts.difficulty)
+  end
+
   call(selEnc, encounterID)
 
   local count = one(api("EJ_GetNumLoot")) or 0
@@ -518,14 +570,26 @@ function Journal.SourceIndex()
   if cache.sources then return cache.sources end
   local out = {}
   for _, inst in ipairs(Journal.CachedInstances()) do
+    -- A DUNGEON is read at every difficulty and merged; a raid is read the way
+    -- it always was, because our own loot table already answers for raid items
+    -- and is consulted first. See Journal.DungeonDifficulties.
+    local diffs = { false }
+    if inst.isRaid == false then
+      local d = Journal.DungeonDifficulties()
+      if #d > 0 then diffs = d end
+    end
     for _, enc in ipairs(Journal.CachedEncounters(inst.id)) do
-      -- Through CachedLoot, so a cold entry is REQUESTED rather than skipped.
-      local list = Journal.CachedLoot(enc.id)
-      for _, j in ipairs(list or {}) do
-        -- First writer wins: an item several bosses share is attributed to the
-        -- first that lists it, which is the same choice DungeonLoot makes.
-        if j.itemID and not out[j.itemID] then
-          out[j.itemID] = { boss = enc.name, instance = inst.name }
+      for _, d in ipairs(diffs) do
+        -- Through CachedLoot, so a cold entry is REQUESTED rather than skipped.
+        local list = Journal.CachedLoot(enc.id, { difficulty = d or nil })
+        for _, j in ipairs(list or {}) do
+          -- First writer wins: an item several bosses share is attributed to
+          -- the first that lists it, which is the same choice DungeonLoot
+          -- makes. Difficulties are walked hardest-first, so the id family the
+          -- season actually runs is the one that claims the entry.
+          if j.itemID and not out[j.itemID] then
+            out[j.itemID] = { boss = enc.name, instance = inst.name }
+          end
         end
       end
     end
@@ -642,11 +706,42 @@ local MAX_WARM_ATTEMPTS = 8
 --- observation, not by the theory, which is why it survived the theory failing.
 ---
 --- Returns list, warming.
+--- The dungeon difficulties a source lookup has to consider, read from the
+--- CLIENT's own table rather than hardcoded.
+---
+--- ⚠️ THE SEASON'S REVAMPED DUNGEONS LIST DIFFERENT ITEMS PER DIFFICULTY, which
+--- is not a general truth about the guide but is true here and is what reached
+--- Jason as a missing source line. Those dungeons carry two id families — the
+--- original Battle-for-Azeroth ids and re-itemised current ones — and our BIS
+--- table holds both, so reading one difficulty can only ever name half of them.
+--- Merging every difficulty is the answer that does not require us to be right
+--- about which one a given pick came from.
+---
+--- Blizzard's own guide builds its dropdown from DifficultyUtil.ID the same
+--- way; the names are read off Blizzard_EncounterJournal's EJ_DIFFICULTIES.
+--- Absent names are skipped, so a client that renames one costs coverage, never
+--- an error.
+function Journal.DungeonDifficulties()
+  local out = {}
+  local D = _G.DifficultyUtil and _G.DifficultyUtil.ID
+  if type(D) ~= "table" then return out end
+  for _, name in ipairs({ "DungeonMythic", "DungeonHeroic", "DungeonNormal" }) do
+    local id = D[name]
+    if type(id) == "number" then out[#out + 1] = id end
+  end
+  return out
+end
+
 function Journal.CachedLoot(encounterID, opts)
   if not encounterID then return {}, false end
   opts = opts or {}
-  local key = ("%s/%s/%s"):format(
-    tostring(encounterID), tostring(opts.classID or "-"), tostring(opts.specID or "-"))
+  -- Difficulty is part of the key because it changes the ANSWER — see
+  -- Journal.DungeonDifficulties. Two reads of one boss at two difficulties are
+  -- two different lists, and keying them together would let whichever ran last
+  -- overwrite the other.
+  local key = ("%s/%s/%s/%s"):format(
+    tostring(encounterID), tostring(opts.classID or "-"), tostring(opts.specID or "-"),
+    tostring(opts.difficulty or "-"))
 
   local attempts = cache.cold[key]
   if cache.loot[key] and not attempts then
@@ -690,10 +785,11 @@ function Journal.Warm()
     else
       -- The key carries everything the re-read needs, which is the reason it is
       -- built from the arguments rather than being an opaque counter.
-      local encID, classID, specID = key:match("^(%d+)/([^/]+)/([^/]+)$")
+      local encID, classID, specID, diff = key:match("^(%d+)/([^/]+)/([^/]+)/([^/]+)$")
       if encID then
         local _, warming = Journal.CachedLoot(tonumber(encID), {
           classID = tonumber(classID), specID = tonumber(specID),
+          difficulty = tonumber(diff),
         })
         stillWarming = stillWarming or warming
       else
@@ -776,14 +872,29 @@ function Journal.PrewarmSeason()
   -- somebody opened a dungeon tile — and the Slots page, which never opens one,
   -- had no source for any dungeon BIS pick as a result. Appended rather than
   -- interleaved so the raid bosses, which the Loot tab shows first, warm first.
+  -- Raid bosses first, at the ambient difficulty — the key the Loot tab reads.
+  local jobs = {}
+  for _, id in ipairs(ids) do jobs[#jobs + 1] = { id = id } end
+
+  -- ⚠️ AND THE DUNGEONS, WHICH THIS WALKED PAST (Session 259), NOW AT EVERY
+  -- DIFFICULTY (Session 260). One difficulty names only one of the two id
+  -- families the season's revamped dungeons carry, so warming a single one left
+  -- the source index unable to answer for half of them — which is what Jason
+  -- hit. These are the keys Journal.SourceIndex reads, so they must match it
+  -- exactly or the index rebuilds cold and the line arrives late or never.
   local seen = {}
   for _, id in ipairs(ids) do seen[id] = true end
+  local diffs = Journal.DungeonDifficulties()
   for _, inst in ipairs(Journal.CachedInstances()) do
     if inst.isRaid == false and Journal.HasLoot(inst.id) then
       for _, enc in ipairs(Journal.CachedEncounters(inst.id)) do
         if enc.id and not seen[enc.id] then
           seen[enc.id] = true
-          ids[#ids + 1] = enc.id
+          if #diffs > 0 then
+            for _, d in ipairs(diffs) do jobs[#jobs + 1] = { id = enc.id, difficulty = d } end
+          else
+            jobs[#jobs + 1] = { id = enc.id }
+          end
         end
       end
     end
@@ -792,10 +903,11 @@ function Journal.PrewarmSeason()
   local i = 0
   local function step()
     i = i + 1
-    if not ids[i] then return end
+    local job = jobs[i]
+    if not job then return end
     -- No class/spec filter: the SAME cache key the Loot tab reads with. Warming
     -- a different key would warm nothing anyone looks at.
-    pcall(Journal.CachedLoot, ids[i])
+    pcall(Journal.CachedLoot, job.id, { difficulty = job.difficulty })
     C_Timer.After(0.05, step)
   end
   C_Timer.After(2, step)
