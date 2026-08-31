@@ -862,8 +862,18 @@ function Style.Chip(parent, kind)
   c.text:SetPoint("CENTER")
 
   --- label, and (outlined only) the colour the text and border take.
+  ---
+  --- ⚠️ SHOWN BEFORE THE LABEL IS WRITTEN, AND WRITTEN THROUGH A REPAINT
+  --- (Session 260). A chip is created HIDDEN, so writing the label first and
+  --- calling Show() at the end is the Session 254 trap exactly: the first paint
+  --- happens off screen, and a string that never changes afterwards is never
+  --- redrawn. The tell on Jason's screen was a chip of the RIGHT WIDTH with no
+  --- glyphs in it — the width is measured from this same string, so the text
+  --- object plainly held it. TIER PIECE was blank on every Slots pick.
   function c:Set(label, color)
     if not label or label == "" then self:Hide() return self end
+    self:Show()
+    self.text:SetText("")
     self.text:SetText(label)
     if self._filled then
       -- ⚠️ A FILLED CHIP HAS TWO GROUNDS, NOT ONE (Session 258, read off the
@@ -887,7 +897,6 @@ function Style.Chip(parent, kind)
     -- TARGET are all different widths for the same padding.
     local w = self.text:GetStringWidth() or 0
     if w > 0 then self:SetWidth(math.floor(w + 0.5) + CHIP_PAD_X * 2) end
-    self:Show()
     return self
   end
 

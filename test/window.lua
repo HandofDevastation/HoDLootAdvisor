@@ -34,6 +34,11 @@ stub.Install()
 local invented = {}      -- method name -> how many times the panel asked for it
 local widgetMeta = {}
 
+-- Every fontstring ever created, so a check can sweep what is ON SCREEN without
+-- walking the frame tree — CreateFrame does not record children, and the string
+-- that goes unpainted is exactly the one nobody thought to look at.
+local allText = {}
+
 local function newWidget(kind, name, parent)
   local w = {
     _kind = kind, _name = name, _parent = parent,
@@ -41,7 +46,9 @@ local function newWidget(kind, name, parent)
     _width = 100, _height = 20, _alpha = 1,
     events = {}, scripts = {},
   }
-  return setmetatable(w, widgetMeta)
+  setmetatable(w, widgetMeta)
+  if kind == "FontString" then allText[#allText + 1] = w end
+  return w
 end
 
 -- The methods with REAL behaviour, because the panel's own logic reads them
@@ -56,7 +63,53 @@ function real.CreateFontString(self) local t = newWidget("FontString", nil, self
   self._children[#self._children + 1] = t; return t end
 function real.CreateMaskTexture(self) return real.CreateTexture(self) end
 
-function real.SetText(self, s) self._text = (s ~= nil) and tostring(s) or nil end
+--- Is this region actually on screen — it AND every ancestor shown?
+local function visibleChain(w)
+  local n = w
+  while n do
+    if not n._shown then return false end
+    n = n._parent
+  end
+  return true
+end
+
+
+-- ⚠️ THE STUB NOW MODELS WHETHER A STRING ACTUALLY PAINTED (Session 260), and
+-- until it did, this harness could not see the single most common defect in
+-- either of these addons.
+--
+-- The client's rule, measured in Session 254 and written up in Core §1.1: a
+-- fontstring redraws only when the string it is handed DIFFERS from the one it
+-- holds, and a draw that happens while the region is off screen does not take.
+-- Together those mean a first paint into a hidden widget is PERMANENT — the
+-- string is stored, every getter reports it correctly, and nothing is rendered.
+--
+-- The old double stored the string and answered every question about it
+-- happily, so it was quieter than the runtime in exactly the S257 sense: it
+-- reported green on code the client draws blank. Jason opened the Slots page
+-- and found three blanks that 118 passing checks had nothing to say about.
+--
+-- ⚠️ IT RECORDS THE CONDITIONS OF THE WRITE, NOT A THEORY OF THE RENDERER.
+-- A first attempt had SetText decide whether the string would PAINT, and swept
+-- every label in the panel. It indicted the footer buttons, the close X and the
+-- header's "BIS" — all of which Jason's own screenshots show rendering
+-- perfectly. Five contradictions out of six hits means the rule as stated was
+-- wrong, not that the addon had five more bugs (Core §1.1: an implausible
+-- result is evidence of a misreading). Narrowing it by "was this widget ever
+-- hidden" did not help either, because CLOSING the panel hides the root and so
+-- marks every descendant.
+--
+-- So this stub claims nothing about what the client draws. It records two
+-- facts — was the region on screen when the string was written, and did the
+-- string CHANGE — and the assertion below applies them only to the recycled
+-- rows of the Slots page, named explicitly. Those two conditions are the whole
+-- content of the Session 254 rule, and they are what the fix has to satisfy.
+function real.SetText(self, s)
+  local v = (s ~= nil) and tostring(s) or nil
+  self._writeChanged = (v ~= self._text)
+  self._writeVisible = visibleChain(self)
+  self._text = v
+end
 function real.GetText(self) return self._text end
 -- Roughly 6px per character at the sizes this panel uses. The exact number does
 -- not matter; being NON-ZERO does, because FitToLabel and the chips size
@@ -115,6 +168,9 @@ end
 function real.Hide(self)
   local was = self._shown
   self._shown = false
+  -- Marks this widget as RECYCLED — see the _painted note above SetText for why
+  -- the paint assertion is scoped to recycled widgets and not to every label.
+  self._everHidden = true
   if was then fire(self, "OnHide") end
 end
 function real.SetShown(self, v)
@@ -1254,6 +1310,110 @@ do
       end
     end
     check("no row on the Slots page shows a raw item id", bad == nil, bad)
+  end
+
+  -- ⚠️ HOW THE STRING WAS WRITTEN, NOT WHAT THE OBJECT HOLDS (Session 260).
+  -- Every other text assertion in this file reads _text — what the addon WROTE
+  -- — and all three blanks Jason found had a perfectly correct _text. The
+  -- writes landed while the widget was still hidden, so nothing drew, and the
+  -- string never changed afterwards to force a redraw. 118 checks had nothing
+  -- to say about any of it.
+  --
+  -- Two conditions, which together are the whole of the Session 254 rule:
+  -- a recycled row must be SHOWN before it is written into, and identity text
+  -- must be written through a forced repaint so an unchanged string still
+  -- redraws. setTextForce satisfies the second by writing "" first.
+  --
+  -- SCOPED TO THE NAMED SLOTS CONTAINERS. This makes no claim about what the
+  -- client does with build-once labels elsewhere in the panel — see the note
+  -- above SetText for the five false positives that taught that lesson.
+  --
+  -- Swept after EVERY slot, because the two layouts are different code paths:
+  -- an ordinary slot draws the list rows, a tier slot draws the identity header
+  -- and the OBTAINED BY panel whose heading was blank on every client since the
+  -- page was built.
+  do
+    local slots = panel.tabs.Slots
+    slots.scripts.OnClick(slots)
+
+    --- Every fontstring a container owns, including the ones inside its chips.
+    local function labelsOf(c, out)
+      if not c then return out end
+      for _, ch in ipairs(c._children or {}) do
+        if ch._kind == "FontString" then out[#out + 1] = ch end
+      end
+      for _, chip in ipairs(c.chips or {}) do
+        if chip and chip.text then out[#out + 1] = chip.text end
+      end
+      if c.chip and c.chip.text then out[#out + 1] = c.chip.text end
+      return out
+    end
+
+    local bad, seen = {}, {}
+    for i = 1, #panel.slotRows do
+      panel.slotRows[i].scripts.OnClick(panel.slotRows[i])
+
+      local watched = { panel.slotHead, panel.slotPanel }
+      for _, r in ipairs(panel.slotListRows) do watched[#watched + 1] = r end
+      for _, r in ipairs(panel.slotRoutes) do watched[#watched + 1] = r end
+
+      for _, c in ipairs(watched) do
+        if c:IsShown() then
+          for _, fs in ipairs(labelsOf(c, {})) do
+            local t = fs._text or ""
+            -- A visible, non-empty label must have been written while on
+            -- screen, and must have been written as a CHANGE.
+            if t ~= "" and not (fs._writeVisible and fs._writeChanged)
+              and not seen[t] then
+              seen[t] = true
+              bad[#bad + 1] = t
+            end
+          end
+        end
+      end
+    end
+    table.sort(bad)
+    local sample = {}
+    for i = 1, math.min(#bad, 6) do sample[i] = bad[i] end
+    check("every Slots label is written into a shown row, as a change",
+          #bad == 0, ("%d bad: %s"):format(#bad, table.concat(sample, " | ")))
+  end
+
+  -- ⚠️ THE SOURCE LINE HOLDS NO IN-FRAME MEASUREMENT (Session 260). Its three
+  -- runs used to be positioned by reading GetStringWidth in the same call that
+  -- set the string. On the first route Jason opened, the measurement came back
+  -- about a comma too short and the instance ran over its own ", " — the line
+  -- read "The Twin FangsThe Venomous Abyss" while the identical code one row
+  -- below rendered correctly, which is exactly what a stale measurement does.
+  -- Anchoring each run to the previous run's RIGHT EDGE leaves nothing to be
+  -- stale, and this asserts the anchor rather than the rendered result.
+  do
+    local slots = panel.tabs.Slots
+    slots.scripts.OnClick(slots)
+    -- Walk the slots until one actually draws a list row with a source on it.
+    -- Whichever slot the previous block left selected need not have one, and a
+    -- probe that silently inspects nothing is worse than no probe (S256).
+    local g
+    for i = 1, #panel.slotRows do
+      panel.slotRows[i].scripts.OnClick(panel.slotRows[i])
+      for _, r in ipairs(panel.slotListRows) do
+        if r:IsShown() and r.source and (r.source.boss._text or "") ~= "" then
+          g = r.source
+          break
+        end
+      end
+      if g then break end
+    end
+    check("a drawn Slots source line was found to inspect", g ~= nil)
+    if g then
+      local b, t = g.boss._points[1] or {}, g.rest._points[1] or {}
+      check("the boss name is anchored to the RIGHT of \"From \"",
+            b[1] == "LEFT" and b[2] == g.pre and b[3] == "RIGHT" and (b[4] or 0) == 0,
+            ("rel=%s x=%s"):format(tostring(b[3]), tostring(b[4])))
+      check("the instance is anchored to the RIGHT of the boss name",
+            t[1] == "LEFT" and t[2] == g.boss and t[3] == "RIGHT" and (t[4] or 0) == 0,
+            ("rel=%s x=%s"):format(tostring(t[3]), tostring(t[4])))
+    end
   end
 
   -- Post belongs to Current Drops only.

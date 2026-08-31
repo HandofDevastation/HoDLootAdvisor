@@ -1836,30 +1836,41 @@ end
 
 local function buildSourceLine(parent, x, y, width)
   local g = {}
-  g.pre  = at(text(parent, "light", "label", "body"), x, y, 40)
+  -- NO EXPLICIT WIDTH ON ANY RUN: each sizes itself to its own string, which is
+  -- what makes the RIGHT-edge anchoring below exact.
+  g.pre  = at(text(parent, "light", "label", "body"), x, y)
   g.boss = text(parent, "bold", "label", "white")
   g.rest = text(parent, "light", "label", "body")
+
+  -- ⚠️ ANCHORED TO EACH OTHER'S RIGHT EDGE, ONCE, AT BUILD TIME (Session 260).
+  -- These three runs used to be positioned by reading GetStringWidth in the very
+  -- call that set the string — a measurement the client has not taken yet on a
+  -- cold or first draw, the same trap Gloom's Build Barn hit in Session 246.
+  -- On the first route Jason opened it came out short by about the width of a
+  -- comma, so the instance run landed on top of its own ", " and the line read
+  -- "The Twin FangsThe Venomous Abyss" — while the identical code one row below
+  -- rendered correctly, which is exactly how a stale measurement looks.
+  -- There is no measurement left here to be stale.
   g.boss:ClearAllPoints()
-  g.boss:SetPoint("LEFT", g.pre, "LEFT", 0, 0)
+  g.boss:SetPoint("LEFT", g.pre, "RIGHT", 0, 0)
   g.rest:ClearAllPoints()
-  g.rest:SetPoint("LEFT", g.boss, "LEFT", 0, 0)
+  g.rest:SetPoint("LEFT", g.boss, "RIGHT", 0, 0)
   g.width = width
 
-  --- Lay the three runs end to end. Each anchor depends on the width of the run
-  --- before it, so this has to run AFTER the strings are set.
+  --- Write the three runs. Position is fixed at build time, so this only sets
+  --- strings — and sets them through a forced repaint, because a source line is
+  --- identity text on a RECYCLED row: the same boss can be written into the same
+  --- row twice, and the second write would not redraw (Session 254).
   function g:Set(src)
     if not src or not src.boss then
-      self.pre:SetText(""); self.boss:SetText(""); self.rest:SetText("")
+      setTextForce(self.pre, "")
+      setTextForce(self.boss, "")
+      setTextForce(self.rest, "")
       return
     end
-    self.pre:SetText("From ")
-    self.pre:SetWidth(0)
-    self.boss:SetText(src.boss)
-    self.rest:SetText(src.instance and (", " .. src.instance) or "")
-    self.boss:ClearAllPoints()
-    self.boss:SetPoint("LEFT", self.pre, "LEFT", (self.pre:GetStringWidth() or 0), 0)
-    self.rest:ClearAllPoints()
-    self.rest:SetPoint("LEFT", self.boss, "LEFT", (self.boss:GetStringWidth() or 0), 0)
+    setTextForce(self.pre, "From ")
+    setTextForce(self.boss, src.boss)
+    setTextForce(self.rest, src.instance and (", " .. src.instance) or "")
   end
 
   function g:SetShown(on)
@@ -3968,7 +3979,14 @@ local function renderSlots()
   local report = ns.SlotsReport and ns.SlotsReport(state.slotsView)
   if not report then return end
 
-  frame.slotSpec:SetText(report.specLabel or "")
+  -- ⚠️ EVERY IDENTITY STRING ON THIS PAGE GOES THROUGH setTextForce (Session
+  -- 260). This whole screen was built after the Session 254 fix and inherited
+  -- none of it: it wrote plain SetText into rows it had not shown yet, so on a
+  -- FIRST draw the item name, the OBTAINED BY heading and the classification
+  -- chip were all blank — permanently, since none of those strings changes
+  -- again while the same slot stays selected. Jason found three of them on the
+  -- first screen he opened.
+  setTextForce(frame.slotSpec, report.specLabel or "")
   for _, v in ipairs(ns.SLOT_VIEWS or {}) do
     if v.key == state.slotsView and frame.slotView then
       setLabel(frame.slotView, v.label)
@@ -3986,7 +4004,7 @@ local function renderSlots()
   for i, row in ipairs(frame.slotRows) do
     local data = report.rows[i]
     row.bg:SetShown(i == state.slotIndex)
-    row.label:SetText(data and data.label or "")
+    setTextForce(row.label, data and data.label or "")
     if data and data.check ~= "none" then
       row.check:Show()
       -- PARTIAL is the one-of-two case, drawn at the same hue and half the
@@ -4031,7 +4049,12 @@ local function renderSlots()
   frame.slotList:SetShown(not useSingle)
 
   if useSingle then
-    frame.slotHead.name:SetText(single.name or "")
+    -- The heading is written HERE rather than once at build time. Built, it was
+    -- set into a panel that is hidden until a tier slot is selected, so its
+    -- first paint never took — and "OBTAINED BY:" never changes, so nothing
+    -- could ever redraw it. It was blank on every client, forever.
+    setTextForce(frame.slotPanel.heading, "OBTAINED BY:")
+    setTextForce(frame.slotHead.name, ns.NonEmpty(single.name) or ns.LOADING_NAME)
     ITEM.SetIcon(frame.slotHead.icon, single.itemID, single.icon)
     ITEM.FitTip(frame.slotHead.nameHit, frame.slotHead.name, single.itemID,
       SL.headNameH)
@@ -4040,7 +4063,7 @@ local function renderSlots()
     -- ⚠️ THE KIND ALONE. The mock's second line reads "Tier Piece"; naming the
     -- slot again repeats what the selected rail row already says, an arm's
     -- length to the left.
-    frame.slotHead.slot:SetText(single.tierPiece and "Tier Piece" or sel.label)
+    setTextForce(frame.slotHead.slot, single.tierPiece and "Tier Piece" or sel.label)
 
     local shown = 0
     for i, r in ipairs(frame.slotRoutes) do
@@ -4051,14 +4074,15 @@ local function renderSlots()
         r:SetPoint("TOPLEFT", SL.panelPadX,
           -(SL.panelPadT + SL.headingH + SL.blockGap
             + (i - 1) * (SL.blockH + SL.blockGap)))
-        r.name:SetText(route.name or ns.LOADING_NAME)
+        -- Shown BEFORE anything is written into it — see setTextForce (S254).
+        r:Show()
+        setTextForce(r.name, ns.NonEmpty(route.name) or ns.LOADING_NAME)
         if r.chip then
           r.chip:Set(route.kind, ns.Style and ns.Style.COLOR.accent)
           r.chip:ClearAllPoints()
           r.chip:SetPoint("TOPRIGHT", r, "TOPRIGHT", 0, -1)
         end
         r.source:Set(route.source)
-        r:Show()
       else
         r:Hide()
       end
@@ -4072,7 +4096,12 @@ local function renderSlots()
     for i, row in ipairs(frame.slotListRows) do
       local pick = picks[i]
       if pick then
-        row.name:SetText(pick.name or "")
+        -- Shown BEFORE anything is written into it — see setTextForce (S254).
+        -- This is the row Jason opened on: the Head pick drew its source line
+        -- and its icon with NO NAME at all, because the name was written while
+        -- the row was still hidden and never changed afterwards.
+        row:Show()
+        setTextForce(row.name, ns.NonEmpty(pick.name) or ns.LOADING_NAME)
         ITEM.SetIcon(row.icon, pick.itemID, pick.icon)
         -- 16, not the row's 55: the name is one line of 13 Regular, and the
         -- source line 18px below it is a different item's worth of nothing.
@@ -4081,8 +4110,15 @@ local function renderSlots()
         if pick.owned then
           row.check:ClearAllPoints()
           -- 6px past the end of the string, so it travels with the name.
-          row.check:SetPoint("LEFT", row.name, "LEFT",
-            (row.name:GetStringWidth() or 0) + 6, 0)
+          --
+          -- ⚠️ ANCHORED TO THE TOOLTIP TARGET, NOT TO A SECOND MEASUREMENT
+          -- (Session 260). This read GetStringWidth itself, one line after the
+          -- name was written — the same in-frame measurement that put the
+          -- source line's comma underneath its own boss name. FitTip has
+          -- ALREADY measured that string to size the hit area directly above,
+          -- so the tick now rides that one result. One measurement, and the
+          -- tick cannot drift away from the region the tooltip covers.
+          row.check:SetPoint("LEFT", row.nameHit, "RIGHT", 6, 0)
           if ns.Style then
             row.check:SetVertexColor(ns.Style.rgb(ns.Style.COLOR.accent))
           end
@@ -4092,7 +4128,6 @@ local function renderSlots()
         row.source:Set(pick.source)
         -- Last visible row drops its rule, the same tell the rail uses.
         if row.rule then row.rule:SetShown(picks[i + 1] ~= nil) end
-        row:Show()
       else
         row:Hide()
       end

@@ -3481,6 +3481,17 @@ header("Dungeons as a content mode — tiles, pooled loot, and scoring")
       check("...and carries the guide's source, not a blank line",
             found and found.source and found.source.boss == dungeonSrc.boss,
             found and found.source and found.source.boss or "NO SOURCE LINE")
+      -- ⚠️ AND IS NOT CALLED A TIER PIECE (Session 260). tierPiece was
+      -- `rec == nil` — "absent from our RAID loot table" — which is equally
+      -- true of every dungeon drop, so a dungeon helm was given the TIER PIECE
+      -- chip, the tier layout, and an OBTAINED BY panel offering a token that
+      -- does not produce it. Jason found it on the first screen he opened.
+      -- This was the last consumer of the proxy Session 259 retired everywhere
+      -- else. A source we can actually NAME refutes the tier claim; absence of
+      -- one still only means we do not know.
+      check("...and is NOT labelled a tier piece",
+            found and found.tierPiece == false,
+            found and tostring(found.tierPiece))
       data.rankings[dungeonId] = nil
       stub.itemEquipLoc[dungeonId] = nil
     end

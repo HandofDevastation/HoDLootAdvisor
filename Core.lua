@@ -957,6 +957,13 @@ function ns.SlotsReport(view)
             for _, c in ipairs(q.contexts) do contexts[c] = true end
             local owned = false
             if ns.EquippedCopy then owned = ns.EquippedCopy(slotKey, itemID) end
+            -- Three sources, most authoritative first: our own raid table
+            -- (which names the boss the way the rest of the site does), then
+            -- the Adventure Guide, which is the ONLY place dungeon loot has a
+            -- source at all, then the item's own crafted claim.
+            local src = ns.ItemSource(itemID, rec)
+              or ns.JournalSource(itemID)
+              or ns.CraftedSource(q)
             bySlot[slotKey][#bySlot[slotKey] + 1] = {
               itemID = itemID,
               -- Through ns.ItemName, not rec.name: a BIS pick is usually one of
@@ -975,16 +982,25 @@ function ns.SlotsReport(view)
               -- Rendered through the SAME shape a boss line uses, so it picks
               -- up the same weights with no second code path: `boss` is the
               -- bold white run, and a crafted item has no instance to name.
-              -- Three sources, most authoritative first: our own raid table
-              -- (which names the boss the way the rest of the site does), then
-              -- the Adventure Guide, which is the ONLY place dungeon loot has a
-              -- source at all, then the item's own crafted claim.
-              source = ns.ItemSource(itemID, rec)
-                or ns.JournalSource(itemID)
-                or ns.CraftedSource(q),
+              source = src,
               owned = owned,
-              -- A piece nothing drops and no token IS is one the catalyst makes.
-              tierPiece = (rec == nil),
+              -- ⚠️ "NOT IN OUR RAID TABLE" IS NOT "TIER PIECE" (Session 260,
+              -- Jason: Worldroot Canopy is not a tier piece). This was the LAST
+              -- consumer of the proxy the Session 259 box retired everywhere
+              -- else — a question equally TRUE of dungeon loot, crafted gear,
+              -- world bosses and Delve gear, so it is wrong for four of five.
+              -- A dungeon helm is absent from our raid table, so it was given
+              -- the TIER PIECE chip, the tier layout, and an OBTAINED BY panel
+              -- offering a token that does not produce it.
+              --
+              -- ⚠️ THIS IS A NARROWING, NOT THE POSITIVE TEST. A source we can
+              -- actually name REFUTES the tier claim; absence of one still only
+              -- means we do not know. The real answer is Blizzard's own item-set
+              -- membership, which the SITE can already resolve and the emitter
+              -- should ship as a flag — the same "emit the answer, never infer
+              -- it in Lua" move that fixed the item level and the crafted line.
+              -- Until then a genuine tier piece is the residue, not a claim.
+              tierPiece = (rec == nil) and (src == nil),
             }
           end
         end
