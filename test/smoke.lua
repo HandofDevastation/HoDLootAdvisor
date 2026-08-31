@@ -3356,6 +3356,149 @@ header("Dungeons as a content mode — tiles, pooled loot, and scoring")
   check("an item outside our loot table gets no raid link at all",
         ns.RaidItemLink(880002, "m") == nil, tostring(ns.RaidItemLink(880002, "m")))
 
+  -- ── THE SOURCE'S OWN BONUS IDS (Session 259) ──────────────────────────────
+  --
+  -- ⚠️ THE POINT IS AN ITEM WE KNOW NOTHING ELSE ABOUT. Everything above needs a
+  -- record in our loot table to answer at all; a crafted BIS pick has none, and
+  -- guessing one from its absence is what put a crafted bracer at ITEM LEVEL 28
+  -- beside an equipped 311. So this stages an id that is deliberately NOT in the
+  -- payload's items, which is the only case that proves the new path.
+  do
+    local data = ns.Data()
+    local CRAFTED = 880777
+    local me = ns.ResolveCharacter()
+    local key = me.className .. "/" .. me.specName
+    check("the staged id really is outside our loot table",
+          (data.items or {})[CRAFTED] == nil)
+
+    data.rankings[CRAFTED] = { [key] = { b = "overall", bi = "13751:12497:13836" } }
+    local link = ns.BisItemLink(CRAFTED, me.className, me.specName, me.heroTree)
+    check("a pick with stated bonus ids gets a link from them", link ~= nil, tostring(link))
+    local p = link and ns.ParseItemLink(link)
+    check("...carrying all three, in the source's own order",
+          p and p.bonusIDs and #p.bonusIDs == 3
+            and p.bonusIDs[1] == 13751 and p.bonusIDs[2] == 12497 and p.bonusIDs[3] == 13836,
+          link)
+    check("...and it is NOT a bare item string, which tooltips at base level",
+          link and not link:match("^item:%d+$"), link)
+
+    -- ⚠️ A MALFORMED ID MUST NOT REACH THE CLIENT. One harvested string carries
+    -- what looks like an item id in the bonus field; a bad value renders a
+    -- nonsense tooltip rather than erroring, which is the failure mode this
+    -- whole change exists to remove.
+    data.rankings[CRAFTED] = { [key] = { b = "overall", bi = "nonsense" } }
+    check("a malformed bonus string yields no link rather than a bad one",
+          ns.BisItemLink(CRAFTED, me.className, me.specName, me.heroTree) == nil)
+
+    -- The common case for a catalyse SOURCE: the guide publishes ids for the
+    -- piece it lists, never for the drop that becomes it.
+    data.rankings[CRAFTED] = { [key] = { b = "overall" } }
+    check("a pick with no stated ids yields nil, so the caller keeps its own link",
+          ns.BisItemLink(CRAFTED, me.className, me.specName, me.heroTree) == nil)
+
+    -- ── "FROM CRAFTED" IS A CLAIM, NOT AN INFERENCE (Session 259) ──────────
+    --
+    -- ⚠️ THE SECOND HALF IS THE IMPORTANT ONE. Labelling from `rec == nil` was
+    -- the tempting fix and it is wrong: dungeon loot, tier pieces, world bosses
+    -- and Delve gear are all equally absent from our raid table, so that rule
+    -- would have called every one of them Crafted. The pair below is what pins
+    -- it — same absence, opposite answers, decided by what the item SAYS.
+    check("an item whose description says Crafted gets a source line",
+          (ns.CraftedSource({ nameDesc = "Tidal Crafted" }) or {}).boss == "Crafted")
+    check("...rendered as a BOSS line, so it inherits those weights with no branch",
+          ns.CraftedSource({ nameDesc = "Tidal Crafted" }).instance == nil)
+    check("...and it is case-insensitive, since the prefix varies by season",
+          (ns.CraftedSource({ nameDesc = "SOME OTHER CRAFTED" }) or {}).boss == "Crafted")
+    check("a dungeon item saying Mythic+ is NOT called crafted",
+          ns.CraftedSource({ nameDesc = "Mythic+" }) == nil)
+    check("an item with NO description is not called crafted either",
+          ns.CraftedSource({}) == nil and ns.CraftedSource(nil) == nil)
+
+    -- End to end through the report: the same staged id, once claiming crafted
+    -- and once not, with everything else identical.
+    local function pickFor(nd)
+      data.rankings[CRAFTED] = { [key] = { b = "overall", bx = { "overall" }, nd = nd } }
+      stub.itemEquipLoc[CRAFTED] = "INVTYPE_WRIST"
+      local rep = ns.SlotsReport("overall")
+      for _, row in ipairs(rep.rows) do
+        for _, p in ipairs(row.picks) do if p.itemID == CRAFTED then return p end end
+      end
+    end
+    local craftedPick = pickFor("Tidal Crafted")
+    check("the report gives a crafted BIS pick its source line",
+          craftedPick and craftedPick.source and craftedPick.source.boss == "Crafted",
+          craftedPick and craftedPick.source and craftedPick.source.boss)
+    local plainPick = pickFor(nil)
+    check("...and the SAME item with no claim gets no source line at all",
+          plainPick and plainPick.source == nil,
+          plainPick and plainPick.source and plainPick.source.boss)
+
+    -- ── DUNGEON LOOT GETS ITS SOURCE FROM THE GUIDE (Session 259) ─────────
+    --
+    -- ⚠️ THE CASE THAT WAS SILENTLY BLANK. loot_items holds RAID loot only, so
+    -- every dungeon BIS pick drew no second line at all — and a missing line is
+    -- invisible in a way a wrong one is not, which is why it survived until
+    -- Jason listed the items by name. The guide is the only thing that knows.
+    local idx = ns.Journal and ns.Journal.SourceIndex and ns.Journal.SourceIndex()
+    check("the journal builds an itemID -> source index", type(idx) == "table")
+    local anyItem, anyEntry
+    for id, e in pairs(idx or {}) do anyItem, anyEntry = id, e; break end
+    check("...with at least one item in it, so the checks below mean something",
+          anyItem ~= nil)
+    if anyItem then
+      local src = ns.JournalSource(anyItem)
+      check("...and JournalSource names the boss for one",
+            src and ns.NonEmpty(src.boss) ~= nil, src and src.boss)
+      check("...and the instance it sits in",
+            src and ns.NonEmpty(src.instance) ~= nil, src and src.instance)
+    end
+    check("an item the guide has never heard of gets no line invented for it",
+          ns.JournalSource(880999) == nil)
+
+    -- ⚠️ AND THROUGH THE REPORT, WHICH IS THE BUG AS REPORTED. Testing
+    -- ns.JournalSource on its own passed with the call site deleted — the probe
+    -- did not bite, which is the S256 rule saying the check was aimed at the
+    -- wrong thing. What Jason saw was a dungeon pick with a blank second line,
+    -- so the assertion has to run the pick through SlotsReport.
+    local dungeonId, dungeonSrc
+    for id, e in pairs(idx or {}) do
+      if not (data.items or {})[id] and ns.NonEmpty(e.boss) then
+        dungeonId, dungeonSrc = id, e
+        break
+      end
+    end
+    check("the guide names an item our raid table does NOT, to stage with",
+          dungeonId ~= nil)
+    if dungeonId then
+      data.rankings[dungeonId] = { [key] = { b = "overall", bx = { "overall" } } }
+      stub.itemEquipLoc[dungeonId] = "INVTYPE_FINGER"
+      local rep = ns.SlotsReport("overall")
+      local found
+      for _, row in ipairs(rep.rows) do
+        for _, p in ipairs(row.picks) do if p.itemID == dungeonId then found = p end end
+      end
+      check("a dungeon BIS pick reaches the report", found ~= nil)
+      check("...and carries the guide's source, not a blank line",
+            found and found.source and found.source.boss == dungeonSrc.boss,
+            found and found.source and found.source.boss or "NO SOURCE LINE")
+      data.rankings[dungeonId] = nil
+      stub.itemEquipLoc[dungeonId] = nil
+    end
+
+    -- ⚠️ THE INDEX MUST NOT FREEZE HALF-EMPTY. A first look at the guide is
+    -- cold, so an index memoised at that moment would be permanently short —
+    -- the async trap this addon has hit repeatedly. Loot arriving clears it.
+    local before = ns.Journal.SourceIndex()
+    check("the index is memoised while nothing changes",
+          ns.Journal.SourceIndex() == before)
+    ns.Journal.CachedLoot(anyEntry and 0 or 0)
+    check("...and is rebuilt as soon as any loot is read again",
+          ns.Journal.SourceIndex() ~= before)
+
+    data.rankings[CRAFTED] = nil
+    stub.itemEquipLoc[CRAFTED] = nil
+  end
+
   stub.items[chestId] = savedItem
 
   -- ── THE GREAT VAULT LEVEL ─────────────────────────────────────────────────

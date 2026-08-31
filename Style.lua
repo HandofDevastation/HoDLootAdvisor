@@ -443,7 +443,22 @@ function Style.Surface(frame, color, alpha, rimColor, rimAlpha)
   local c = color or Style.COLOR.bg
   local bg = frame:CreateTexture(nil, "BACKGROUND")
   bg:SetAllPoints()
-  bg:SetColorTexture(c.r, c.g, c.b, alpha or 0.96)
+  -- Opaque by default. This was 0.96, which would have composited 4% of the
+  -- game scene into any surface painted without an explicit alpha.
+  --
+  -- ⚠️ AND IT WAS NOT THE CAUSE OF ANYTHING — recorded because I announced it as
+  -- the answer to "why aren't the colours the values I specified" and it is not
+  -- (Session 259). EVERY window overpaints this texture with an opaque one of
+  -- its own: Style.PanelGround for the panel, and S.Surface(..., 1) in
+  -- LoadWindow, RecordWindow and Settings, each hiding frame.bgTex first. The
+  -- 0.96 never reached the screen anywhere. THE REVERT-CHECK IS WHAT CAUGHT
+  -- THIS: putting 0.96 back changed no assertion, which is the S256 rule
+  -- working — a probe that does not bite is telling you something.
+  --
+  -- Kept at 1 anyway, as a default nobody chose is a trap for the next surface
+  -- that forgets an alpha. An explicit value still wins, which is what the
+  -- deliberate 10% washes pass.
+  bg:SetColorTexture(c.r, c.g, c.b, alpha or 1)
   frame.bgTex = bg
   if rimColor then
     frame.rim = Style.Rim(frame, rimColor, rimAlpha or 1)
@@ -1203,7 +1218,11 @@ function Style.Window(frame)
     end
   end
 
-  Style.Surface(frame, Style.COLOR.bg, 0.96)
+  -- Opaque, matching Style.Surface's default. ⚠️ This is NOT load-bearing and
+  -- was briefly mistaken for the cause of a colour mismatch: every window paints
+  -- its own opaque ground over this one, so whatever alpha is used here never
+  -- reaches the screen. See the note in Style.Surface.
+  Style.Surface(frame, Style.COLOR.bg, 1)
   if frame.bgTex then frame.bgTex:SetDrawLayer("BACKGROUND", -8) end
 
   -- A title bar the same colour as the site's card header, so the window reads

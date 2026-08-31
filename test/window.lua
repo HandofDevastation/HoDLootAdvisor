@@ -124,7 +124,15 @@ function real.IsShown(self) return self._shown end
 function real.IsVisible(self) return self._shown end
 
 function real.SetWidth(self, w) self._width = w end
-function real.SetHeight(self, h) self._height = h end
+-- ⚠️ RECORDS THAT IT WAS CALLED, NOT JUST THE VALUE (Session 259). Widgets
+-- default to _height = 20, which happens to equal the ranking row's pitch — so a
+-- check reading GetHeight() == 20 passed whether the addon set a height or not,
+-- and the revert-check for a real alignment fix came back green. A default that
+-- collides with a value under test makes the test unfalsifiable.
+function real.SetHeight(self, h) self._height = h; self._heightSet = true end
+-- Recorded rather than invented: vertical justification is half of what makes a
+-- cell centre in its row, and a no-op here cannot tell the two apart.
+function real.SetJustifyV(self, v) self._justifyV = v end
 function real.SetSize(self, w, h) self._width, self._height = w, h end
 function real.GetWidth(self) return self._width end
 function real.GetHeight(self) return self._height end
@@ -220,8 +228,34 @@ _G.NORMAL_FONT_COLOR = { r = 1, g = 0.82, b = 0 }
 -- The minimap button anchors to Minimap and reads its scale; without it the
 -- login sequence dies before Settings is ever initialised.
 _G.Minimap = newWidget("Frame", "Minimap")
+-- ⚠️ RECORDING, NOT INVENTED (Session 259). SetHyperlink fell through to the
+-- invented-method path, so it answered a no-op and a hover test could only ever
+-- prove that nothing ERRORED — which is the exact claim Core §1.1's "A GREEN
+-- HARNESS IS NOT A LIKENESS" says is not the job. These four are methods the
+-- client really has; recording what they were HANDED is what lets a check assert
+-- that the tooltip opened on the right item.
 _G.GameTooltip = newWidget("Frame", "GameTooltip")
+_G.GameTooltip.calls = { owner = nil, link = nil, lines = {}, shown = false }
+function _G.GameTooltip:SetOwner(o, anchor)
+  self.calls.owner, self.calls.anchor = o, anchor
+  self.calls.link, self.calls.lines = nil, {}
+end
+function _G.GameTooltip:SetHyperlink(link) self.calls.link = link end
+function _G.GameTooltip:AddLine(t) self.calls.lines[#self.calls.lines + 1] = t end
+function _G.GameTooltip:Show() self.calls.shown = true; real.Show(self) end
+function _G.GameTooltip:Hide() self.calls.shown = false; real.Hide(self) end
 _G.GameFontNormal = newWidget("Font", "GameFontNormal")
+-- ⚠️ DECLARED, BECAUSE ITS ABSENCE WAS INVISIBLE (Session 259). The icon fill
+-- falls back to a question mark when the client cannot answer, so with no
+-- GetItemIcon at all the harness took the FALLBACK path on every row and a
+-- check reading "the icon was given a texture" passed without once exercising
+-- the real one. A stub quieter than the client reports green on code it never
+-- ran. The client has this; so does the double, and the checks now assert the
+-- texture is NOT the fallback.
+_G.GetItemIcon = function(itemID)
+  if not itemID then return nil end
+  return ("Interface\\Icons\\stub_%d"):format(itemID)
+end
 -- CreateColor returns the table SetGradient is handed, so a test can compare
 -- the stops it was actually given.
 _G.CreateColor = function(r, g, b, a) return { r = r, g = g, b = b, a = a or 1 } end
@@ -604,9 +638,18 @@ do
     -- layout choice exists to avoid.
     check("...with at least one route drawn",
           panel.slotRoutes and panel.slotRoutes[1]:IsShown())
-    check("...and the panel is as tall as the routes it holds",
-          panel.slotPanel:GetHeight() >= 101,
-          panel.slotPanel:GetHeight())
+    -- ⚠️ THE NODE'S ARITHMETIC, NOT ">= SOMETHING" (Session 259). The old form
+    -- was ">= 101", which passed for a panel of any height above a floor — so
+    -- the 20px block gap being wrong by half went unseen. Node 590:2055 is 131
+    -- tall for two routes: 14 above the heading, a 17 heading, 10, then 30-per
+    -- route with 10 between, then 20 below.
+    local shown = 0
+    for _, r in ipairs(panel.slotRoutes or {}) do if r:IsShown() then shown = shown + 1 end end
+    local wantH = 14 + 17 + 10 + shown * 30 + math.max(0, shown - 1) * 10 + 20
+    check("...and the panel is exactly as tall as the routes it holds",
+          panel.slotPanel:GetHeight() == wantH,
+          ("%s routes: got %s, node says %s"):format(shown,
+            panel.slotPanel:GetHeight(), wantH))
   end
 
   -- ⚠️ EXACTLY ONE LAYOUT IS EVER ON SCREEN. Both being shown would draw the
@@ -627,6 +670,119 @@ do
   -- branch, the line above proves only half of what it claims.
   check("...and the sweep actually reached both layouts", sawSingle)
 
+  -- ── Hovering a BIS name opens the game's item card (Session 259) ─────────
+  --
+  -- ⚠️ ASSERT THE VALUE, NOT THE ABSENCE OF AN ERROR. Firing OnEnter and
+  -- checking it did not throw would pass with SetHyperlink never called at all,
+  -- which is the whole of Core §1.1's "A GREEN HARNESS IS NOT A LIKENESS". So
+  -- these read back WHICH link the tooltip was handed and WHERE the hit area
+  -- actually sits.
+  -- The link a catalogue row is expected to tooltip with. Mirrors
+  -- ITEM.CatalogueLink, which is panel-local: raid loot at Mythic, everything
+  -- else at the fixed M+ drop. Derived from the payload rather than hardcoded,
+  -- so it cannot go stale against a new season's data.
+  local function catalogueLink(itemID)
+    -- ⚠️ THE SOURCE'S STATED IDS COME FIRST, and this mirror has to say so. It
+    -- did not, and both hover checks went red the moment the payload started
+    -- carrying them — the TEST was stale, not the panel. Worth keeping as a
+    -- note: a mirror of production logic is a second implementation, and it
+    -- drifts exactly like any other.
+    local me = ns.ResolveCharacter()
+    local stated = me and ns.BisItemLink(itemID, me.className, me.specName, me.heroTree)
+    if stated then return stated end
+    local data = ns.Data()
+    if data and (data.items or {})[itemID] then
+      return ns.RaidItemLink(itemID, "m") or ns.ItemLinkFor(itemID, "m")
+    end
+    return ns.MplusItemLink(itemID)
+  end
+
+  do
+    -- Land on a slot that draws the LIST, since that is the common case.
+    local listRow
+    for i = 1, #(panel.slotRows or {}) do
+      panel.slotRows[i].scripts.OnClick(panel.slotRows[i])
+      if panel.slotList:IsShown() and panel.slotListRows[1]:IsShown() then
+        listRow = panel.slotListRows[1]
+        break
+      end
+    end
+    check("a slot draws the candidate list, to hover a name in", listRow ~= nil)
+
+    if listRow then
+      -- Geometry is asserted further down; this is the RENDER half — that the
+      -- row was actually pointed at an item's artwork rather than left holding
+      -- the previous item's, or nothing at all.
+      check("a drawn row's icon shows the ITEM's art, not the question mark",
+            listRow.icon and listRow.icon._texture ~= nil
+              and not listRow.icon._texture:match("QuestionMark"),
+            listRow.icon and listRow.icon._texture)
+
+      local hit, fs = listRow.nameHit, listRow.name
+      check("the BIS name carries a hover target", hit ~= nil and hit:IsShown())
+      check("...that knows which item it is over",
+            hit and type(hit.itemID) == "number", hit and hit.itemID)
+
+      -- ⚠️ THE REVERT-CHECK FOR THIS ONE IS THE WIDTH. Every name here is given
+      -- a 300px wrapping ceiling, so a hit area measured with GetWidth instead
+      -- of GetStringWidth would arm the tooltip across half an empty row and
+      -- pass every other check in this block.
+      local strW = fs:GetStringWidth()
+      check("...sized to the string, not to the 300px wrapping ceiling",
+            hit and strW > 0 and hit:GetWidth() == strW and hit:GetWidth() < 300,
+            ("hit %s vs string %s"):format(tostring(hit and hit:GetWidth()), tostring(strW)))
+      check("...and only as tall as the one line it covers, not the 55px row",
+            hit and hit:GetHeight() == 16, hit and hit:GetHeight())
+
+      GameTooltip.calls = { lines = {} }
+      drive("hovering a BIS name", function() hit.scripts.OnEnter(hit) end)
+      check("...opens the game's item card on that item",
+            GameTooltip.calls.link == catalogueLink(hit.itemID)
+              and GameTooltip.calls.link ~= nil,
+            GameTooltip.calls.link)
+      -- ⚠️ THE CHECK THAT WOULD HAVE CAUGHT SESSION 259's ilvl-28 REPORT. A bare
+      -- "item:251222" is a perfectly valid link and tooltips at the item's BASE
+      -- level — 28, beside an equipped 311 — so every other assertion here
+      -- passed while the panel showed a number that made the whole page look
+      -- wrong. A catalogue row must never hand the client a link with no bonus
+      -- ids on it.
+      check("...never a bare item string, which tooltips at BASE level",
+            GameTooltip.calls.link and not GameTooltip.calls.link:match("^item:%d+$"),
+            GameTooltip.calls.link)
+      check("...anchored to the cursor", GameTooltip.calls.anchor == "ANCHOR_CURSOR",
+            GameTooltip.calls.anchor)
+      check("...and shown", GameTooltip.calls.shown == true)
+      -- The Slots rows have no OnClick, so a targeting hint here would promise
+      -- an interaction the page does not have.
+      check("...with no right-click hint, which this page cannot honour",
+            #GameTooltip.calls.lines == 0, #GameTooltip.calls.lines)
+
+      drive("leaving a BIS name", function() hit.scripts.OnLeave(hit) end)
+      check("...closes it again", GameTooltip.calls.shown == false)
+    end
+
+    -- The tier-piece header is the other place a BIS item's name is drawn.
+    if staged then
+      drive("returning to the single-item layout", function()
+        for i, r in ipairs(ns.SLOT_ROWS) do
+          if r.key == stagedSlot then panel.slotRows[i].scripts.OnClick(panel.slotRows[i]) end
+        end
+      end)
+      local hit = panel.slotHead.nameHit
+      check("the tier piece's name carries one too",
+            hit and hit:IsShown() and type(hit.itemID) == "number", hit and hit.itemID)
+      GameTooltip.calls = { lines = {} }
+      drive("hovering the tier piece's name", function() hit.scripts.OnEnter(hit) end)
+      check("...and opens the item card on the tier piece",
+            GameTooltip.calls.link == catalogueLink(hit.itemID)
+              and GameTooltip.calls.link ~= nil,
+            GameTooltip.calls.link)
+      check("...also at a real drop level, not the base one",
+            GameTooltip.calls.link and not GameTooltip.calls.link:match("^item:%d+$"),
+            GameTooltip.calls.link)
+    end
+  end
+
   -- Leaving the tab must take the page's furniture with it.
   local loot = panel.tabs and panel.tabs.Loot
   if loot then
@@ -634,6 +790,272 @@ do
     check("the rail does not draw over another tab", not panel.slotRail:IsShown())
     check("neither Slots layout draws over another tab",
           not panel.slotPanel:IsShown() and not panel.slotList:IsShown())
+  end
+end
+
+
+header("The item icon and the gutter it opens (Session 259)")
+
+-- ⚠️ THESE READ NUMBERS BACK OFF THE WIDGETS, which is the only kind of check
+-- that can see a layout change. Every assertion here is a value from a Figma
+-- node — 591:2187 and 608:77 (the Slots identity block), 591:2178 and 608:82
+-- (a Slots list row), 590:2055 (OBTAINED BY) and 577:878 (the Loot header).
+do
+  local function pointOf(w)
+    local p, x, y = w:GetPoint()
+    return p, x, y
+  end
+
+  -- ── One icon, one size, on all three surfaces ──────────────────────────
+  local icons = {
+    { "the Loot detail header", panel.itemIcon },
+    { "the Slots identity block", panel.slotHead and panel.slotHead.icon },
+    { "a Slots list row", panel.slotListRows and panel.slotListRows[1].icon },
+  }
+  for _, e in ipairs(icons) do
+    local label, tex = e[1], e[2]
+    check(("%s draws an item icon"):format(label), tex ~= nil)
+    if tex then
+      check(("...at 32, the size every one of them shares"):format(label),
+            tex:GetWidth() == 32 and tex:GetHeight() == 32,
+            ("%sx%s"):format(tex:GetWidth(), tex:GetHeight()))
+      -- The S258 pair: a mask alone leaves the four points where a circle
+      -- touches its square, which is exactly where WoW bakes the icon border.
+      check("...cropped to shed the baked-in border",
+            tex._texCoord ~= nil and tex._texCoord[1] == 0.08, tex._texCoord and tex._texCoord[1])
+      check("...and masked to a circle", (tex._masks or 0) > 0, tex._masks)
+    end
+  end
+
+  -- ── The gutter every text run moved into ──────────────────────────────
+  if panel.slotHead then
+    local _, x, y = pointOf(panel.slotHead.icon)
+    check("the Slots icon sits one below the two-line block", x == 0 and y == -1,
+          ("%s,%s"):format(x, y))
+    local _, nx = pointOf(panel.slotHead.name)
+    check("...with the item name 42 to its right", nx == 42, nx)
+    check("...and the block is 34 tall, not one line's 18",
+          panel.slotHead:GetHeight() == 34, panel.slotHead:GetHeight())
+    local _, sx = pointOf(panel.slotHead.slot)
+    check("...and the kind line is indented to the name, not the icon",
+          sx == 272, sx)
+  end
+
+  local lr = panel.slotListRows and panel.slotListRows[1]
+  if lr then
+    local _, ix, iy = pointOf(lr.icon)
+    check("a list row's icon sits at the block's centre line", ix == 0 and iy == -11,
+          ("%s,%s"):format(ix, iy))
+    local _, nx, ny = pointOf(lr.name)
+    check("...its name is in the gutter at 42", nx == 42 and ny == -10,
+          ("%s,%s"):format(nx, ny))
+    local _, px, py = pointOf(lr.source.pre)
+    check("...and so is its source line, on the same left edge",
+          px == 42 and py == -28, ("%s,%s"):format(px, py))
+  end
+
+  -- ── OBTAINED BY moved in under the name and narrowed ──────────────────
+  if panel.slotPanel then
+    local _, px = pointOf(panel.slotPanel)
+    check("OBTAINED BY is indented to the text column", px == 272, px)
+    check("...and narrowed to match, so its right edge still lands on the pane's",
+          panel.slotPanel:GetWidth() == 428 and px + 428 == 700,
+          panel.slotPanel:GetWidth())
+    local r = panel.slotRoutes and panel.slotRoutes[1]
+    check("...and a route inside it is 388, not the pane's width less padding",
+          r and r:GetWidth() == 388, r and r:GetWidth())
+  end
+
+  -- ── The Loot header came down with it ─────────────────────────────────
+  do
+    local _, nx = pointOf(panel.itemName)
+    check("the Loot header's name column moved left with the smaller icon",
+          nx == 306, nx)
+    -- 32 against a 34-tall block puts the block ONE ABOVE the icon, not three
+    -- below it. Asserting the centres agree is what survives a size change.
+    local _, _, iy = pointOf(panel.itemIcon)
+    local _, _, by = pointOf(panel.itemName)
+    check("...and the block and the icon still share a centre line",
+          (-by) + 17 == (-iy) + 16, ("block %s, icon %s"):format(-by, -iy))
+  end
+end
+
+
+header("Every window's ground is OPAQUE (Session 259)")
+
+-- A translucent ground would mean no colour on it is the specified one: it would
+-- be the value plus a share of the game scene, which changes as the world does.
+--
+-- ⚠️ THESE PASS TODAY AND ALWAYS DID. The shared surface defaulted to 0.96 and
+-- that looked like the answer to "why are the colours wrong" — but every window
+-- overpaints it with an opaque ground of its own, so the default never reached
+-- the screen. Putting 0.96 back changes NOTHING here, which is how that was
+-- caught. Kept as a REGRESSION guard on the property that matters, not as
+-- evidence of a bug that was fixed: if any window ever stops laying its own
+-- ground, this is what notices.
+--
+-- The stub records what SetColorTexture was handed, so the alpha is readable.
+do
+  local function groundAlpha(f)
+    local t = f and f.bgTex
+    return t and t._color and t._color[4]
+  end
+
+  -- ⚠️ BUILD THEM FIRST, AND NAME THEM BY THE GLOBAL THE ADDON ACTUALLY SETS.
+  -- The first version of this reached for ns.RecordWindow.Frame() and friends,
+  -- which do not exist — so three of the four rows were nil, the loop skipped
+  -- them, and the block passed having checked ONLY the panel. A check that goes
+  -- quiet about the cases it was written for is the S249 trap.
+  ns.LoadWindow.Toggle(); ns.RecordWindow.Toggle(); ns.Settings.Toggle()
+  local windows = {
+    { "the panel", panel },
+    { "the Loot Log", _G.HoDLootAdvisorLootLog },
+    { "the Import window", _G.HoDLootAdvisorLoadFrame },
+    { "the Settings window", _G.HoDLootAdvisorConfigFrame },
+  }
+  for _, e in ipairs(windows) do
+    local label, f = e[1], e[2]
+    check(("%s exists, so the next check means something"):format(label), f ~= nil)
+    local a = groundAlpha(f)
+    check(("%s's ground is fully opaque"):format(label), a == 1,
+          ("alpha %s"):format(tostring(a)))
+  end
+
+  -- ⚠️ AND THE COLOUR, WHICH IS THE THING ACTUALLY BEING ASKED ABOUT. Asserting
+  -- the alpha alone passes for a ground painted fully opaque in the WRONG hue —
+  -- and #0d0d14 (the shared window fill) against #0c0721 (the panel's) is
+  -- exactly that: both near-black, one bluish-grey and one violet, and only a
+  -- side-by-side shows it. Read the value back and compare it to the token.
+  local function hexOf(f)
+    local c = f and f.bgTex and f.bgTex._color
+    if not c then return "none" end
+    return ("%02x%02x%02x"):format(
+      math.floor(c[1] * 255 + 0.5), math.floor(c[2] * 255 + 0.5), math.floor(c[3] * 255 + 0.5))
+  end
+  check("the panel's ground is the design's #0c0721", hexOf(panel) == "0c0721", hexOf(panel))
+  check("...and NOT the shared window fill #0d0d14", hexOf(panel) ~= "0d0d14", hexOf(panel))
+  check("the secondary windows use their own #1c1228",
+        hexOf(_G.HoDLootAdvisorLootLog) == "1c1228", hexOf(_G.HoDLootAdvisorLootLog))
+  for i = #ns.windowStack, 1, -1 do ns.EscapeTop() end
+  ns.Panel.Show()
+
+  -- The deliberate washes are UNAFFECTED — they pass an explicit alpha, and
+  -- asserting that is what stops a future "make it all opaque" flattening them.
+  check("a deliberate 10% wash still reads 0.1",
+        panel.slotPanel and panel.slotPanel.bgTex and panel.slotPanel.bgTex._color
+          and math.abs(panel.slotPanel.bgTex._color[4] - 0.1) < 0.001,
+        panel.slotPanel and panel.slotPanel.bgTex and panel.slotPanel.bgTex._color
+          and panel.slotPanel.bgTex._color[4])
+end
+
+
+header("A ranking row's cells share one centre line (Session 259)")
+
+-- ⚠️ THE HOVER HIGHLIGHT IS WHAT EXPOSED THIS, not any check in this file. Every
+-- text cell was anchored TOPLEFT with no height, so each drew wherever its own
+-- line box landed — and that differs by font and size, so the 14px Bold rank,
+-- the 11px Light name and the 12px chips settled on three different lines. The
+-- chips were the only elements ever centred, being anchored LEFT.
+--
+-- Geometry checks passed throughout, because every cell was at the x it should
+-- be. Alignment is a property BETWEEN cells, so it has to be asserted that way.
+do
+  local r = panel.rows and panel.rows[1]
+  if r then
+    for _, e in ipairs({ { "rank", r.rank }, { "name", r.name },
+                         { "gain", r.gain }, { "priority", r.pr }, { "source", r.src } }) do
+      local label, fs = e[1], e[2]
+      -- _heightSet, not GetHeight(): the stub's default height is 20 and so is
+      -- the row pitch, so comparing the value alone cannot fail.
+      check(("the %s cell is GIVEN the row's height"):format(label),
+            fs and fs._heightSet and fs:GetHeight() == 20,
+            fs and ("set=%s h=%s"):format(tostring(fs._heightSet), tostring(fs:GetHeight())))
+      check(("...and centres vertically inside it"):format(label),
+            fs and fs._justifyV == "MIDDLE", fs and tostring(fs._justifyV))
+      local _, _, y = fs:GetPoint()
+      check(("...anchored at the row's top, not inset"):format(label), y == 0, y)
+    end
+    -- The property that actually matters: they all resolve to the same centre.
+    -- A cell 20 tall anchored at 0 centres at 10 whatever font it carries.
+    local centres = {}
+    for _, fs in ipairs({ r.rank, r.name, r.gain, r.pr, r.src }) do
+      local _, _, y = fs:GetPoint()
+      centres[#centres + 1] = (-(y or 0)) + (fs:GetHeight() or 0) / 2
+    end
+    local same = true
+    for i = 2, #centres do if centres[i] ~= centres[1] then same = false end end
+    check("every cell in the row shares one centre line", same, table.concat(centres, ", "))
+  end
+end
+
+
+header("The identity block's two lines (Session 259)")
+
+-- ⚠️ SIZE ALONE CANNOT SEPARATE THESE AND IS NOT MEANT TO. Nodes 591:2189 and
+-- 591:2195 are 13 Regular blush over 12 Light white — one pixel apart, so what
+-- distinguishes them is WEIGHT and COLOUR. That makes the pair easy to "fix"
+-- toward a size difference the design does not have, which is what these pin.
+do
+  local function fontOf(fs) return fs and fs._font or "" end
+
+  local n, k = panel.slotHead and panel.slotHead.name, panel.slotHead and panel.slotHead.slot
+  check("the Slots item name is 13", n and n._size == 13, n and n._size)
+  check("...and Regular, not Light", fontOf(n):match("Manrope%-Regular") ~= nil, fontOf(n))
+  check("the kind line is 12", k and k._size == 12, k and k._size)
+  check("...and Light, which is what separates them",
+        fontOf(k):match("Manrope%-Light") ~= nil, fontOf(k))
+
+  -- ⚠️ THE LINE BOXES, WHICH IS WHERE THIS BLOCK WAS ACTUALLY WRONG. Both lines
+  -- were the right size and neither had an explicit height, so each drew
+  -- wherever its own line box landed instead of stacking 18-over-16 into the
+  -- node's 34. Sizes passing while the stack is wrong is exactly why this
+  -- asserts the heights separately.
+  check("the name's line box is the node's 18", n and n:GetHeight() == 18, n and n:GetHeight())
+  check("the kind line's is 16", k and k:GetHeight() == 16, k and k:GetHeight())
+  check("...and together they are the block's 34",
+        n and k and (n:GetHeight() + k:GetHeight()) == 34)
+
+  -- The same treatment the Loot detail header already had, asserted so the two
+  -- surfaces cannot drift apart.
+  check("the Loot header's name line box is 18 too",
+        panel.itemName:GetHeight() == 18, panel.itemName:GetHeight())
+  check("...and its second line 16", panel.itemSub:GetHeight() == 16, panel.itemSub:GetHeight())
+end
+
+
+header("Table headers are BOLD, on both tables (Session 259)")
+
+-- ⚠️ A WEIGHT IS A VALUE AND CAN BE ASSERTED. The Loot table's four headers were
+-- drawn Light against a node that is font-bold, which made the whole table read
+-- as thinner and flatter than the mock while every POSITION on it was correct —
+-- so every geometry check in this file passed throughout. The stub records the
+-- font path SetFont was handed; that is the thing to read back.
+do
+  local function fontOf(fs) return fs and fs._font or "" end
+
+  for i, name in ipairs({ "RAIDER", "UPGRADE", "ILVL GAIN", "PRIORITY" }) do
+    local fs = panel.head and panel.head[i]
+    check(("the Loot table's %s header is Bold"):format(name),
+          fontOf(fs):match("Manrope%-Bold") ~= nil, fontOf(fs))
+  end
+  -- The other table in the same panel, so the two cannot drift apart again.
+  for i = 1, 5 do
+    local fs = panel.stHead and panel.stHead[i]
+    if fs then
+      check(("the Standings table's header %d is Bold too"):format(i),
+            fontOf(fs):match("Manrope%-Bold") ~= nil, fontOf(fs))
+    end
+  end
+
+  -- And the cells around them are NOT, which is what makes the headers read as
+  -- headings. Asserting only the bold half would pass on a table set entirely
+  -- in one weight.
+  local r1 = panel.rows and panel.rows[1]
+  if r1 then
+    check("a raider name is Light, not Bold",
+          fontOf(r1.name):match("Manrope%-Light") ~= nil, fontOf(r1.name))
+    check("...and the rank is the one Bold cell in the table",
+          fontOf(r1.rank):match("Manrope%-Bold") ~= nil, fontOf(r1.rank))
   end
 end
 

@@ -233,16 +233,39 @@ local SL = {
   -- The right-hand region, shared origin, two layouts.
   paneX = 230, paneW = 470,
 
+  -- ⚠️ THE ITEM ICON, ADDED SESSION 259 (Jason: "it was oddly confusing without
+  -- it"). 32px, the same size the Loot page's selected item dropped to in the
+  -- same edit — one item icon, one size, everywhere it appears.
+  --
+  -- textX IS THE GUTTER IT OPENS. Every text run on both layouts moved right by
+  -- 42: the name, the source line and the "Tier Piece" kind line. The chips are
+  -- unaffected because they are right-aligned to the pane's far edge.
+  itemIcon = 32, textX = 42,
+
   -- SINGLE-ITEM: an identity block, then the OBTAINED BY panel beneath it.
-  headY = 141, headNameH = 18, headSlotY = 159, chipY = 142,
-  panelY = 186,
-  -- The panel's own box: 14 above the heading, 20 below the last route, and 20
-  -- of gap between blocks. A 2-route panel measures 151, which is the mock's.
+  -- The block is 34 tall now (two lines) with the icon centred against it — the
+  -- icon spans 142..174 inside a block running 141..175.
+  -- The two lines are 18 then 16, stacking to the block's 34. They are NEARLY
+  -- the same size on purpose — node 591:2189 is 13 Regular blush and 591:2195 is
+  -- 12 Light white — so what separates them is WEIGHT AND COLOUR, not size.
+  headY = 141, headBlockH = 34, headNameH = 18, headKindH = 16,
+  headSlotY = 159, chipY = 142,
+
+  -- ⚠️ THE OBTAINED BY PANEL IS INDENTED TO THE TEXT COLUMN, NOT THE ICON
+  -- (node 590:2055, re-read Session 259). It sits at 272 and is 428 wide, so
+  -- its left edge lines up under the item's NAME rather than under its icon,
+  -- and its right edge still lands on the pane's. It was drawn full-width from
+  -- paneX before the icon existed, which now reads as the panel hanging out
+  -- past the block it belongs to.
+  panelX = 272, panelW = 428, panelY = 186,
+  -- The panel's own box: 14 above the heading, 20 below the last route, and 10
+  -- of gap between blocks. A 2-route panel measures 131, which is the mock's.
   panelPadT = 14, panelPadB = 20, panelPadX = 20,
-  headingH = 17, blockGap = 20, blockH = 30, routeLineY = 16,
+  headingH = 17, blockGap = 10, blockH = 30, routeLineY = 16,
 
   -- MULTI-ITEM: a flat list of candidates, each 55 tall with a 10px top inset.
-  listY = 129, listPitch = 55, listNameY = 10, listSourceY = 28,
+  -- The icon sits at 11, one below the text block, on the same centre line.
+  listY = 129, listPitch = 55, listNameY = 10, listSourceY = 28, listIconY = 11,
   listRows = 7, routeRows = 4,
 
   chipH = 15, chipGap = 6,
@@ -403,7 +426,16 @@ local COL_ROWS = math.floor(COL_AREA_H / ITEM_PITCH)
 -- machine, and note that luac on this Mac accepts what the game refuses.
 local DET = {
   headY   = 177,                      -- the header row, 41 tall
-  iconX   = 263, iconY = 178, icon = 40,
+  -- ⚠️ 32, NOT 40 (Jason, Session 259, re-read from node 577:878). It came down
+  -- to match the item icon the Slots page gained in the same edit — one item
+  -- icon, one size, on every surface that draws one. The name column came left
+  -- with it, 313 -> 306, keeping the gutter beside a narrower icon.
+  --
+  -- The centring arithmetic below needs no change and that is worth noting: at
+  -- 32 against a 34-tall block it resolves to -1, so the block now sits ONE
+  -- ABOVE the icon's top rather than three below it, which is what the node
+  -- draws (block 177..211, icon 178..210).
+  iconX   = 263, iconY = 178, icon = 32,
   -- ⚠️ THE TWO-LINE BLOCK IS CENTRED ON THE ICON, NOT TOP-ALIGNED WITH IT
   -- (Jason, Session 258). Node 577:880 is 34 tall beside a 40 icon, so it sits
   -- 3 down from the icon's top and 3 up from its bottom. It was pinned to the
@@ -413,7 +445,7 @@ local DET = {
   -- Standings rail needed it: a fontstring anchored TOPLEFT with no height
   -- draws wherever its own line box lands, so "centred" cannot be arithmetic
   -- on the anchor alone.
-  nameX   = 313,                      -- name (13 Regular) over slot line (12 Light)
+  nameX   = 306,                      -- name (13 Regular) over slot line (12 Light)
   nameH   = 18, line2H = 16,          -- 34 together, the node's own block
   -- The verdict badge: a 10%-blush box with the grade over the word "Upgrade".
   badgeX  = 623, badgeY = 178, badgeW = 75, badgeH = 40,
@@ -902,13 +934,29 @@ local function buildRankRow(parent, i)
   -- ⚠️ BOLD, AND THE ONLY BOLD IN THE TABLE. The node is 14px Bold in #f2bdad
   -- — not the muted grey it used to be. It is what the eye scans down, and the
   -- design gives it weight rather than a second colour to do that job.
-  row.rank    = at(text(row, "bold", "rank", "body"), C_RANK - o, 1, 20, "LEFT")
+  row.rank    = at(text(row, "bold", "rank", "body"), C_RANK - o, 0, 20, "LEFT")
   -- ⚠️ CLASS-COLOURED, AND THE ASTERISK IS NOT. The mock paints each name in its
   -- class colour and leaves the ad-hoc "*" white, so the marker stays legible on
   -- a dark class and does not read as part of the name.
-  row.name    = at(text(row, "light", "name", "white"), C_NAME - o, 1, 90)
-  row.gain    = atRight(text(row, "light", "name", "white"), C_GAIN_R - o, 1, 44)
-  row.pr      = atRight(text(row, "light", "name", "white"), C_PRIORITY_R - o, 1, 48)
+  row.name    = at(text(row, "light", "name", "white"), C_NAME - o, 0, 90)
+  row.gain    = atRight(text(row, "light", "name", "white"), C_GAIN_R - o, 0, 44)
+  row.pr      = atRight(text(row, "light", "name", "white"), C_PRIORITY_R - o, 0, 48)
+
+  -- ⚠️ EVERY CELL IS THE ROW'S FULL HEIGHT AND CENTRES IN IT (Jason, Session
+  -- 259: "the name isn't vertically aligned with the other elements in the
+  -- row"). These were anchored TOPLEFT at y=1 with NO height, so each one drew
+  -- wherever its own line box landed — and the box differs by font and size, so
+  -- the 14px Bold rank, the 11px Light name and the 12px chips all settled on
+  -- different lines. The chips were the only elements that were ever centred,
+  -- being anchored LEFT, which is why the hover highlight made it obvious.
+  --
+  -- The node agrees: its name column is leading-[20px] inside a 20px row, which
+  -- IS a centred line box. Same rule as the Slots identity block — type needs an
+  -- explicit height wherever it is being aligned against anything else.
+  for _, fs in ipairs({ row.rank, row.name, row.gain, row.pr }) do
+    fs:SetHeight(RANK_PITCH)
+    fs:SetJustifyV("MIDDLE")
+  end
 
   -- ⚠️ THE UPGRADE COLUMN IS CHIPS NOW, NOT A STRING. The mock puts the verdict,
   -- the BIS listing and the gap side by side as separate tags — "MAJOR  O-BIS
@@ -929,7 +977,11 @@ local function buildRankRow(parent, i)
   -- case and that is deliberate: almost every row is scored from the site
   -- snapshot, so tagging all twenty turns the signal into wallpaper. What is
   -- worth marking is the rows BETTER than the snapshot.
-  row.src     = at(text(row, "body", "tiny", "textDim"), C_GAIN_R - o + 6, 2, 36)
+  -- Centred with the rest of the row for the same reason: it sits directly
+  -- beside the GAIN figure and was drawing a couple of pixels below it.
+  row.src     = at(text(row, "body", "tiny", "textDim"), C_GAIN_R - o + 6, 0, 36)
+  row.src:SetHeight(RANK_PITCH)
+  row.src:SetJustifyV("MIDDLE")
 
   -- The browse view reuses these rows for ITEMS, which need an icon the ranking
   -- rows have no use for. Created once and hidden rather than built per refresh:
@@ -1042,25 +1094,21 @@ local function buildRankRow(parent, i)
   end)
   row:SetScript("OnEnter", function(self)
     self.hl:Show()
-    -- A ranking row is a RAIDER and carries no itemID, so it never had a tooltip
-    -- at all. The provenance marker is four characters wide, which is nowhere
-    -- near enough to explain itself — the sentence lives here.
-    if not self.itemID then
-      if self.srcHelp or self.splitHelp then
-        ns.Tip:SetOwner(self, "ANCHOR_CURSOR")
-        if self.srcHelp then
-          ns.Tip:AddLine(self.srcName or "", 1, 1, 1)
-          ns.Tip:AddLine(self.srcHelp, 0.6, 0.6, 0.7, true)
-        end
-        if self.splitHelp then
-          if self.srcHelp then ns.Tip:AddLine(" ") end
-          ns.Tip:AddLine(self.splitName or "", 0.953, 0.773, 0.420)
-          ns.Tip:AddLine(self.splitHelp, 0.6, 0.6, 0.7, true)
-        end
-        ns.Tip:Show()
-      end
-      return
-    end
+    -- ⚠️ A RAIDER ROW HAS NO TOOLTIP (Jason, Session 259: "seems to serve no
+    -- real purpose"). It used to explain the provenance marker, the ad-hoc
+    -- asterisk and the alt-spec chip; hovering your own name in a ranking list
+    -- popped a sentence over the table for no decision anyone was making.
+    --
+    -- ⚠️ IT WAS ALSO THE STICKY ONE, and that is the same bug rather than a
+    -- second one: this handler opened ns.Tip while OnLeave below hid only
+    -- GameTooltip, so nothing took it down until the cursor reached a surface
+    -- that happened to call Tip:Hide — which is why it survived until you left
+    -- the addon entirely. OnLeave now hides both, so a tooltip opened here can
+    -- never outlive the row again.
+    --
+    -- The MARKERS all stay on screen; only the sentences are gone. Provenance
+    -- is still visible, which is what the three-tier rule actually requires.
+    if not self.itemID then return end
     local link = self.link or ns.ItemLinkFor(self.itemID)
     if not link then return end
     -- The other half of the exclusion in Tip:Show — whichever opens last wins,
@@ -1074,7 +1122,12 @@ local function buildRankRow(parent, i)
   end)
   row:SetScript("OnLeave", function(self)
     self.hl:Hide()
+    -- ⚠️ BOTH, ALWAYS. Hiding only the one this handler happens to open today is
+    -- how the raider tooltip came to outlive its row: OnEnter could raise EITHER
+    -- surface and OnLeave took down one of them. A leave handler that does not
+    -- close everything its enter handler can open is the bug, not the symptom.
     GameTooltip:Hide()
+    if ns.Tip then ns.Tip:Hide() end
   end)
   return row
 end
@@ -1685,9 +1738,105 @@ end
 --- and only recoloured the boss, which loses the emphasis the design is
 --- actually made of. Three strings chained left-to-right costs two extra
 --- widgets and reproduces it exactly.
-local function buildSourceLine(parent, y, width)
+--- Panel-local helpers for an item's identity — its icon, and its name's hover
+--- target — shared by the Loot detail header and both Slots layouts.
+---
+--- ⚠️ ONE TABLE, NOT FOUR NAMES, AND THAT IS A HARD CONSTRAINT rather than a
+--- style choice (Core §1.1, the Lua-5.1 limits box). Panel.lua sits near 5.1's
+--- ceiling of 200 top-level locals: these went in as four locals first, took the
+--- file's headroom from 7 to 3, and smoke.lua refused it — which is the S254
+--- trap exactly, since 5.4 and 5.5 compiled it happily and only the runtime the
+--- game uses would have said no. Group new helpers into a table.
+local ITEM = {}
+
+--- The item icon, drawn the way the design draws it everywhere it appears: a
+--- 32px square, cropped to shed the border baked into every WoW icon, then
+--- masked to a circle.
+---
+--- ⚠️ BOTH, AND THE CROP IS NOT REDUNDANT. A circle inscribed in a square still
+--- touches all four edges at their midpoints — exactly where the border is —
+--- so the mask alone leaves four bright nicks. Blizzard's own UI puts a mask
+--- and a texcoord on one texture.
+---
+--- ONE BUILDER FOR THREE SURFACES (Session 259): the Loot detail header, the
+--- Slots identity block and every Slots list row. Three copies of a crop, a
+--- mask and a fallback texture is three chances for one of them to drift into
+--- being a square while the other two are round.
+function ITEM.BuildIcon(parent, size)
+  local t = parent:CreateTexture(nil, "ARTWORK")
+  t:SetSize(size, size)
+  t:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+  if ns.Style then ns.Style.Round(parent, t) end
+  return t
+end
+
+--- The link a CATALOGUE row should tooltip with — the level the item actually
+--- drops at, never the level a bare item string reports.
+---
+--- ⚠️ A BARE LINK IS NOT "THE HONEST ANSWER", IT IS A WRONG NUMBER (Jason,
+--- Session 259, and this shipped for an hour with a comment claiming the
+--- opposite). Ethereal Netherwrap is the Destruction Warlock's M+ BIS waist and
+--- tooltipped at ITEM LEVEL 28 with 4 armour beside an equipped 311 — because it
+--- is one of the BIS picks with no record in our payload, so ItemLinkFor fell
+--- back to "item:251222" and the client rendered the item's BASE level. The BIS
+--- data was correct throughout; only the link was wrong. It read as the whole
+--- page being untrustworthy, which is exactly what Core §7.7 forbids and what
+--- the S251/S252 catalogue-link rules already say twice.
+---
+--- THE DISCRIMINATOR IS THE ONE THE ROW ALREADY USES. A pick with a payload
+--- record is raid loot and draws a "From <boss>, <instance>" line from that same
+--- record; one without is dungeon loot, which drops at a FIXED Hero 3/6 at every
+--- key level from +10 up. Keying the link on the same fact means the tooltip and
+--- the source line beneath it cannot disagree.
+---
+--- ⚠️ RAID LOOT FOLLOWS THE LOOT TAB'S CONTENT CONTROL (Jason, Session 259:
+--- "there's no item level control on the Slots page itself, I thought it would
+--- stand to reason that the one on the Loot page would carry over"). It was
+--- hardcoded to Mythic for a day, on the reasoning that the control is
+--- location-derived and this page's answer must not change as you walk around.
+--- That reasoning was half right and the conclusion was wrong: the control is a
+--- SETTING FIRST and only falls back to detection on AUTO, so an explicit
+--- "Raid: Mythic" is a stated preference, not a fact about where you stand.
+--- One control, both pages.
+---
+--- ⚠️ DUNGEON LOOT IGNORES IT, AND MUST. A key drops Hero 3/6 at every level
+--- from +10 up, so "Raid: Mythic" has nothing to say about a dungeon item —
+--- applying it would put a raid item level on loot that cannot drop at one.
+--- This is why the two branches exist at all.
+function ITEM.CatalogueLink(itemID)
+  if not itemID then return nil end
+
+  -- ⚠️ THE SOURCE'S OWN IDS FIRST, ALWAYS. When the guide states what the pick
+  -- should be, that beats anything derived here — it is the only answer that is
+  -- right for a crafted piece, and it needs no branch to be right for the other
+  -- two. The branches below remain for picks the source names no ids for.
+  local char = ns.ResolveCharacter and ns.ResolveCharacter()
+  if char then
+    local stated = ns.BisItemLink(itemID, char.className, char.specName, char.heroTree)
+    if stated then return stated end
+  end
+
+  local data = ns.Data()
+  local rec = data and (data.items or {})[itemID]
+  if rec then
+    local key = ns.DifficultyKey()
+    return ns.RaidItemLink(itemID, key) or ns.ItemLinkFor(itemID, key)
+  end
+  return ns.MplusItemLink(itemID)
+end
+
+--- Point an icon at an item. The question mark matters: without it a recycled
+--- row keeps the PREVIOUS item's art, which reads as the right icon for the
+--- wrong item rather than as a missing one.
+function ITEM.SetIcon(tex, itemID, icon)
+  if not tex then return end
+  if not icon and itemID and GetItemIcon then icon = GetItemIcon(itemID) end
+  tex:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+end
+
+local function buildSourceLine(parent, x, y, width)
   local g = {}
-  g.pre  = at(text(parent, "light", "label", "body"), 0, y, 40)
+  g.pre  = at(text(parent, "light", "label", "body"), x, y, 40)
   g.boss = text(parent, "bold", "label", "white")
   g.rest = text(parent, "light", "label", "body")
   g.boss:ClearAllPoints()
@@ -1736,14 +1885,68 @@ end
 
 --- One candidate row on the multi-item layout: a name that may carry a check,
 --- a right-aligned chip row, and a source line beneath.
+--- Hovering an item's NAME opens the game's own item card, which is what
+--- hovering an item anywhere else in WoW does (Jason, Session 259).
+---
+--- ⚠️ THE TARGET IS THE STRING, NOT THE ROW. A Slots row is 55 tall and carries
+--- a source line and up to four chips as well, so a row-wide hit area would open
+--- an item tooltip over things that are not the item. It therefore has to be
+--- RE-MEASURED on every draw — the string it covers changes with the slot.
+---
+--- ⚠️ NO TARGETING HINT HERE, unlike the two Loot-tab tooltips. Those rows carry
+--- an OnClick that targets; a Slots row has none, and a tooltip offering an
+--- interaction the surface does not have is worse than one that says nothing.
+function ITEM.AttachTip(hit)
+  hit:EnableMouse(true)
+  hit:SetScript("OnEnter", function(self)
+    if not self.itemID then return end
+    local link = ITEM.CatalogueLink(self.itemID)
+    if not link then return end
+    -- The other half of the exclusion in Tip:Show — whichever opens last wins,
+    -- and neither is ever left behind the other.
+    ns.Tip:Hide()
+    GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+    GameTooltip:SetHyperlink(link)
+    GameTooltip:Show()
+  end)
+  hit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  return hit
+end
+
+--- Lay a name's hover target over the glyphs it actually drew.
+---
+--- ⚠️ MEASURED FROM THE STRING, NEVER FROM THE FONTSTRING'S WIDTH. Every name on
+--- this page is given a 300px ceiling to wrap against, so reading GetWidth would
+--- arm the tooltip across half a row of empty space — the item card would open
+--- with the cursor nowhere near the item.
+function ITEM.FitTip(hit, fs, itemID, h)
+  if not hit then return end
+  hit.itemID = itemID
+  local w = itemID and (fs:GetStringWidth() or 0) or 0
+  if w <= 0 then hit:Hide() return end
+  hit:SetSize(w, h)
+  hit:Show()
+end
+
 local function buildSlotListRow(parent, i)
   local row = CreateFrame("Frame", nil, parent)
   row:SetSize(SL.paneW, SL.listPitch)
   row:SetPoint("TOPLEFT", 0, -(i - 1) * SL.listPitch)
 
+  -- The item's own icon, left of the two-line block and centred against it.
+  row.icon = ITEM.BuildIcon(row, SL.itemIcon)
+  row.icon:SetPoint("TOPLEFT", 0, -SL.listIconY)
+
   -- 13 Regular in the blush, exactly as the detail header's item name is — this
   -- IS that surface, one row per candidate instead of one item.
-  row.name = at(text(row, "regular", "detail", "body"), 0, SL.listNameY, 300)
+  row.name = at(text(row, "regular", "detail", "body"), SL.textX, SL.listNameY, 300)
+
+  -- Anchored to the fontstring rather than to the row's own geometry, so the
+  -- target follows the name if the name ever moves and there is no second copy
+  -- of the layout to keep in step.
+  row.nameHit = ITEM.AttachTip(CreateFrame("Frame", nil, row))
+  row.nameHit:SetPoint("TOPLEFT", row.name, "TOPLEFT", 0, 0)
+  row.nameHit:Hide()
 
   -- ⚠️ THE CHECK FOLLOWS THE NAME, IT IS NOT RIGHT-ALIGNED. The mock puts it 6px
   -- past the end of the string (name w134, check at x140), so it reads as part
@@ -1759,7 +1962,7 @@ local function buildSlotListRow(parent, i)
   end
 
   -- 10px, "From " light blush, the BOSS bold white, then the instance.
-  row.source = buildSourceLine(row, SL.listSourceY, SL.paneW)
+  row.source = buildSourceLine(row, SL.textX, SL.listSourceY, SL.paneW - SL.textX)
 
   row.rule = divider(row, 0, SL.listPitch - 1, SL.paneW)
 
@@ -1770,11 +1973,14 @@ end
 --- One route inside the OBTAINED BY panel.
 local function buildSlotRoute(parent, i)
   local r = CreateFrame("Frame", nil, parent)
-  r:SetSize(SL.paneW - SL.panelPadX * 2, SL.blockH)
+  -- Sized off panelW, not paneW: the OBTAINED BY panel narrowed to 428 when it
+  -- moved in under the text column, so a route measured from the pane's full
+  -- width would run 42px past the panel it sits inside.
+  r:SetSize(SL.panelW - SL.panelPadX * 2, SL.blockH)
 
   r.name = at(text(r, "regular", "row", "body"), 0, 0, 300)
   r.chip = ns.Style and ns.Style.Chip(r, "filled")
-  r.source = buildSourceLine(r, SL.routeLineY, SL.paneW - SL.panelPadX * 2)
+  r.source = buildSourceLine(r, 0, SL.routeLineY, SL.panelW - SL.panelPadX * 2)
 
   r:Hide()
   return r
@@ -1901,9 +2107,26 @@ local function buildSlotsTab()
   -- ── The single-item layout ────────────────────────────────────────────────
   frame.slotHead = CreateFrame("Frame", nil, frame)
   frame.slotHead:SetPoint("TOPLEFT", SL.paneX, -SL.headY)
-  frame.slotHead:SetSize(SL.paneW, SL.headNameH)
+  -- 34, the two-line block's own height — not the name line's 18. The icon is
+  -- centred against the BLOCK, so a frame sized to one line cannot hold it.
+  frame.slotHead:SetSize(SL.paneW, SL.headBlockH)
+
+  frame.slotHead.icon = ITEM.BuildIcon(frame.slotHead, SL.itemIcon)
+  frame.slotHead.icon:SetPoint("TOPLEFT", 0, -1)
+
   frame.slotHead.name = at(text(frame.slotHead, "regular", "detail", "body"),
-    0, 0, 300)
+    SL.textX, 0, 300)
+  -- ⚠️ EXPLICIT HEIGHT + TOP JUSTIFY, the S258 rule this block was built without
+  -- (Jason, Session 259: "check line height"). A fontstring anchored TOPLEFT
+  -- with no height draws wherever its own line box happens to land, so the
+  -- node's 18-over-16 stack cannot be arithmetic on the anchors alone — which is
+  -- why the two lines sat tighter together here than in the mock while both
+  -- were the right SIZE. The Loot detail header already does exactly this.
+  frame.slotHead.name:SetHeight(SL.headNameH)
+  frame.slotHead.name:SetJustifyV("TOP")
+  frame.slotHead.nameHit = ITEM.AttachTip(CreateFrame("Frame", nil, frame.slotHead))
+  frame.slotHead.nameHit:SetPoint("TOPLEFT", frame.slotHead.name, "TOPLEFT", 0, 0)
+  frame.slotHead.nameHit:Hide()
   -- ⚠️ FOUR, NOT THREE (Jason, Session 258). Three BIS contexts can all apply
   -- at once, and the classification chip (TIER PIECE) comes AFTER them — so on
   -- a three-context item the purple chip was written into chips[4], which did
@@ -1914,17 +2137,20 @@ local function buildSlotsTab()
   end
   -- ⚠️ WHITE OVER BLUSH HERE, the opposite way round from the rail's cards. Read
   -- off the node rather than from a rule about which kind of thing it is.
+  -- Indented with the name it sits under, not with the icon beside it.
   frame.slotHead.slot = at(text(frame, "light", "head", "white"),
-    SL.paneX, SL.headSlotY, SL.paneW)
+    SL.paneX + SL.textX, SL.headSlotY, SL.paneW - SL.textX)
+  frame.slotHead.slot:SetHeight(SL.headKindH)
+  frame.slotHead.slot:SetJustifyV("TOP")
 
   frame.slotPanel = CreateFrame("Frame", nil, frame)
-  frame.slotPanel:SetPoint("TOPLEFT", SL.paneX, -SL.panelY)
-  frame.slotPanel:SetSize(SL.paneW, 151)
+  frame.slotPanel:SetPoint("TOPLEFT", SL.panelX, -SL.panelY)
+  frame.slotPanel:SetSize(SL.panelW, 131)
   if ns.Style then
     ns.Style.Surface(frame.slotPanel, ns.Style.COLOR.rule, 0.1)
   end
   frame.slotPanel.heading = at(text(frame.slotPanel, "bold", "head", "accent"),
-    SL.panelPadX, SL.panelPadT, SL.paneW - SL.panelPadX * 2)
+    SL.panelPadX, SL.panelPadT, SL.panelW - SL.panelPadX * 2)
   frame.slotPanel.heading:SetText("OBTAINED BY:")
   frame.slotRoutes = {}
   for i = 1, SL.routeRows do
@@ -1942,8 +2168,11 @@ local function buildSlotsTab()
 
   -- The one line that says why a slot is empty. Kept distinct from the shared
   -- tabEmpty, which is a whole-tab message rather than a per-slot one.
+  -- Aligned to the TEXT column, because it stands in for the list of names and
+  -- would otherwise be the only run on the page starting at the icon's edge.
+  -- No node draws this state; the alignment follows what it replaces.
   frame.slotNote = at(text(frame, "light", "head", "textDim"),
-    SL.paneX, SL.listY + SL.listNameY, SL.paneW)
+    SL.paneX + SL.textX, SL.listY + SL.listNameY, SL.paneW - SL.textX)
   frame.slotNote:Hide()
 end
 
@@ -1961,8 +2190,7 @@ local function buildDetailPane()
   --
   -- ⚠️ THE ICON IS CIRCULAR AND 40px, matching the boss rail. Masked with the
   -- client's own portrait mask, so there is nothing to bundle.
-  frame.itemIcon = frame:CreateTexture(nil, "ARTWORK")
-  frame.itemIcon:SetSize(DET.icon, DET.icon)
+  frame.itemIcon = ITEM.BuildIcon(frame, DET.icon)
   frame.itemIcon:SetPoint("TOPLEFT", DET.iconX, -DET.iconY)
   -- ⚠️ CIRCULAR, AND CROPPED. I got this wrong once and the correction is worth
   -- keeping (Jason, Session 258: "what the fuck do you mean it was never meant
@@ -1983,9 +2211,8 @@ local function buildDetailPane()
   -- icon border the crop was for", and that is FALSE for a circle inscribed in
   -- a square: the circle touches all four edges at their midpoints, which is
   -- exactly where the border is. Blizzard's own UI uses both on one texture.
-  -- The crop trims 3.2px per edge at 40px, then the mask rounds what is left.
-  frame.itemIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-  if ns.Style then ns.Style.Round(frame, frame.itemIcon) end
+  -- The crop trims 2.6px per edge at 32px, then the mask rounds what is left.
+  -- Both live in buildItemIcon now, shared with the two Slots surfaces.
 
   -- ⚠️ THE NAME IS BLUSH AND THE SLOT LINE IS WHITE — the OPPOSITE of the left
   -- rail's cards, and read off the node rather than reasoned about. See the note
@@ -2050,7 +2277,10 @@ local function buildDetailPane()
   -- hovering it should do what hovering an item anywhere else in the game does.
   frame.itemHover = CreateFrame("Frame", nil, frame)
   frame.itemHover:SetPoint("TOPLEFT", DET.iconX, -DET.iconY)
-  frame.itemHover:SetSize(DET.badgeX - DET.iconX - 10, DET.icon)
+  -- Sized to the two-line BLOCK, not to the icon: the icon came down to 32 and
+  -- the block is 34, so keying the hit area to the icon would leave the last
+  -- 2px of the slot line unhoverable.
+  frame.itemHover:SetSize(DET.badgeX - DET.iconX - 10, DET.nameH + DET.line2H)
   frame.itemHover:EnableMouse(true)
   frame.itemHover:SetScript("OnEnter", function(self)
     local itemID = Panel.CurrentItemID()
@@ -2105,19 +2335,36 @@ local function buildDetailPane()
   -- ⚠️ THE HEADERS ARE 12 AND IN THE ACCENT PURPLE, not 10 white — the mock
   -- treats them as headings rather than as labels, which is the same purple it
   -- uses for the Standings rail's section titles.
-  frame.head[1] = at(text(frame, "light", "head", "accent"), C_NAME, RANK_HEAD_Y, 90)
-  frame.head[2] = at(text(frame, "light", "head", "accent"), C_UPGRADE, RANK_HEAD_Y, 110)
-  frame.head[3] = atRight(text(frame, "light", "head", "accent"), C_GAIN_R, RANK_HEAD_Y, 60)
+  --
+  -- ⚠️ AND THEY ARE BOLD (Jason, Session 259: "everything just looks a bit
+  -- off"). Node 577:907 is font-bold #9f50d4 12px, and these were drawn Light —
+  -- which is why the table read as thinner and flatter than the mock while
+  -- every position on it was correct. THE STANDINGS TABLE WAS ALREADY BOLD, so
+  -- this was inconsistent with the addon's own other table as well as with the
+  -- design.
+  --
+  -- CONFIRMED BY MEASUREMENT, not by reading the word "bold": Manrope-Bold at
+  -- 12 sums to RAIDER 42.7 / UPGRADE 56.5 / ILVL GAIN 55.1 / PRIORITY 53.8
+  -- against the node's own 44 / 56 / 56 / 54. Light sums 3-5px short of every
+  -- one of them, which is the tell. test/measure-text.py does this.
+  frame.head[1] = at(text(frame, "bold", "head", "accent"), C_NAME, RANK_HEAD_Y, 90)
+  frame.head[2] = at(text(frame, "bold", "head", "accent"), C_UPGRADE, RANK_HEAD_Y, 110)
+  -- 70, NOT 60: bold widened "ILVL GAIN" from 50.7 to 55.1 against a 60 field,
+  -- which is 4.9px of slack — the S252 trap's own margin. It grows LEFTWARDS
+  -- from its right edge into empty space, so nothing else had to move.
+  frame.head[3] = atRight(text(frame, "bold", "head", "accent"), C_GAIN_R, RANK_HEAD_Y, 70)
   -- ⚠️ 64, NOT 48 — "PRIORITY" MEASURES 47.3px AND WAS TRUNCATING TO "PRIORI…".
   -- The field had been sized to the string with 0.7px to spare, which is not a
   -- margin: the game's own text measurement differs slightly from the font's
   -- advance widths (kerning, hinting, rounding), so it tipped over. Nothing had
   -- to move — the header is right-aligned at C_PRIORITY_R, so widening it grows
   -- LEFTWARDS into empty space, and the GAIN column's right edge is at
-  -- C_GAIN_R (499) against this field's new left edge at 527.
+  -- C_GAIN_R (616, corrected in place Session 259 — this said 499, which was a
+  -- pre-redesign value and made the clearance argument unverifiable) against
+  -- this field's new left edge at 620.
   -- Header widths are now sized with real slack. Measured, not eyeballed:
   -- RAIDER 37.3 / UPGRADE 49.2 / GAIN 25.9 / PRIORITY 47.3 at 10px Semibold.
-  frame.head[4] = atRight(text(frame, "light", "head", "accent"), C_PRIORITY_R, RANK_HEAD_Y, 70)
+  frame.head[4] = atRight(text(frame, "bold", "head", "accent"), C_PRIORITY_R, RANK_HEAD_Y, 70)
 
   frame.list = CreateFrame("Frame", nil, frame)
   frame.list:SetPoint("TOPLEFT", C_RANK, -RANK_TOP)
@@ -3132,9 +3379,7 @@ local function renderItemIdentity(entry)
     return
   end
 
-  local icon = entry.icon
-  if not icon and GetItemIcon then icon = GetItemIcon(entry.itemID) end
-  frame.itemIcon:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+  ITEM.SetIcon(frame.itemIcon, entry.itemID, entry.icon)
   frame.itemIcon:Show()
   frame.itemHover.link = entry.link
   frame.itemHover:Show()
@@ -3787,6 +4032,9 @@ local function renderSlots()
 
   if useSingle then
     frame.slotHead.name:SetText(single.name or "")
+    ITEM.SetIcon(frame.slotHead.icon, single.itemID, single.icon)
+    ITEM.FitTip(frame.slotHead.nameHit, frame.slotHead.name, single.itemID,
+      SL.headNameH)
     fillPickChips(frame.slotHead.chips, single)
     layoutChipsRight(frame.slotHead.chips, frame.slotHead, SL.paneW, SL.chipY - SL.headY)
     -- ⚠️ THE KIND ALONE. The mock's second line reads "Tier Piece"; naming the
@@ -3825,6 +4073,10 @@ local function renderSlots()
       local pick = picks[i]
       if pick then
         row.name:SetText(pick.name or "")
+        ITEM.SetIcon(row.icon, pick.itemID, pick.icon)
+        -- 16, not the row's 55: the name is one line of 13 Regular, and the
+        -- source line 18px below it is a different item's worth of nothing.
+        ITEM.FitTip(row.nameHit, row.name, pick.itemID, 16)
         row.check:SetShown(pick.owned)
         if pick.owned then
           row.check:ClearAllPoints()

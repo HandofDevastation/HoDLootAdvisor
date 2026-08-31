@@ -497,7 +497,41 @@ local cache = { instances = nil, encounters = {}, loot = {}, cold = {},
 
 function Journal.Invalidate()
   cache = { instances = nil, encounters = {}, loot = {}, cold = {},
-            index = nil, portraits = {} }
+            index = nil, portraits = {}, sources = nil }
+end
+
+--- itemID -> { boss, instance }: where the Adventure Guide says a thing drops.
+---
+--- ⚠️ THIS IS THE ONLY SOURCE DUNGEON LOOT HAS. Our own loot_items table holds
+--- RAID loot for the season and nothing else, so every dungeon BIS pick drew a
+--- blank second line — Ethereal Netherwrap, Charged Sandstone Band, Brood
+--- Cleanser's Amice and the rest (Jason, Session 259). The guide knows all of
+--- them, and it knows the dungeon's name too, which "Dropped by" from a web
+--- lookup does not.
+---
+--- ⚠️ BUILT FROM WHATEVER IS CACHED, AND INVALIDATED WHENEVER LOOT ARRIVES. A
+--- first look is cold, so an index frozen at that moment would be permanently
+--- half-empty — the async-item trap this addon has hit repeatedly. CachedLoot
+--- clears this whenever it writes, so the next read rebuilds, and ScheduleWarm
+--- already refreshes the panel when a warm lands.
+function Journal.SourceIndex()
+  if cache.sources then return cache.sources end
+  local out = {}
+  for _, inst in ipairs(Journal.CachedInstances()) do
+    for _, enc in ipairs(Journal.CachedEncounters(inst.id)) do
+      -- Through CachedLoot, so a cold entry is REQUESTED rather than skipped.
+      local list = Journal.CachedLoot(enc.id)
+      for _, j in ipairs(list or {}) do
+        -- First writer wins: an item several bosses share is attributed to the
+        -- first that lists it, which is the same choice DungeonLoot makes.
+        if j.itemID and not out[j.itemID] then
+          out[j.itemID] = { boss = enc.name, instance = inst.name }
+        end
+      end
+    end
+  end
+  cache.sources = out
+  return out
 end
 
 function Journal.CachedInstances()
@@ -625,6 +659,9 @@ function Journal.CachedLoot(encounterID, opts)
 
   local list, cold = Journal.Loot(encounterID, opts)
   cache.loot[key] = list
+  -- New loot invalidates the itemID -> source index, so an index built while
+  -- the cache was cold cannot freeze half-empty.
+  cache.sources = nil
   if cold > 0 then
     cache.cold[key] = (attempts or 0) + 1
     Journal.RequestItems(list)
@@ -733,6 +770,24 @@ function Journal.PrewarmSeason()
   local ids = {}
   for id in pairs(bosses) do ids[#ids + 1] = id end
   table.sort(ids)
+
+  -- ⚠️ AND THE DUNGEONS, WHICH THIS WALKED PAST (Session 259). data.bosses is
+  -- our emitted RAID bosses and nothing else, so dungeon loot stayed cold until
+  -- somebody opened a dungeon tile — and the Slots page, which never opens one,
+  -- had no source for any dungeon BIS pick as a result. Appended rather than
+  -- interleaved so the raid bosses, which the Loot tab shows first, warm first.
+  local seen = {}
+  for _, id in ipairs(ids) do seen[id] = true end
+  for _, inst in ipairs(Journal.CachedInstances()) do
+    if inst.isRaid == false and Journal.HasLoot(inst.id) then
+      for _, enc in ipairs(Journal.CachedEncounters(inst.id)) do
+        if enc.id and not seen[enc.id] then
+          seen[enc.id] = true
+          ids[#ids + 1] = enc.id
+        end
+      end
+    end
+  end
 
   local i = 0
   local function step()

@@ -830,6 +830,39 @@ function ns.ItemSource(itemID, rec)
   return { boss = bossName, instance = ns.InstanceNameFor(rec.boss) }
 end
 
+--- Where the Adventure Guide says an item drops — the answer for DUNGEON loot,
+--- which our own tables know nothing about.
+---
+--- Returns the same { boss, instance } shape as ns.ItemSource, so the line reads
+--- "From Avatar of Sethraliss, Temple of Sethraliss" with no second code path.
+--- NIL while the guide is still cold, which is correct rather than unfortunate:
+--- Journal.CachedLoot books a re-read and ScheduleWarm refreshes the panel, so
+--- the line fills in rather than being guessed at.
+function ns.JournalSource(itemID)
+  if not (itemID and ns.Journal and ns.Journal.SourceIndex) then return nil end
+  local hit = ns.Journal.SourceIndex()[itemID]
+  -- An entry with no usable name is worse than none: it would draw "From ,".
+  if not (hit and ns.NonEmpty(hit.boss)) then return nil end
+  return { boss = hit.boss, instance = ns.NonEmpty(hit.instance) }
+end
+
+--- "From Crafted", but ONLY when the item says it is crafted.
+---
+--- ⚠️ POSITIVE SIGNAL ONLY. The item's own name-description is "Tidal Crafted"
+--- on crafted gear, "Mythic+" on some dungeon drops, and empty on ordinary raid
+--- loot — so this fires on a statement, never on an absence. Anything we cannot
+--- confirm gets NO line, which is what it had before: a missing line reads as
+--- "we do not know", a wrong one reads as a fact.
+---
+--- Returns the SAME SHAPE as ns.ItemSource so buildSourceLine needs no branch:
+--- `boss` is the bold white run and there is no instance to follow it.
+function ns.CraftedSource(q)
+  local desc = q and q.nameDesc
+  if type(desc) ~= "string" then return nil end
+  if not desc:lower():find("crafted", 1, true) then return nil end
+  return { boss = "Crafted" }
+end
+
 --- Every way to end up holding one item.
 ---
 --- ⚠️ THE TIER TOKEN CARRIES NO BIS ROW and never has, so it cannot be found by
@@ -930,7 +963,25 @@ function ns.SlotsReport(view)
               -- the 232 items our payload has no record of at all.
               name = ns.ItemName(itemID),
               contexts = contexts,
-              source = ns.ItemSource(itemID, rec),
+              -- ⚠️ "FROM CRAFTED" IS THE ITEM'S OWN CLAIM, NEVER AN INFERENCE
+              -- (Jason, Session 259: "If it's not a crafted piece, don't label
+              -- it a crafted piece"). The tempting signal was `rec == nil` —
+              -- not in our raid loot table — but that is equally true of
+              -- dungeon loot, tier pieces, world bosses and Delve gear, so it
+              -- would have labelled all of them Crafted. `nd` is the
+              -- name-description the item itself carries ("Tidal Crafted"),
+              -- resolved through the same spec key ladder as the rest.
+              --
+              -- Rendered through the SAME shape a boss line uses, so it picks
+              -- up the same weights with no second code path: `boss` is the
+              -- bold white run, and a crafted item has no instance to name.
+              -- Three sources, most authoritative first: our own raid table
+              -- (which names the boss the way the rest of the site does), then
+              -- the Adventure Guide, which is the ONLY place dungeon loot has a
+              -- source at all, then the item's own crafted claim.
+              source = ns.ItemSource(itemID, rec)
+                or ns.JournalSource(itemID)
+                or ns.CraftedSource(q),
               owned = owned,
               -- A piece nothing drops and no token IS is one the catalyst makes.
               tierPiece = (rec == nil),
@@ -2765,6 +2816,47 @@ end
 --- Attaches the Hero block's rank-3 bonus id and lets the CLIENT compute the
 --- level and stats, the same reasoning as ns.ItemLinkFor — we never re-derive
 --- numbers we would then have to keep in step with Blizzard's.
+--- The link for a BIS pick, built from the bonus IDs THE SOURCE PUBLISHED.
+---
+--- ⚠️ THIS ENDS THE GUESSING, AND THE GUESSING WAS THE BUG (Session 259). With
+--- no stated ids the only question a consumer could ask was "is this item in our
+--- raid loot table?" — a proxy for "is it raid loot" — and then it had to pick a
+--- difficulty. That proxy is wrong for dungeon, crafted and tier picks alike: it
+--- put a crafted bracer at the M+ drop level, and before that at its BASE level
+--- of 28 beside an equipped 311, which read as the whole page being untrustworthy.
+---
+--- ⚠️ THE CLIENT RESOLVES IT, SO NOTHING HERE LEARNS WHAT "CRAFTED" MEANS. Handed
+--- Martyr's Bindings' own ids the game draws "Tidal Crafted · Item Level 331"
+--- itself. Every classification we would otherwise have had to derive — track,
+--- rank, crafted, Mythic+ — is already in the string.
+---
+--- Returns NIL when the pick names none (one harvested row in 1884, plus every
+--- catalyse SOURCE, which the guide never publishes ids for), so the caller keeps
+--- whatever link it had rather than being handed a bare one.
+function ns.BisItemLink(itemID, className, specName, heroTree)
+  if not itemID then return nil end
+  local data = ns.Data()
+  local q = data and data.rankings and ns.Scoring.resolveQuality(
+    data.rankings, itemID, className, specName, heroTree, nil)
+  local ids = q and q.bonusIds
+  if type(ids) ~= "string" or ids == "" then return nil end
+
+  local list, n = {}, 0
+  for part in ids:gmatch("[^:]+") do
+    local v = tonumber(part)
+    -- ⚠️ VALIDATED, NOT TRUSTED. One harvested string carries what looks like an
+    -- ITEM id in the bonus field, so a malformed entry reaches here; a bad id
+    -- would render a nonsense tooltip rather than erroring, which is the kind of
+    -- wrong number this whole change exists to stop.
+    if v and v > 0 and v == math.floor(v) then n = n + 1; list[n] = v end
+  end
+  if n == 0 then return nil end
+
+  -- item : id : enchant : gem1-4 : suffix : unique : level : specID :
+  -- modifiersMask : itemContext : numBonusIDs : bonusID...
+  return ("item:%d::::::::::::%d:%s"):format(itemID, n, table.concat(list, ":"))
+end
+
 function ns.MplusItemLink(itemID)
   if not itemID then return nil end
   local data = ns.Data()

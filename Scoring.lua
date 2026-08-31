@@ -397,13 +397,22 @@ function M.resolveQuality(rankings, itemId, className, specName, heroTree, conte
   local byKey = rankings and rankings[itemId]
   if not byKey then return nil end
 
-  local grade, bis, contexts, catalysesInto
+  local grade, bis, contexts, catalysesInto, bonusIds, nameDesc
   for _, key in ipairs(qualityKeys(className, specName, heroTree, contentScope)) do
     local e = byKey[key]
     if e then
       if grade == nil then grade = e.g end
       if bis == nil then bis = e.b; contexts = e.bx end
       if catalysesInto == nil then catalysesInto = e.cat end
+      -- ⚠️ RESOLVED THROUGH THE SAME KEY LADDER AS EVERYTHING ELSE, and that is
+      -- the whole reason it is read here rather than in Core.lua. The guide
+      -- bakes its socket and stat choices into these ids, so 112 of 247 items
+      -- carry a DIFFERENT string per spec — reading `bi` off the first entry in
+      -- the table would hand most specs another spec's build.
+      --
+      -- ADDITIVE ONLY: nothing scored changes, and no existing field moves.
+      if bonusIds == nil then bonusIds = e.bi end
+      if nameDesc == nil then nameDesc = e.nd end
     end
   end
 
@@ -412,7 +421,8 @@ function M.resolveQuality(rankings, itemId, className, specName, heroTree, conte
   -- here: every caller wanting the LABEL wants the full set, and making that
   -- caller handle "sometimes absent" is how one of them ends up not handling it.
   if bis and not contexts then contexts = { bis } end
-  return { grade = grade, bis = bis, contexts = contexts, catalysesInto = catalysesInto }
+  return { grade = grade, bis = bis, contexts = contexts, catalysesInto = catalysesInto,
+           bonusIds = bonusIds, nameDesc = nameDesc }
 end
 
 --- Just the letter grade. Kept as its own call because the scorer's ranked-tier
