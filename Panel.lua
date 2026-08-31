@@ -471,7 +471,13 @@ local DET = {
   -- Upgrade"). MAJOR is 16px Bold, whose line box is about 19 tall — so a 13px
   -- step put the word inside the grade's own descender space. The pair now runs
   -- 8..39 inside a 40-tall box.
-  badgePadX = 10, badgeTop = 8, badgeLine2 = 19,
+  -- ⚠️ THE PAIR IS CENTRED, SO THERE IS NO TOP OFFSET ANY MORE (Session 260).
+  -- badgeTop/badgeLine2 are gone: a top pin plus a line-box-sized step is what
+  -- put eight pixels above the words and one below, and opened a gap between
+  -- them that the design does not have. These are the VISIBLE heights of the
+  -- two lines — 16px Bold and 10px Light at Manrope's 0.72 cap ratio, measured
+  -- from the bundled TTF — plus the gap the design puts between them.
+  badgePadX = 10, badgeLine1H = 12, badgeLine2H = 8, badgeGap = 2,
 }
 
 -- TWO hairlines, not three. The mock separates header / meta / table and
@@ -813,8 +819,19 @@ local function buildBossTile(parent, i)
   -- biggest thing the rail buys. Truncation is left to the fontstring's own
   -- width rather than to a character count: the names vary from "Vashnik" to
   -- "Tidebound Sorceress's Reliquary" and any count is wrong for one of them.
-  tile.name = at(text(tile, "light", "name", "body"), BOSS_NAME_X, BOSS_TEXT_Y,
-    BOSS_W - BOSS_NAME_X - 24)
+  -- ⚠️ CENTRED IN THE ROW, NOT PINNED BY ITS TOP (Jason, Session 260: the boss
+  -- and dungeon names "aren't vertically centered within each line"). Anchored
+  -- TOPLEFT at a fixed y, a fontstring draws wherever its own line box lands —
+  -- so the name sat at whatever height the font's ascent happened to put it,
+  -- and the 28px icon beside it is centred on the row, so the two disagreed.
+  -- An explicit height equal to the ROW plus JustifyV MIDDLE centres it against
+  -- the row and therefore against the icon, with no arithmetic to keep in step
+  -- if either changes. The S258 rule, applied where it had not been.
+  tile.name = text(tile, "light", "name", "body")
+  tile.name:SetPoint("LEFT", BOSS_NAME_X, 0)
+  tile.name:SetWidth(BOSS_W - BOSS_NAME_X - 24)
+  tile.name:SetHeight(BOSS_ROW_H)
+  tile.name:SetJustifyV("MIDDLE")
 
   -- The best-in-slot diamond, right-aligned in the row. Sized and placed from
   -- the mock's own node (15x12, at the row's right edge).
@@ -1468,7 +1485,11 @@ local function buildLootControls()
   -- Blizzard's ChatFrameExpandArrow, which points RIGHT — it reads as "expand
   -- sideways", and it is not the shape in the mock.
   frame.diffCaret:SetTexture("Interface\\AddOns\\HoDLootAdvisor\\Media\\ui\\caret.png")
-  if ns.Style then frame.diffCaret:SetVertexColor(ns.Style.rgb(ns.Style.COLOR.white)) end
+  -- ⚠️ THE CONTROL'S OWN TEXT COLOUR, NOT WHITE (Jason, Session 260). The caret
+  -- is part of the label, not a separate mark, and the Slots page's dropdown
+  -- has always drawn it in controlText — so the two dropdowns disagreed and
+  -- this one was the odd match out.
+  if ns.Style then frame.diffCaret:SetVertexColor(ns.Style.rgb(ns.Style.COLOR.controlText)) end
 
   frame.diffMenu = CreateFrame("Frame", nil, frame)
   -- TOOLTIP strata so nothing the panel draws can land over the open list.
@@ -2315,10 +2336,30 @@ local function buildDetailPane()
   -- third weight is bundled for.
   -- No SetWidth on either line: a fontstring with a fixed width TRUNCATES, and
   -- the box is what resizes here. They anchor to its right edge instead.
+  -- ⚠️ THE PAIR IS CENTRED IN THE BOX, AND THE GAP IS THE GAP (Jason, Session
+  -- 260: too much space between the two words, and the pair sits too close to
+  -- the bottom edge). Both were the same cause. The lines were pinned from the
+  -- box's TOP at 8, then stepped by 19 — a step chosen to clear the 16px Bold
+  -- line box — so the visible pair ran 8..39 in a 40-tall box: eight pixels of
+  -- air above and one below. And because the step had to clear a LINE BOX
+  -- rather than the letters, it opened a gap the design does not have.
+  --
+  -- Both lines now carry an explicit height and centre their own line box
+  -- inside it, so the step is between the TEXT rather than around its
+  -- descender space. The stack is then centred in the box by arithmetic, which
+  -- means changing either line's size cannot decentre the pair.
+  local stackH = DET.badgeLine1H + DET.badgeGap + DET.badgeLine2H
+  local stackTop = math.floor((DET.badgeH - stackH) / 2 + 0.5)
+
   frame.hUpgrade = text(frame.badgeBox, "bold", "badge", "major", "RIGHT")
-  frame.hUpgrade:SetPoint("TOPRIGHT", -DET.badgePadX, -DET.badgeTop)
+  frame.hUpgrade:SetPoint("TOPRIGHT", -DET.badgePadX, -stackTop)
+  frame.hUpgrade:SetHeight(DET.badgeLine1H)
+  frame.hUpgrade:SetJustifyV("MIDDLE")
   frame.hUpgradeWord = text(frame.badgeBox, "light", "label", "white", "RIGHT")
-  frame.hUpgradeWord:SetPoint("TOPRIGHT", -DET.badgePadX, -(DET.badgeTop + DET.badgeLine2))
+  frame.hUpgradeWord:SetPoint("TOPRIGHT", -DET.badgePadX,
+    -(stackTop + DET.badgeLine1H + DET.badgeGap))
+  frame.hUpgradeWord:SetHeight(DET.badgeLine2H)
+  frame.hUpgradeWord:SetJustifyV("MIDDLE")
   frame.hUpgradeWord:SetText("Upgrade")
 
   --- Resize the box around whichever verdict it is currently showing, never
@@ -2369,8 +2410,22 @@ local function buildDetailPane()
   -- string placed after the first is measured. The separators, being a colour
   -- change alone, stay inline.
   frame.div1 = divider(frame, DIV_X, DIV1_Y, DIV_W)
-  frame.facts = at(text(frame, "light", "label", "white"), FACTS_X, FACTS_Y, DIV_W - 20)
-  frame.factTags = at(text(frame, "bold", "label", "body"), FACTS_X, FACTS_Y, DIV_W - 20)
+  -- ⚠️ CENTRED BETWEEN THE TWO RULES (Jason, Session 260: this line "isn't
+  -- vertically centered between the two horizontal lines, and it looks
+  -- sloppy"). It was anchored by its TOP at a y picked to look right, which
+  -- makes the spacing a coincidence of the font's ascent rather than a
+  -- statement — and it drifts the moment a size or a rule moves. Given the
+  -- height of the band it lives in and JustifyV MIDDLE, the client centres it
+  -- and the two dividers are the only numbers that decide where it sits.
+  local FACTS_BAND = DIV2_Y - DIV1_Y
+  frame.facts = text(frame, "light", "label", "white")
+  frame.facts:SetPoint("TOPLEFT", FACTS_X, -DIV1_Y)
+  frame.facts:SetSize(DIV_W - 20, FACTS_BAND)
+  frame.facts:SetJustifyV("MIDDLE")
+  frame.factTags = text(frame, "bold", "label", "body")
+  frame.factTags:SetPoint("TOPLEFT", FACTS_X, -DIV1_Y)
+  frame.factTags:SetSize(DIV_W - 20, FACTS_BAND)
+  frame.factTags:SetJustifyV("MIDDLE")
   frame.div2 = divider(frame, DIV_X, DIV2_Y, DIV_W)
 
   -- ⚠️ UPPERCASE, 11px LIGHT, BLUSH — the node's own treatment, not a grey

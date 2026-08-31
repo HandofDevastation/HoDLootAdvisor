@@ -1701,11 +1701,25 @@ do
     -- 16px Bold, whose box is about 19 tall.
     local gradeY = offsetY(panel.hUpgrade)
     local wordY  = offsetY(panel.hUpgradeWord)
-    check("the badge's word clears the grade's line box",
-          (-wordY) - (-gradeY) >= 17, ("gap %d"):format((-wordY) - (-gradeY)))
-    check("...and both still fit inside the badge",
-          (-wordY) + 12 <= panel.badgeBox:GetHeight(),
-          ("%d in %d"):format((-wordY) + 12, panel.badgeBox:GetHeight()))
+    -- ⚠️ REWRITTEN FOR WHAT THE BADGE NOW CLAIMS (Session 260). The old check
+    -- required a 17px step because the lines were stacked around the 16px
+    -- Bold's LINE BOX — and that step is exactly the gap Jason called too big.
+    -- Both lines carry explicit visible heights now and centre their own text
+    -- inside them, so the assertion is the one that actually matters: the two
+    -- do not overlap, and the PAIR is centred in the box. A step-size floor
+    -- would just re-encode the defect.
+    local gradeH, wordH = panel.hUpgrade:GetHeight(), panel.hUpgradeWord:GetHeight()
+    check("the badge's two lines do not overlap",
+          (-wordY) >= (-gradeY) + gradeH,
+          ("word at %d, grade ends %d"):format(-wordY, (-gradeY) + gradeH))
+    local pairTop, pairBottom = -gradeY, (-wordY) + wordH
+    local boxH = panel.badgeBox:GetHeight()
+    check("...and both still fit inside the badge", pairBottom <= boxH,
+          ("%d in %d"):format(pairBottom, boxH))
+    -- The whole point of the change: equal air above and below.
+    check("...and the pair is centred in the box, not pinned to its top",
+          math.abs(pairTop - (boxH - pairBottom)) <= 1,
+          ("%d above, %d below"):format(pairTop, boxH - pairBottom))
   end
 
   -- ── The size slider ───────────────────────────────────────────────────────

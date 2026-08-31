@@ -673,6 +673,23 @@ end
 --- size, recolourable — which is the whole reason the design has no rounding.
 local CONTROL_PAD_X, CONTROL_H = 20, 27
 
+-- How far DOWN a control's label is nudged from the geometric centre, in
+-- pixels. See the note above btn.text: the client does not place a centred
+-- fontstring on the optical centre of its glyphs, and every control label in
+-- this addon is uppercase, so the unused descender space reads as a gap
+-- underneath. One knob, one place, every button.
+local CONTROL_TEXT_Y = 1
+
+-- The gap between a dropdown's label and its caret, and the padding OUTSIDE
+-- the caret. Read off the Slots node (590:2050): a 111-wide control with the
+-- label at x20 running 57 wide, and the 6px caret at x91 — so 20 left of the
+-- text, 14 between text and caret, and 14 beyond it.
+-- ⚠️ JASON READS THE OUTER PADDING AS 20 (Session 260) and the node I could
+-- reach measures 14; the Figma link had dropped by then, so his number is used
+-- and this records the disagreement rather than burying it. If a dropdown now
+-- looks too wide, this is why.
+local CARET_GAP, CARET_PAD_R = 14, 20
+
 function Style.Control(parent, label, size)
   local btn = CreateFrame("Button", nil, parent)
   btn._hodStyled = true
@@ -698,7 +715,32 @@ function Style.Control(parent, label, size)
   Style.SetFont(btn.text, Style.FONT.light, Style.SIZE[size or "head"])
   btn.text:SetTextColor(Style.rgb(Style.COLOR.controlText))
   btn.text:SetJustifyH("CENTER")
-  btn.text:SetPoint("CENTER")
+  -- ⚠️ CENTRED IN THE BUTTON'S RECT, NOT BY ITS OWN LINE BOX (Jason, Session
+  -- 260: every button label sits high, with more space under it than over).
+  -- SetPoint("CENTER") on a fontstring with no height centres the LINE BOX,
+  -- and a line box is not the text: it reserves descender space below the
+  -- baseline whether or not the label has a descender, and every control label
+  -- here is uppercase. So the glyphs ride above the middle by half the unused
+  -- descent, on every button in the addon.
+  --
+  -- ⚠️ AND IT IS CORRECTED BY AN OFFSET, NOT BY A RECT. The tidy fix —
+  -- SetAllPoints plus JustifyV MIDDLE — cannot be used here: a fontstring with
+  -- a fixed WIDTH truncates, and FitToLabel sizes the button FROM
+  -- GetStringWidth, so giving the string the button's rect makes the two size
+  -- each other in a circle. Height alone changes nothing, because centring a
+  -- taller box centres the same line box inside it.
+  --
+  -- ⚠️ THE MAGNITUDE IS NOT DERIVED AND IS NOT PRETENDING TO BE. Measured from
+  -- the bundled TTF, Manrope's line-box centre sits 0.023 em ABOVE its cap
+  -- centre, which predicts labels sitting LOW — the opposite of what is on
+  -- screen — and at 13px it is a third of a pixel either way. So the client is
+  -- not placing this the way the font metrics alone would suggest, and I could
+  -- not settle which way from here. CONTROL_TEXT_Y is therefore ONE named knob
+  -- with a starting value, in ONE place, feeding every control in the addon.
+  -- If the labels still sit wrong, its sign and size are the only thing to
+  -- change. Positive moves the label DOWN.
+  btn.text:SetPoint("CENTER", 0, -CONTROL_TEXT_Y)
+  btn.text:SetJustifyV("MIDDLE")
   btn:SetFontString(btn.text)
   btn._label = label or ""
   btn.text:SetText(btn._label)
