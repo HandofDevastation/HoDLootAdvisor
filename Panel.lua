@@ -966,12 +966,10 @@ local function buildBossTile(parent, i)
   tile.tgt = tile:CreateTexture(nil, "OVERLAY")
   tile.tgt:SetSize(15, 15)
   tile.tgt:SetPoint("LEFT", tile.bisN, "RIGHT", 10, 0)
-  -- ⚠️ THE MOCK'S NEW TARGET ICON IS NOT IN THE REPO YET. Jason added it in
-  -- Figma ("the new target icon that's just been added"); nothing has exported
-  -- it. This uses the EXISTING target mark so the row is complete and visibly
-  -- wrong-shaped rather than silently blank — a missing texture draws nothing
-  -- and would read as the count being broken.
-  tile.tgt:SetTexture("Interface\\AddOns\\HoDLootAdvisor\\Media\\ui\\mark-target.png")
+  -- The mock's own target mark, exported at 2x like every other icon here and
+  -- rendered WHITE so it can be tinted from the palette — a gold export would
+  -- multiply into the gold tint and come out darker than it was drawn.
+  tile.tgt:SetTexture("Interface\\AddOns\\HoDLootAdvisor\\Media\\ui\\target.png")
   if S and S.COLOR.target then tile.tgt:SetVertexColor(S.rgb(S.COLOR.target)) end
   tile.tgt:Hide()
 

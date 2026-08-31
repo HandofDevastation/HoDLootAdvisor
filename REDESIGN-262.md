@@ -299,9 +299,6 @@ character count — Session 258's rule, unchanged.
   harness reads values back off widgets, which catches a wrong number and cannot
   catch a wrong-looking screen (Core §1.1, S258: a green harness is not a
   likeness).
-- ⚠️ **THE NEW TARGET ICON IS NOT IN THE REPO.** The boss rows draw the existing
-  `mark-target.png` because nothing has exported the one Jason added in Figma.
-  It will look wrong rather than missing, which is deliberate.
 - The four frames listed in §7 and §8 (Runner, Import, Settings, the second
   Slots state) were never read for colour and type. They inherit the global type
   roles and colour tokens, so they will have MOVED with the refresh — but their

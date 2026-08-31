@@ -83,6 +83,10 @@ for _, required in ipairs({
   -- dropped fonts would drop them all.
   "Media/fonts/Saira-OFL.txt", "Media/fonts/FONT-LICENSES.md",
   "Media/fonts/Saira-Light.ttf", "Media/fonts/Saira-Black.ttf",
+  -- ⚠️ AN ICON THE PACKAGER FORGETS DRAWS NOTHING AND ERRORS NOTHING. The boss
+  -- rows' two marks are the newest assets here, so they are the ones a stale
+  -- copy step would miss.
+  "Media/ui/target.png", "Media/ui/diamond.png",
 }) do
   local fh = io.open(dir .. "/" .. required, "r")
   check("ships " .. required, fh ~= nil)
