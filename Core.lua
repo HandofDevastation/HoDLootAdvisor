@@ -2806,10 +2806,46 @@ function ns.DungeonList()
     -- open, so a client that will not answer shows the tile rather than hiding
     -- a real dungeon.
     if inst.isRaid == false and ns.Journal.HasLoot(inst.id) then
-      out[#out + 1] = { id = inst.id, name = inst.name, order = #out + 1, bis = 0 }
+      out[#out + 1] = { id = inst.id, name = inst.name, order = #out + 1,
+                        bis = ns.DungeonBisCount(inst.id) }
     end
   end
   return out
+end
+
+--- How many of a dungeon's drops are best-in-slot for the viewer.
+---
+--- ⚠️ THIS WAS A HARDCODED ZERO (Jason, Session 260: "shouldn't there be BIS
+--- icons on some dungeons?"). Raid tiles have carried a diamond since the strip
+--- was built, and the dungeon branch shipped with `bis = 0` written in as a
+--- placeholder — so the mark could never appear on a dungeon however many BIS
+--- picks it held. A literal that stands in for a calculation looks exactly like
+--- a calculation that returns zero.
+---
+--- ⚠️ COUNTED OFF THE POOLED LIST, WHICH IS THE LIST THE TILE OPENS. A key
+--- drops one chest, so the dungeon is the unit of loot and ns.DungeonLoot
+--- already pools and deduplicates across its bosses. Counting any other way
+--- would let the tile disagree with what it shows when clicked — and the test
+--- asserts they match rather than trusting that they do.
+---
+--- Cheap after the season prewarm: DungeonLoot reads through CachedLoot, so a
+--- refresh costs table walks rather than journal calls.
+function ns.DungeonBisCount(instanceID)
+  local data = ns.Data()
+  if not (data and data.rankings and instanceID) then return 0 end
+  local char = ns.ResolveCharacter and ns.ResolveCharacter()
+  if not (char and char.className and char.specName) then return 0 end
+  local scope = ns.CurrentContentScope and ns.CurrentContentScope() or nil
+
+  local n = 0
+  for _, j in ipairs((ns.DungeonLoot(instanceID))) do
+    if j.itemID then
+      local q = ns.Scoring.resolveQuality(
+        data.rankings, j.itemID, char.className, char.specName, char.heroTree, scope)
+      if q and q.bis then n = n + 1 end
+    end
+  end
+  return n
 end
 
 --- Everything one dungeon can drop, pooled across its bosses and deduplicated.

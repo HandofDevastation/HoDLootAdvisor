@@ -3223,6 +3223,54 @@ header("Dungeons as a content mode — tiles, pooled loot, and scoring")
   for _, e in ipairs(pooled) do if e.itemID == sharedID then occurrences = occurrences + 1 end end
   check("...exactly once", occurrences == 1, occurrences)
 
+  -- ── THE DUNGEON TILE'S BIS COUNT ─────────────────────────────────────────
+  --
+  -- ⚠️ IT WAS A HARDCODED ZERO (Jason, Session 260: "shouldn't there be BIS
+  -- icons on some dungeons?"). Raid tiles have carried the diamond since the
+  -- strip was built; the dungeon branch shipped `bis = 0` as a placeholder, so
+  -- the mark could never appear on a dungeon however many picks it held. A
+  -- literal standing in for a calculation is indistinguishable from a
+  -- calculation that returns zero — which is why this asserts a NON-ZERO count
+  -- somewhere, not merely that the field exists.
+  do
+    local data = ns.Data()
+    local char = ns.ResolveCharacter()
+    -- Stage a BIS pick on something the fixture's dungeons actually drop, so
+    -- the count has a real item to find rather than testing an empty set.
+    local staged = pooled[1] and pooled[1].itemID
+    check("a pooled dungeon item exists to stage a BIS pick on", staged ~= nil)
+    if staged then
+      local key = char.className .. "/" .. char.specName
+      local prior = data.rankings[staged]
+      data.rankings[staged] = { [key] = { b = "overall", bx = { "overall" } } }
+
+      local n = ns.DungeonBisCount(multiBoss.id)
+      check("a dungeon's BIS count sees a pick in its pooled loot", n >= 1, n)
+
+      -- ⚠️ THE TILE MUST AGREE WITH THE LIST IT OPENS. Counting any other way
+      -- lets the diamond promise something the list does not show.
+      local listed = 0
+      for _, e in ipairs(ns.DungeonLoot(multiBoss.id)) do
+        local q = ns.Scoring.resolveQuality(data.rankings, e.itemID,
+          char.className, char.specName, char.heroTree,
+          ns.CurrentContentScope and ns.CurrentContentScope() or nil)
+        if q and q.bis then listed = listed + 1 end
+      end
+      check("...and the tile's count equals what the dungeon's list marks",
+            n == listed, ("tile=%d list=%d"):format(n, listed))
+
+      -- And it reaches the tile the panel actually draws.
+      local shown
+      for _, d in ipairs(ns.DungeonList()) do
+        if d.id == multiBoss.id then shown = d.bis end
+      end
+      check("...and the dungeon tile carries it", shown == n,
+            ("tile field=%s count=%d"):format(tostring(shown), n))
+
+      data.rankings[staged] = prior
+    end
+  end
+
   -- ── The Adventure Guide's slot wording maps to ours ───────────────────────
   -- These are the GAME'S spellings. A string transform would turn "Two-Hand"
   -- into "TWOHAND" and every two-hander would score and price as unknown.
