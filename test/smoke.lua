@@ -1440,14 +1440,35 @@ local instances = J.CachedInstances()
 --
 -- DERIVED FROM THE FIXTURE, not written as a literal, so adding an instance to
 -- the stub cannot fail a check about world bosses.
+-- ⚠️ RAIDS FROM THE TIER, DUNGEONS FROM THE SEASON (Session 260). The
+-- catalogue is no longer "everything in the current tier": a Mythic+ season
+-- rotates in revamped dungeons that live in OTHER tiers, and it leaves some of
+-- the expansion's own dungeons out of the keystone pool entirely. Deriving the
+-- expected count from both sources is the point — the old derivation read the
+-- tier alone, which is the question the addon was wrongly asking.
 local expectedInstances = 0
 for _, inst in ipairs(stub.journal.instances) do
-  if not ns.Journal.WORLD_BOSS_INSTANCES[inst.id] then
+  if inst.isRaid and not ns.Journal.WORLD_BOSS_INSTANCES[inst.id] then
     expectedInstances = expectedInstances + 1
   end
 end
+local seasonMaps = 0
+for _ in pairs(stub.journal.challengeMaps) do seasonMaps = seasonMaps + 1 end
+expectedInstances = expectedInstances + seasonMaps
+
 check("raids AND dungeons both enumerate", #instances == expectedInstances,
-      ("%d instances, fixture offers %d"):format(#instances, expectedInstances))
+      ("%d instances, expected %d"):format(#instances, expectedInstances))
+
+-- THE BUG AS JASON FOUND IT, both halves. A season dungeon from an older tier
+-- must be present; an expansion dungeon outside the keystone pool must not.
+local function catalogueHas(id)
+  for _, inst in ipairs(instances) do if inst.id == id then return true end end
+  return false
+end
+check("a season dungeon from an OLDER tier is in the catalogue",
+      catalogueHas(1030), "Temple of Sethraliss, which the tier walk cannot see")
+check("...and an in-tier dungeon the season does NOT run is left out",
+      not catalogueHas(1250), "Magisters' Terrace is not in the keystone pool")
 check("...and the fixture contains a world-boss container to exclude",
       expectedInstances < #stub.journal.instances,
       "otherwise the exclusion below is vacuous")
@@ -3491,6 +3512,21 @@ header("Dungeons as a content mode — tiles, pooled loot, and scoring")
             stub.journal.slotFilter == "Finger", tostring(stub.journal.slotFilter))
       check("...and so is their difficulty",
             stub.journal.difficulty == 1, tostring(stub.journal.difficulty))
+
+      -- ⚠️ AND THE SOURCE INDEX FOLLOWS THE SEASON, NOT THE TIER. This is the
+      -- item Jason chased for three rounds: its dungeon was never enumerated,
+      -- so no amount of filter or difficulty fixing downstream could have found
+      -- it. The out-of-season item is the other half — a catalogue scoped to
+      -- the season must not quietly widen either.
+      check("an item from a season dungeon in an older tier is indexed",
+            idx2 and idx2[880043] ~= nil,
+            "Sandworn Guardian's Breastplate, Temple of Sethraliss")
+      check("...naming its boss",
+            idx2 and idx2[880043] and idx2[880043].boss == "Avatar of Sethraliss",
+            idx2 and idx2[880043] and idx2[880043].boss)
+      check("...and an out-of-season dungeon's loot is NOT indexed",
+            idx2 and idx2[880044] == nil,
+            "Magisters' Terrace is in the tier but not in the season")
 
       stub.journal.slotFilter, stub.journal.difficulty = nil, nil
       ns.Journal.Invalidate()

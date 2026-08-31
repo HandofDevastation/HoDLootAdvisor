@@ -415,12 +415,40 @@ function stub.Install()
     tier = 13,
     selectedTier = 13, selectedInstance = nil, selectedEncounter = nil,
     filter = nil, appliedFilter = nil,
+    -- ⚠️ THE TIER'S DUNGEONS ARE NOT THE SEASON'S, AND THIS FIXTURE USED TO
+    -- PRETEND THEY WERE (Session 260). It listed exactly the dungeons the tests
+    -- then asserted came back, so the harness could never notice that the addon
+    -- was asking the wrong question — the S251 trap, verbatim: a fixture that
+    -- differs from production tests a system that does not exist.
+    --
+    -- Production: a Mythic+ season rotates in FOUR REVAMPED dungeons from
+    -- earlier expansions, which live in their OWN tiers and do NOT appear in
+    -- the current tier's walk. Jason opened the dungeon list and found the
+    -- expansion's dungeons where the season's should have been.
+    --
+    -- So the tier now carries a dungeon the season does NOT run (Magisters'
+    -- Terrace), and the season carries one the tier has never heard of (Temple
+    -- of Sethraliss, in tier 9). Getting both right is the whole test.
     instances = {
       { id = 1317, name = "The Tidebound Grotto", isRaid = true },
       { id = 1312, name = "Midnight",             isRaid = true },
       { id = 1304, name = "Murder Row",           isRaid = false },
       { id = 1322, name = "Altar of Fangs",       isRaid = false },
       { id = 1319, name = "Keystone Dungeons",    isRaid = false },
+      -- In the tier, NOT in this season's keystone pool.
+      { id = 1250, name = "Magisters' Terrace",   isRaid = false },
+    },
+    -- Instances that live in an older tier. The current-tier walk cannot see
+    -- them; only the challenge-map route reaches them.
+    otherTier = {
+      [1030] = { tier = 9, name = "Temple of Sethraliss" },
+    },
+    -- The season's keystone pool, as C_ChallengeMode reports it: challenge map
+    -- id -> { name, uiMapID }, plus the uiMapID -> journal instance bridge.
+    challengeMaps = {
+      [501] = { name = "Murder Row",           uiMapID = 2001, instanceID = 1304 },
+      [502] = { name = "Altar of Fangs",       uiMapID = 2002, instanceID = 1322 },
+      [503] = { name = "Temple of Sethraliss", uiMapID = 2003, instanceID = 1030 },
     },
     -- Instances that enumerate but hold no loot.
     noLoot = { [1319] = true },
@@ -435,6 +463,11 @@ function stub.Install()
       [1322] = { { id = 2920, name = "Fangcaller Vex" },
                  { id = 2921, name = "The Brood Matron" } },
       [1319] = {},
+      -- A season dungeon living in an OLDER tier: invisible to the current
+      -- tier's walk, reachable only through the challenge-map route.
+      [1030] = { { id = 2960, name = "Avatar of Sethraliss" } },
+      -- In the tier but NOT in the season. Its loot must never be indexed.
+      [1250] = { { id = 2970, name = "Selin Fireheart" } },
     },
     -- classID 3 is the Hunter in this fixture; anything else sees fewer items.
     loot = {
@@ -495,6 +528,19 @@ function stub.Install()
         { itemID = 880042, name = "Sunbaked Guardian's Breastplate", icon = 21,
           slot = "Chest", armorType = "Plate", itemQuality = 4, difficulty = 23 },
       },
+      -- The cross-tier season dungeon's loot. This is the shape of Desert
+      -- Guardian's Breastplate: a real season pick whose dungeon the current
+      -- tier has never heard of.
+      [2960] = {
+        { itemID = 880043, name = "Sandworn Guardian's Breastplate", icon = 22,
+          slot = "Chest", armorType = "Plate", itemQuality = 4 },
+      },
+      -- OUT OF SEASON. In the tier, not in the keystone pool, so nothing here
+      -- may reach the catalogue or the source index.
+      [2970] = {
+        { itemID = 880044, name = "Phoenix-Wing Cloak", icon = 23,
+          slot = "Back", armorType = "Cloth", itemQuality = 4 },
+      },
     },
   }
 
@@ -510,10 +556,13 @@ function stub.Install()
     return "Some Instance", "description", 4210987
   end
   _G.EJ_SelectTier = function(t) J.selectedTier = t end
+  -- The tier walk lists ONLY what belongs to the selected tier — instances in
+  -- J.otherTier are invisible here, exactly as a revamped dungeon from an older
+  -- expansion is invisible in the current tier's walk.
   _G.EJ_GetInstanceByIndex = function(i, isRaid)
     local n = 0
     for _, inst in ipairs(J.instances) do
-      if inst.isRaid == isRaid then
+      if inst.isRaid == isRaid and not J.otherTier[inst.id] then
         n = n + 1
         if n == i then return inst.id, inst.name end
       end
@@ -521,7 +570,13 @@ function stub.Install()
     return nil
   end
   _G.EJ_SelectInstance = function(id) J.selectedInstance = id end
+  -- ⚠️ AN INSTANCE ONLY RESOLVES IN ITS OWN TIER. This is the property that
+  -- makes a cross-tier season dungeon answer NOTHING until the caller finds its
+  -- tier — and without it modelled, the harness would report green on code that
+  -- never leaves the current tier, which is the bug Jason found.
   _G.EJ_GetEncounterInfoByIndex = function(i)
+    local home = J.otherTier[J.selectedInstance]
+    if home and J.selectedTier ~= home.tier then return nil end
     local list = J.encounters[J.selectedInstance] or {}
     local e = list[i]
     if not e then return nil end
@@ -640,6 +695,34 @@ function stub.Install()
     GetSlotFilter = function() return J.slotFilter end,
     SetSlotFilter = function(slot) J.slotFilter = slot end,
     ResetSlotFilter = function() J.slotFilter = nil end,
+    -- The bridge from a keystone map to its journal instance. Only defined for
+    -- maps in the season's pool, because that is the only place the client can
+    -- answer from.
+    GetInstanceForGameMap = function(uiMapID)
+      for _, m in pairs(J.challengeMaps) do
+        if m.uiMapID == uiMapID then return m.instanceID end
+      end
+      return nil
+    end,
+  }
+
+  -- ⚠️ THE SEASON'S KEYSTONE POOL, WHICH IS NOT THE EXPANSION'S DUNGEON LIST.
+  -- Absent from this stub entirely until Session 260, which is why the harness
+  -- had nothing to say while the addon asked the tier instead of the season.
+  _G.C_ChallengeMode = {
+    GetMapTable = function()
+      local out = {}
+      for id in pairs(J.challengeMaps) do out[#out + 1] = id end
+      table.sort(out)
+      return out
+    end,
+    -- name, id, timeLimit, texture, backgroundTexture, mapID — the SIXTH return
+    -- is the UI map id, read off ChallengeModeInfoDocumentation.
+    GetMapUIInfo = function(challengeID)
+      local m = J.challengeMaps[challengeID]
+      if not m then return nil end
+      return m.name, challengeID, 1800, nil, 0, m.uiMapID
+    end,
   }
 
   -- Items the addon asked the client to load. Item data is eventually

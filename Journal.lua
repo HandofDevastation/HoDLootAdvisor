@@ -275,6 +275,113 @@ local function selectTier(tier)
   return tier
 end
 
+--- Which tier an instance resolves in, once discovered. Cheap memo: the sweep
+--- below costs a handful of selects and the answer never changes in a session.
+local instanceTier = {}
+
+--- Select an instance, sweeping tiers if it does not resolve in the current one.
+---
+--- ⚠️ A SEASON DUNGEON NEED NOT BELONG TO THE CURRENT TIER (Session 260). The
+--- four revamped dungeons a Mythic+ season rotates in live in the tiers of the
+--- expansions they came from, so selecting them while the journal points at the
+--- current tier can answer nothing at all. The tell is an instance that
+--- enumerates zero encounters when the Adventure Guide plainly shows four.
+---
+--- saveState restores the tier, so sweeping costs nothing the caller can see.
+local function selectInstanceAcrossTiers(instanceID)
+  local sel = api("EJ_SelectInstance")
+  local byIndex = api("EJ_GetEncounterInfoByIndex")
+  if not (sel and instanceID) then return false end
+
+  local known = instanceTier[instanceID]
+  if known then selectTier(known) end
+  call(sel, instanceID)
+  -- With no way to read encounters back there is nothing to verify against, so
+  -- the plain select stands — degraded, never worse than before.
+  if not byIndex then return true end
+  if one(byIndex, 1) ~= nil then
+    instanceTier[instanceID] = instanceTier[instanceID] or one(api("EJ_GetCurrentTier"))
+    return true
+  end
+
+  -- Newest tier first: a season's own dungeons are far commoner than its
+  -- revamped guests, so the usual case is found on the first try.
+  local numTiers = one(api("EJ_GetNumTiers")) or 0
+  for t = numTiers, 1, -1 do
+    selectTier(t)
+    call(sel, instanceID)
+    if one(byIndex, 1) ~= nil then
+      instanceTier[instanceID] = t
+      return true
+    end
+  end
+  return false
+end
+
+--- THE SEASON'S MYTHIC+ DUNGEONS, ASKED OF THE GAME (Session 260).
+---
+--- ⚠️ THE EXPANSION TIER IS NOT THE SEASON. This is the bug behind every
+--- missing dungeon source line, and it is bigger than the two that preceded it:
+--- the dungeon list was built by walking the CURRENT TIER, which lists the
+--- expansion's own dungeons. A Mythic+ season also rotates in FOUR REVAMPED
+--- dungeons from earlier expansions, and those live in their OWN tiers — so we
+--- never enumerated them, never read their loot, and could not have sourced an
+--- item from one no matter what else was fixed.
+---
+--- Jason opened the dungeon list and found Magisters' Terrace and Maisara
+--- Caverns where Kings' Rest, Ruby Life Pools and Temple of Sethraliss should
+--- have been. Desert Guardian's Breastplate drops in Temple of Sethraliss.
+---
+--- ⚠️ IT WAS CORRECT WHEN IT WAS CHECKED, which is why it survived. Session 243
+--- verified the tier walk against a live client and recorded nine dungeons
+--- INCLUDING the revamped ones; the tier's contents moved afterwards and
+--- nothing re-read them. A list that is right on the day it is written and
+--- derived from the wrong question fails silently later — this is the S246 rule
+--- ("is it current?" is always OUR question) in a third domain.
+---
+--- THE CHAIN, every step the game's own: C_ChallengeMode.GetMapTable() is the
+--- season's keystone pool; GetMapUIInfo answers a name and, as its SIXTH
+--- return, a UI map id; C_EncounterJournal.GetInstanceForGameMap turns that into
+--- the journal instance. No name matching and no tier guessing.
+---
+--- Returns an EMPTY list when the client cannot answer, and the caller then
+--- keeps the tier walk — an over-broad dungeon list is visibly wrong and
+--- fixable, an empty one reads as the addon being broken.
+function Journal.SeasonDungeons()
+  local out = {}
+  local CM = _G.C_ChallengeMode
+  local forMap = api("GetInstanceForGameMap")
+  if not (CM and type(CM.GetMapTable) == "function"
+    and type(CM.GetMapUIInfo) == "function" and forMap) then
+    return out
+  end
+
+  local okTable, maps = call(CM.GetMapTable)
+  if not okTable or type(maps[1]) ~= "table" then return out end
+
+  local seen = {}
+  for _, challengeID in ipairs(maps[1]) do
+    local okInfo, info = call(CM.GetMapUIInfo, challengeID)
+    -- name is 1, uiMapID is 6 — read off ChallengeModeInfoDocumentation rather
+    -- than counted off a call site.
+    local name, uiMapID = okInfo and info[1], okInfo and info[6]
+    if type(uiMapID) == "number" then
+      local instanceID = one(forMap, uiMapID)
+      if type(instanceID) == "number" and instanceID > 0 and not seen[instanceID] then
+        seen[instanceID] = true
+        out[#out + 1] = { id = instanceID, name = name, isRaid = false }
+      end
+    end
+  end
+
+  if ns.Diagnostics then
+    ns.Diagnostics.Note("journalSeasonDungeons", {
+      challengeMaps = #(maps[1] or {}), resolved = #out,
+    })
+  end
+  return out
+end
+
 --- Every instance in a tier: raids AND dungeons, in the journal's own order.
 ---
 --- World bosses arrive here as a RAID entry (1312 "Midnight" in Season 2), which
@@ -344,11 +451,36 @@ function Journal.Instances(tier)
     end
   end
 
+  -- ⚠️ THE DUNGEON HALF COMES FROM THE SEASON, NOT THE TIER (Session 260).
+  -- The tier walk above is right for RAIDS — a season's raid is its
+  -- expansion's — and wrong for dungeons, because a Mythic+ season rotates in
+  -- revamped dungeons that belong to other tiers entirely. See
+  -- Journal.SeasonDungeons for what that cost.
+  --
+  -- FAIL OPEN: if the client cannot answer, the tier's dungeons stay, which is
+  -- exactly today's behaviour rather than an empty list.
+  local season = Journal.SeasonDungeons()
+  if #season > 0 then
+    local kept = {}
+    for _, inst in ipairs(out) do
+      if inst.isRaid then kept[#kept + 1] = inst end
+    end
+    for _, inst in ipairs(season) do
+      -- The tier walk may already have named it; prefer its own entry so the
+      -- name and tier we recorded there survive.
+      local prior
+      for _, o in ipairs(out) do if o.id == inst.id then prior = o end end
+      kept[#kept + 1] = prior or inst
+    end
+    out = kept
+  end
+
   if ns.Diagnostics then
     ns.Diagnostics.Note("journalCatalogue", {
       tier = resolved, tierName = tierName,
       tierNameResolved = tierName ~= nil,
       instances = #out, excluded = excluded,
+      seasonDungeons = #season,
     })
   end
 
@@ -363,7 +495,7 @@ function Journal.Encounters(instanceID)
   if not (sel and byIndex and instanceID) then return {} end
 
   local restore = saveState()
-  call(sel, instanceID)
+  selectInstanceAcrossTiers(instanceID)
 
   local out = {}
   for i = 1, 30 do
@@ -403,8 +535,9 @@ function Journal.Loot(encounterID, opts)
   -- call (the encounter list had just selected it) and empty on every call
   -- after. Ambient selection state is not an input; it is a race.
   local instanceID = opts.instanceID or Journal.InstanceForEncounter(encounterID)
-  local selInst = api("EJ_SelectInstance")
-  if instanceID and selInst then call(selInst, instanceID) end
+  -- Across tiers, because a season's revamped dungeons are not in the current
+  -- one — see selectInstanceAcrossTiers.
+  if instanceID then selectInstanceAcrossTiers(instanceID) end
 
   -- FILTER BEFORE SELECT. The other order reads back correctly and filters
   -- nothing — see the header note.
