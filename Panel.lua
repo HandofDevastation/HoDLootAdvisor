@@ -404,11 +404,24 @@ local COL_ROWS = math.floor(COL_AREA_H / ITEM_PITCH)
 local DET = {
   headY   = 177,                      -- the header row, 41 tall
   iconX   = 263, iconY = 178, icon = 40,
-  nameX   = 313, nameY = 177,         -- name (13 Regular) over slot line (12 Light)
-  line2Y  = 194,                      -- the block is 34 tall for two lines
+  -- ⚠️ THE TWO-LINE BLOCK IS CENTRED ON THE ICON, NOT TOP-ALIGNED WITH IT
+  -- (Jason, Session 258). Node 577:880 is 34 tall beside a 40 icon, so it sits
+  -- 3 down from the icon's top and 3 up from its bottom. It was pinned to the
+  -- header's top instead, which put both lines high against the artwork.
+  --
+  -- Heights are EXPLICIT and both lines top-justify, for the same reason the
+  -- Standings rail needed it: a fontstring anchored TOPLEFT with no height
+  -- draws wherever its own line box lands, so "centred" cannot be arithmetic
+  -- on the anchor alone.
+  nameX   = 313,                      -- name (13 Regular) over slot line (12 Light)
+  nameH   = 18, line2H = 16,          -- 34 together, the node's own block
   -- The verdict badge: a 10%-blush box with the grade over the word "Upgrade".
   badgeX  = 623, badgeY = 178, badgeW = 75, badgeH = 40,
-  badgePadX = 10, badgeTop = 9,
+  -- ⚠️ 19, NOT 13 (Jason: "there's not enough space between MAJOR and
+  -- Upgrade"). MAJOR is 16px Bold, whose line box is about 19 tall — so a 13px
+  -- step put the word inside the grade's own descender space. The pair now runs
+  -- 8..39 inside a 40-tall box.
+  badgePadX = 10, badgeTop = 8, badgeLine2 = 19,
 }
 
 -- TWO hairlines, not three. The mock separates header / meta / table and
@@ -1951,17 +1964,31 @@ local function buildDetailPane()
   frame.itemIcon = frame:CreateTexture(nil, "ARTWORK")
   frame.itemIcon:SetSize(DET.icon, DET.icon)
   frame.itemIcon:SetPoint("TOPLEFT", DET.iconX, -DET.iconY)
-  -- ⚠️ NO SetTexCoord ALONGSIDE A MASK. The 8% crop exists to trim the border
-  -- baked into every WoW item icon, but a mask samples the texture in its own
-  -- coordinate space and the two fight. The mask hides that border anyway,
-  -- which is what the crop was for.
-  if ns.Style then ns.Style.Round(frame, frame.itemIcon) end
+  -- ⚠️ SQUARE AND CROPPED, NOT MASKED (Session 258). The comment here said the
+  -- icon "IS CIRCULAR, matching the boss rail" and used the client's portrait
+  -- mask. Node 577:878 is a ROUNDED-RECTANGLE 40x40 — it was never a circle —
+  -- and the mask was evidently not applying in game anyway, because the border
+  -- baked into every WoW item icon was plainly visible. Jason asked for the
+  -- crop that removes it.
+  --
+  -- The standing rule "no SetTexCoord alongside a mask" still holds and is why
+  -- the mask goes rather than the two being stacked: at 40px an 8% inset trims
+  -- 3.2px from each edge, which is exactly the baked border.
+  frame.itemIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
   -- ⚠️ THE NAME IS BLUSH AND THE SLOT LINE IS WHITE — the OPPOSITE of the left
   -- rail's cards, and read off the node rather than reasoned about. See the note
   -- on Style.COLOR.body.
-  frame.itemName = at(text(frame, "regular", "detail", "body"), DET.nameX, DET.nameY, 300)
-  frame.itemSub  = at(text(frame, "light", "row", "white"), DET.nameX, DET.line2Y, 300)
+  -- Centred against the icon: the icon spans iconY..iconY+40, the block is 34,
+  -- so the block's top is iconY + 3.
+  local blockTop = DET.iconY + math.floor((DET.icon - (DET.nameH + DET.line2H)) / 2)
+  frame.itemName = at(text(frame, "regular", "detail", "body"), DET.nameX, blockTop, 300)
+  frame.itemName:SetHeight(DET.nameH)
+  frame.itemName:SetJustifyV("TOP")
+  frame.itemSub  = at(text(frame, "light", "row", "white"), DET.nameX,
+    blockTop + DET.nameH, 300)
+  frame.itemSub:SetHeight(DET.line2H)
+  frame.itemSub:SetJustifyV("TOP")
 
   -- The verdict badge. Its ground is the blush at 10%, and the grade sits over
   -- the word "Upgrade" in two tight 10px lines — which is why both are anchored
@@ -1995,7 +2022,7 @@ local function buildDetailPane()
   frame.hUpgrade = text(frame.badgeBox, "bold", "badge", "major", "RIGHT")
   frame.hUpgrade:SetPoint("TOPRIGHT", -DET.badgePadX, -DET.badgeTop)
   frame.hUpgradeWord = text(frame.badgeBox, "light", "label", "white", "RIGHT")
-  frame.hUpgradeWord:SetPoint("TOPRIGHT", -DET.badgePadX, -(DET.badgeTop + 13))
+  frame.hUpgradeWord:SetPoint("TOPRIGHT", -DET.badgePadX, -(DET.badgeTop + DET.badgeLine2))
   frame.hUpgradeWord:SetText("Upgrade")
 
   --- Resize the box around whichever verdict it is currently showing, never

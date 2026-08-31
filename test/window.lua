@@ -153,6 +153,11 @@ function real.SetGradient(self, orientation, c1, c2)
   self._gradient = { orientation = orientation, from = c1, to = c2 }
 end
 function real.SetTexture(self, t) self._texture = t end
+-- Recorded rather than invented: the item icon's crop is what hides the border
+-- baked into every WoW icon, and a no-op here would make a test for it pass
+-- whether the call happened or not.
+function real.SetTexCoord(self, l, r, t, b) self._texCoord = { l, r, t, b } end
+function real.AddMaskTexture(self, m) self._masks = (self._masks or 0) + 1 end
 function real.GetName(self) return self._name end
 
 widgetMeta.__index = function(self, key)
@@ -853,6 +858,58 @@ do
           table.concat(missed, ", "))
     ns.Settings.Set("panelScale", 100)
     ns.ApplyWindowScale()
+  end
+
+  -- ── The Loot tab's detail header (node 582:983) ───────────────────────────
+  do
+    -- The icon is cropped rather than masked: node 577:878 is a rounded
+    -- RECTANGLE, and the 8% inset is what removes the border baked into every
+    -- WoW item icon.
+    local tc = panel.itemIcon._texCoord
+    check("the item icon is cropped to hide its baked border",
+          tc ~= nil and tc[1] > 0 and tc[2] < 1, tc and table.concat(tc, ",") or "no crop")
+    -- ⚠️ AND NOT MASKED AS WELL. The two fight — a mask samples the texture in
+    -- its own coordinate space — which is why the crop replaced the mask rather
+    -- than joining it.
+    check("...and carries no mask alongside the crop",
+          (panel.itemIcon._masks or 0) == 0, panel.itemIcon._masks)
+
+    -- ⚠️ THE BLOCK IS CENTRED ON THE ICON, not aligned to the header's top.
+    -- Both are anchored TOPLEFT with explicit heights, so this is arithmetic
+    -- on values the frame actually holds rather than an eyeball.
+    -- ⚠️ SetPoint HAS TWO SHAPES and the offsets are not in a fixed position:
+    -- ("TOPLEFT", x, y) and ("TOPLEFT", rel, "TOPLEFT", x, y). Reading select(5)
+    -- blindly gives nil for the short form, which is what every `at()` call in
+    -- this file uses. Take the last two numbers instead.
+    local function offsetY(f)
+      local pt = { f:GetPoint(1) }
+      for i = #pt, 1, -1 do
+        if type(pt[i]) == "number" then return pt[i] end
+      end
+    end
+    local iconY = offsetY(panel.itemIcon)
+    local nameY = offsetY(panel.itemName)
+    local subY  = offsetY(panel.itemSub)
+    local blockTop, blockH = -nameY, panel.itemName:GetHeight() + panel.itemSub:GetHeight()
+    local iconTop, iconH = -iconY, panel.itemIcon:GetHeight()
+    check("the two-line block is 34 tall, as the node is", blockH == 34, blockH)
+    check("...and its centre is the icon's centre",
+          math.abs((blockTop + blockH / 2) - (iconTop + iconH / 2)) <= 1,
+          ("block %d..%d, icon %d..%d"):format(blockTop, blockTop + blockH,
+            iconTop, iconTop + iconH))
+    check("...with the second line directly under the first",
+          -subY == blockTop + panel.itemName:GetHeight(),
+          ("%d vs %d"):format(-subY, blockTop + panel.itemName:GetHeight()))
+
+    -- The badge's two lines must not sit inside each other's line box. MAJOR is
+    -- 16px Bold, whose box is about 19 tall.
+    local gradeY = offsetY(panel.hUpgrade)
+    local wordY  = offsetY(panel.hUpgradeWord)
+    check("the badge's word clears the grade's line box",
+          (-wordY) - (-gradeY) >= 17, ("gap %d"):format((-wordY) - (-gradeY)))
+    check("...and both still fit inside the badge",
+          (-wordY) + 12 <= panel.badgeBox:GetHeight(),
+          ("%d in %d"):format((-wordY) + 12, panel.badgeBox:GetHeight()))
   end
 
   -- ── The size slider ───────────────────────────────────────────────────────
