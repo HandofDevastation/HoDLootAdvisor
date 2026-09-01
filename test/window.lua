@@ -1011,6 +1011,43 @@ do
     end
   end
 
+  -- ── THE FILTER ROW AND THE DROPDOWN CENTRE THEIR OWN LABELS ───────────
+  --
+  -- Jason, Session 262: the toggles "aren't vertically centered with the
+  -- surround text … flush at the top and hang down too far", and the
+  -- difficulty control's "text is too close to the top of the button".
+  -- Both are the same fault — a label with no height drawing by its own line
+  -- box — and both are asserted here as a RELATIONSHIP, not as a number.
+  do
+    local sw = panel.swSource
+    if sw then
+      local function yOf(w)
+        local p = w._points and w._points[1]
+        return p and p[#p]
+      end
+      check("a filter label carries the track's own height",
+            sw.left._heightSet and sw.left:GetHeight() == sw:GetHeight(),
+            ("label %s vs track %s, set=%s"):format(sw.left:GetHeight(),
+              sw:GetHeight(), tostring(sw.left._heightSet)))
+      check("...and centres inside it", sw.left._justifyV == "MIDDLE",
+            tostring(sw.left._justifyV))
+      check("...on the SAME line as the track, so all three agree",
+            yOf(sw.left) == yOf(sw) and yOf(sw.right) == yOf(sw),
+            ("left %s right %s track %s"):format(yOf(sw.left), yOf(sw.right), yOf(sw)))
+    end
+
+    local d = panel.diff
+    if d and d.text then
+      check("the difficulty control's label centres vertically",
+            d.text._justifyV == "MIDDLE", tostring(d.text._justifyV))
+      -- ⚠️ LEFT, NOT CENTRE. A label centred across the FULL width reads as
+      -- pushed right, because the caret owns the right ~20px — which is the
+      -- uneven padding Jason saw. Node 582:1127 left-aligns it at 20.
+      check("...and is left-aligned at 20, clear of the caret",
+            d.text._justifyH == "LEFT", tostring(d.text._justifyH))
+    end
+  end
+
   -- ── THE RAIL READS LEFT TO RIGHT NOW (Session 262) ────────────────────
   --
   -- ⚠️ THIS CHANGE WAS CATALOGUED IN SESSION 261 AND NEVER BUILT. The rail was

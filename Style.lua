@@ -602,6 +602,19 @@ end
 --- `on` is the selected state: solid purple. Off is the same hue at 30%, which
 --- is how the design distinguishes them — never a different colour, so the group
 --- still reads as one control.
+-- ── Control metrics, shared by Pill and Control ────────────────────────────
+--
+-- Declared here rather than beside Style.Control because Pill comes FIRST in
+-- this file and needs them too.
+local CONTROL_PAD_X, CONTROL_H = 20, 27
+
+-- How far DOWN a control's label is nudged from the geometric centre, in
+-- pixels. The client does not place a centred fontstring on the optical centre
+-- of its glyphs, and every control label in this addon is uppercase, so the
+-- unused descender space reads as a gap underneath. One knob, one place, every
+-- button.
+local CONTROL_TEXT_Y = 1
+
 function Style.Pill(parent, width, height, label, size)
   local btn = CreateFrame("Button", nil, parent)
   btn._hodStyled = true
@@ -632,7 +645,14 @@ function Style.Pill(parent, width, height, label, size)
   -- until each is rebuilt from its own mock, they just stop clashing meanwhile.
   btn.text:SetTextColor(Style.rgb(Style.COLOR.controlText))
   btn.text:SetJustifyH("CENTER")
-  btn.text:SetPoint("CENTER")
+  -- ⚠️ THE SAME LINE-BOX CORRECTION Style.Control CARRIES (Jason, Session 262:
+  -- the difficulty control's "text is too close to the top of the button,
+  -- rather than being vertically centered"). A bare SetPoint("CENTER") centres
+  -- the LINE BOX, which reserves descender space these uppercase labels never
+  -- use, so the glyphs ride high — the S260 rule, and Style.Control had already
+  -- been corrected for it while this primitive had not. One knob, both places.
+  btn.text:SetPoint("CENTER", 0, -CONTROL_TEXT_Y)
+  btn.text:SetJustifyV("MIDDLE")
   btn:SetFontString(btn.text)
   btn.text:SetText(label or "")
 
@@ -713,14 +733,11 @@ end
 ---
 --- ⚠️ SQUARE CORNERS, DELIBERATELY (Jason). Four 1px textures, no artwork, any
 --- size, recolourable — which is the whole reason the design has no rounding.
-local CONTROL_PAD_X, CONTROL_H = 20, 27
-
--- How far DOWN a control's label is nudged from the geometric centre, in
--- pixels. See the note above btn.text: the client does not place a centred
--- fontstring on the optical centre of its glyphs, and every control label in
--- this addon is uppercase, so the unused descender space reads as a gap
--- underneath. One knob, one place, every button.
-local CONTROL_TEXT_Y = 1
+-- CONTROL_PAD_X / CONTROL_H / CONTROL_TEXT_Y are declared ABOVE Style.Pill
+-- (Session 262) — Pill needs the same optical nudge and a file-local declared
+-- further down this file is not in scope in a function above it. Lua answers
+-- nil for the global instead, so the arithmetic errors at BUILD time rather
+-- than compile time; the panel simply failed to open.
 
 -- The gap between a dropdown's label and its caret, and the padding OUTSIDE
 -- the caret. Read off the Slots node (590:2050): a 111-wide control with the
@@ -1103,6 +1120,17 @@ function Style.Switch(parent, leftLabel, rightLabel)
   -- still line up.
   f.left  = Style.Text(parent, "light", "label", Style.COLOR.body, "LEFT")
   f.right = Style.Text(parent, "light", "label", Style.COLOR.body, "LEFT")
+  -- ⚠️ THE TRACK'S OWN HEIGHT, SO THEY CENTRE AGAINST IT (Jason, Session 262:
+  -- the toggles "aren't vertically centered with the surround text on either
+  -- side … they're flush at the top and hang down too far"). It was the track
+  -- that was right: 16 tall on the row's y, exactly as the node draws it. The
+  -- LABELS had no height, so each drew by its own line box a pixel or two down
+  -- and the track appeared to overhang at both ends. Node 582:1013 and its
+  -- toggle are both 16 tall on the same y — this makes that true here too.
+  for _, fs in ipairs({ f.left, f.right }) do
+    fs:SetHeight(SW.h)
+    fs:SetJustifyV("MIDDLE")
+  end
   f.left:SetText(leftLabel or "")
   f.right:SetText(rightLabel or "")
 
@@ -1465,6 +1493,27 @@ function Style.Window(frame)
   frame:HookScript("OnShow", function(self) Style.SkinChildButtons(self) end)
 
   return frame
+end
+
+--- Re-point a control's label to its LEFT edge, for a control that carries a
+--- caret.
+---
+--- ⚠️ A CENTRED LABEL IN A DROPDOWN IS NOT CENTRED IN WHAT YOU CAN SEE (Jason,
+--- Session 262: "there's not an equal amount of padding on each side"). The
+--- caret occupies the right ~20px, so a label centred across the FULL width
+--- reads as pushed right, crowding the caret with a wide gap on the left. Both
+--- dropdown nodes — 582:1127 and 590:2051 — left-align their label at 20
+--- instead, which is why this exists rather than a cleverer centring.
+---
+--- No SetWidth: a fontstring with a fixed width truncates, and FitToLabel sizes
+--- the control FROM the string, so the two would size each other in a circle.
+function Style.LeftLabel(btn, inset)
+  if not (btn and btn.text) then return btn end
+  btn.text:ClearAllPoints()
+  btn.text:SetPoint("LEFT", inset or CONTROL_PAD_X, -CONTROL_TEXT_Y)
+  btn.text:SetJustifyH("LEFT")
+  btn.text:SetJustifyV("MIDDLE")
+  return btn
 end
 
 --- The design's own text field: a dark box with the control rim, no game art.

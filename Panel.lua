@@ -259,7 +259,8 @@ local SL = {
 
   -- The caption and the view dropdown, both on the tab row's band.
   capR = 760, capY = 48,
-  viewX = 646, viewY = 82, viewW = 111, viewH = 27,
+  -- Node 590:2050: 115 wide at 645, not 111 at 646 (Session 262).
+  viewX = 645, viewY = 82, viewW = 115, viewH = 27,
   caret = 6, caretR = 14,
 
   -- The right-hand region, shared origin, two layouts.
@@ -1645,6 +1646,9 @@ local function buildLootControls()
   frame.diff = ns.Style and ns.Style.Pill(frame, DIFF_W, DIFF_H, "")
     or CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
   frame.diff:SetPoint("TOPLEFT", DIFF_X, -DIFF_Y)
+  -- Node 582:1127 left-aligns the label at 20 and puts the caret in the space
+  -- that leaves; see Style.LeftLabel (Session 262).
+  if ns.Style then ns.Style.LeftLabel(frame.diff) end
   if frame.diff.SetPillState then frame.diff:SetPillState(true) end
   -- ORANGE, per the mock. It was built purple like every other pill on the row,
   -- but the tabs and filter toggles are VIEWS and this one selects CONTENT —
@@ -1817,10 +1821,14 @@ local function buildLootControls()
     if not ns.Style then return nil end
     local s = ns.Style.Switch(frame, leftLabel, rightLabel)
     s:SetPoint("TOPLEFT", trackX, -TOG.trackY)
+    -- ⚠️ THE SAME y AS THE TRACK, NOT ONE BELOW IT (Session 262). Both labels
+    -- carry the track's height now, so anchoring them on its own line is what
+    -- centres all three — and the node puts the text and the toggle on the
+    -- same y regardless.
     s.left:ClearAllPoints()
-    s.left:SetPoint("TOPLEFT", leftX, -TOG.y)
+    s.left:SetPoint("TOPLEFT", leftX, -TOG.trackY)
     s.right:ClearAllPoints()
-    s.right:SetPoint("TOPLEFT", rightX, -TOG.y)
+    s.right:SetPoint("TOPLEFT", rightX, -TOG.trackY)
     s:Wire(onPick)
     return s
   end
@@ -2433,6 +2441,8 @@ local function buildSlotsTab()
   if frame.slotView then
     frame.slotView:SetSize(SL.viewW, SL.viewH)
     frame.slotView:SetPoint("TOPLEFT", SL.viewX, -SL.viewY)
+    -- The page's other dropdown, same treatment (node 590:2051).
+    ns.Style.LeftLabel(frame.slotView)
     frame.slotView:SetActive(true)
     frame.slotView.caret = frame.slotView:CreateTexture(nil, "OVERLAY")
     frame.slotView.caret:SetSize(SL.caret, SL.caret)
