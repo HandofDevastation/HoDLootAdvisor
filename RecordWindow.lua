@@ -904,8 +904,16 @@ function RecordWindow.Refresh()
   -- every draw turns it into a real name as soon as the client can answer.
   ns.Record.ResolveItemInfo()
 
+  -- ⚠️ SELECTION IS SetActive, NOT SetEnabled (Jason, Session 263: "none of them
+  -- light up"). Disabling the selected filter blocks its click and changes
+  -- NOTHING on screen — Style.Control draws its own fontstring, so the client's
+  -- disabled treatment never reaches it — leaving three identical outlined boxes
+  -- with no way to tell which list you were looking at. These are tabs and they
+  -- take the tab treatment the panel's own row takes: the selected one filled at
+  -- full strength, the rest outlined at half.
   for i, f in ipairs(FILTERS) do
-    frame.filters[i]:SetEnabled(state.filter ~= f.key)
+    local b = frame.filters[i]
+    if b.SetActive then b:SetActive(state.filter == f.key) else b:SetEnabled(state.filter ~= f.key) end
   end
 
   local _, gi = ns.Record.Counts(ns.Record.GUILD)

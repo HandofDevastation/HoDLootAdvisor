@@ -2399,10 +2399,20 @@ end
 --- The stored size, as a multiplier on whatever the client gave the window.
 --- Clamped here rather than at each call site so the slash command, the slider
 --- and a hand-edited SavedVariables all land in the same range.
+--- The scale the addon's windows should draw at, or nil for "leave them alone".
+---
+--- ⚠️ AN ABSOLUTE SCALE NOW, NOT A MULTIPLIER (Jason, Session 263). The settings
+--- footer reports the scale that would put one UI unit on exactly one screen
+--- pixel — and that number was unusable while this was a percentage of whatever
+--- the client had already chosen. Typing it in has to produce it.
+---
+--- nil = the client's own value, untouched. That is the default, so an install
+--- that never opens this setting behaves exactly as it did before.
 function ns.WindowScale()
-  local pct = tonumber(ns.Settings and ns.Settings.Get("panelScale")) or 100
-  if pct < 50 then pct = 50 elseif pct > 200 then pct = 200 end
-  return pct / 100
+  local v = tonumber(ns.Settings and ns.Settings.Get("panelScale")) or 0
+  if v <= 0 then return nil end
+  if v < 0.20 then v = 0.20 elseif v > 1.50 then v = 1.50 end
+  return v
 end
 
 --- Apply it to one window, or to all of them.
@@ -2431,13 +2441,29 @@ ns.scaleHeld = nil
 
 function ns.ApplyWindowScale(frame)
   local list = frame and { frame } or ns.scaledWindows
-  local mult = ns.WindowScale()
+  local want = ns.WindowScale()
   for _, f in ipairs(list) do
     if f and f.SetScale and f ~= ns.scaleHeld then
+      -- The client's own value, remembered the first time this window is seen —
+      -- MakeWindow has already pixel-snapped it, and that is what "no setting"
+      -- must return to rather than a shared constant.
       f._baseScale = f._baseScale or (f.GetScale and f:GetScale()) or 1
-      pcall(f.SetScale, f, f._baseScale * mult)
+      pcall(f.SetScale, f, want or f._baseScale)
     end
   end
+end
+
+--- The scale the panel is ACTUALLY drawing at right now — the setting when one
+--- is chosen, otherwise the value the client handed the window.
+---
+--- Exists so the Panel Size field can show a real number instead of the 0 that
+--- means "untouched": a blank-looking control is what makes a person type a
+--- guess, and the whole point of this row is that the number is knowable.
+function ns.CurrentWindowScale()
+  local want = ns.WindowScale()
+  if want then return want end
+  local f = (ns.scaledWindows or {})[1]
+  return (f and f._baseScale) or (f and f.GetScale and f:GetScale()) or 1
 end
 
 --- Hold a window out of live scaling for the duration of a drag, then let it
@@ -2507,14 +2533,46 @@ function ns.DisplayReport(scaleOverride)
   local sw, sh = GetPhysicalScreenSize()
   if type(sh) ~= "number" or sh <= 0 then return nil end
 
+  -- ⚠️ THIS REPORT IS ABOUT THE ADDON'S WINDOW, NOT UIParent (Jason, Session
+  -- 263). It measured the GAME's UI scale while the Panel Size field sets the
+  -- WINDOW's — two different numbers — so the scale it recommended was for a
+  -- quantity the setting does not control. Typing it in shrank the window to
+  -- roughly half instead of sharpening it.
+  --
+  -- A frame's scale multiplies its parent's, so the pixel arithmetic is about
+  -- the EFFECTIVE scale, while the value a person types is the FRAME's. Both
+  -- are returned; only one of them is typeable.
+  local parent = (UIParent and UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+  if parent <= 0 then parent = 1 end
   local scale = scaleOverride
   if not scale then
-    scale = (UIParent and UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+    local win = ns.CurrentWindowScale and ns.CurrentWindowScale() or 1
+    scale = win * parent
   end
 
-  local factor  = 768 / sh
-  local perfect = factor                      -- the scale at which 1 unit = 1 pixel
+  local factor = 768 / sh                     -- the scale at which 1 unit = 1 pixel
   local pxPerUnit = scale / factor            -- how many real pixels one unit covers
+
+  -- ⚠️ THE ADVICE WAS "GO TO 1:1" AND THAT IS A TRAP (Jason, Session 263). One
+  -- unit on one pixel is the CRISPEST mapping and also, on a 4K display, an
+  -- absurdly small window: the panel is 740 units wide, so 1:1 draws it 740
+  -- physical pixels across — a fifth of the screen. He typed the number the
+  -- readout told him to and got two little squares.
+  --
+  -- CRISPNESS DOES NOT REQUIRE 1:1. Text lands on whole pixels at ANY scale
+  -- where pxPerUnit is a whole number, so the useful answer is the nearest such
+  -- scale to the one in use — same sharpness, without shrinking the window to
+  -- a fifth of its size. Rounded to at least 1, since below that there is no
+  -- whole-pixel scale to reach.
+  -- ⚠️ COMPUTED FROM THE WINDOW'S NATURAL SIZE, NOT THE CURRENT SETTING (Jason,
+  -- Session 263). Deriving it from the scale in force made the recommendation
+  -- move every time the dial moved — a reference value that will not hold still
+  -- is not a reference. Anchored to the size the client gives the window, it is
+  -- a property of the display and the design, and it stays put.
+  local baseEffective = ((ns.scaledWindows or {})[1] or {})._baseScale
+  baseEffective = (baseEffective or 1) * parent
+  local steps = math.max(1, math.floor(baseEffective / factor + 0.5))
+  local perfect = factor * steps
 
   -- A size is exact when it lands on a whole pixel. Compare against the ROUNDED
   -- value rather than testing equality on a float.
@@ -2539,6 +2597,16 @@ function ns.DisplayReport(scaleOverride)
     screenHeight = sh,
     scale        = scale,
     perfectScale = perfect,
+    -- How many whole pixels one unit covers at perfectScale — the readout says
+    -- so, because "0.7112" means nothing without "two pixels per unit".
+    perfectSteps = steps,
+    -- ⚠️ WHAT TO TYPE INTO PANEL SIZE. perfectScale is an EFFECTIVE scale; the
+    -- field sets the frame's own, which the parent then multiplies. Printing the
+    -- effective one is exactly the mistake this box was written about.
+    perfectPanelSize = perfect / parent,
+    parentScale = parent,
+    -- The true 1:1 scale, kept for anyone who explicitly wants it.
+    onePixelScale = factor,
     pixelsPerUnit = pxPerUnit,
     aligned      = math.abs(pxPerUnit - math.floor(pxPerUnit + 0.5)) < 0.001,
     worstDrift   = worst,          -- 0 = every size exact, 0.5 = worst possible
@@ -3190,4 +3258,50 @@ function ns.EncounterIdsFor(tileId)
     if enc.id then set[enc.id] = true end
   end
   return set
+end
+
+--- The season's raid bosses in the order the strip draws them.
+---
+--- ⚠️ THE ORDER IS THE EMITTER'S AND IT IS GLOBAL ACROSS THE SEASON (Session
+--- 252): raid_bosses.display_order is per instance, so the emitter assigns a
+--- dense sequence across every instance and the addon only reads it. The name
+--- tie-break is here for a payload that predates that and would otherwise sort
+--- by whatever pairs() happened to yield.
+---
+--- IN CORE BECAUSE TWO THINGS NEED THE SAME ORDER and one of them cannot be
+--- tested: the panel's boss column builds from it, and ns.BossIndexForEncounter
+--- below answers a POSITION in it. A second copy of an ordering is one of them
+--- going stale, and the copy in a window file is the one no harness can see.
+function ns.SortedBosses()
+  local data = ns.Data()
+  local out = {}
+  for id, b in pairs((data or {}).bosses or {}) do
+    out[#out + 1] = { id = id, name = b.name, order = b.order or 99, enc = b.enc }
+  end
+  table.sort(out, function(a, b)
+    if a.order ~= b.order then return a.order < b.order end
+    return (a.name or "") < (b.name or "")
+  end)
+  return out
+end
+
+--- Which position in ns.SortedBosses a RECORDED DROP belongs to, or nil.
+---
+--- ⚠️ THE DROP CARRIES THE OTHER ID, which is the whole reason this is not a
+--- table lookup. A recorded drop's encounterID is the DungeonEncounter id from
+--- ENCOUNTER_END (or, for a drop seen without one, C_LootHistory's own), while
+--- the boss list is keyed by JOURNAL id. ns.EncounterIdsFor is the settled seam
+--- that accepts either, so this asks it rather than comparing numbers itself.
+---
+--- RAID ONLY. A dungeon hands out personal loot, so there is no drop to open on
+--- and a dungeon tile is an instance rather than a boss — a different id space
+--- that would match by coincidence.
+function ns.BossIndexForEncounter(encounterID)
+  if not encounterID or encounterID == 0 then return nil end
+  if ns.ContentMode() == "mplus" then return nil end
+  for i, b in ipairs(ns.SortedBosses()) do
+    local ids = ns.EncounterIdsFor(b.id)
+    if ids and ids[encounterID] then return i, b end
+  end
+  return nil
 end

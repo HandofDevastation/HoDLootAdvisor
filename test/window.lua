@@ -146,6 +146,9 @@ function real.GetStringHeight(self)
   return math.max(1, math.ceil(textW / w)) * lineH
 end
 function real.SetWordWrap(self, on) self._wordWrap = on and true or false end
+-- RECORDED, not swallowed: a line cap is invisible on a headless stub, so a
+-- check for "nothing is truncated" could not fail while this was a no-op.
+function real.SetMaxLines(self, n) self._maxLines = n end
 
 -- ⚠️ Show AND Hide FIRE THEIR SCRIPTS, BECAUSE THE CLIENT'S DO (Session 258).
 -- Without this the stub is quieter than the runtime in a way that hides real
@@ -232,6 +235,15 @@ function real.RegisterEvent(self, e)
   end
   self.events[e] = true
 end
+-- ⚠️ SCROLLING IS MODELLED, NOT INVENTED (Session 263). These were answering as
+-- no-op stubs, so a wheel handler could run, move nothing, and report green —
+-- the S257 rule about a double being quieter than the thing it stands in for.
+-- The client stores an offset and hands back a child frame; so does this.
+function real.SetVerticalScroll(self, v) self._vscroll = tonumber(v) or 0 end
+function real.GetVerticalScroll(self) return self._vscroll or 0 end
+function real.SetScrollChild(self, c) self._scrollChild = c end
+function real.GetScrollChild(self) return self._scrollChild end
+
 function real.SetFontString(self, fs) self._fontString = fs end
 function real.GetFontString(self) return self._fontString end
 function real.GetObjectType(self) return self._kind end
@@ -443,6 +455,164 @@ drive("selecting each boss in turn expands its loot without erroring", function(
   end
 end)
 
+header("A drop opens the panel ON the boss that dropped (Session 263)")
+
+-- ⚠️ THE FAULT JASON REPORTED FROM A LIVE LFR. The panel DID appear on a kill,
+-- and showed the season's whole boss list collapsed with not one item on it —
+-- because Panel.Show clears the selection on every open, which is right when a
+-- person opened it themselves and wrong when a drop did. "Open Panel On A Drop"
+-- had been proved to fire and was still not doing the thing it is for.
+do
+  local panel = _G.HoDLootAdvisorPanel
+
+  -- ⚠️ ADDRESSED BY THE ID A RECORDED DROP ACTUALLY CARRIES — the
+  -- DungeonEncounter id from ENCOUNTER_END — which differs from the journal id
+  -- the boss row is keyed by for every raid boss in the payload. Passing the
+  -- journal id would pass whether or not the two id spaces are reconciled,
+  -- which is the S251(b) trap: the one value that cannot fail.
+  local bosses = ns.SortedBosses()
+  local target = bosses[3]
+  check("the fixture boss carries a SEPARATE kill id, or the next check proves nothing",
+        target ~= nil and target.enc ~= nil and target.enc ~= target.id,
+        target and ("id %s / enc %s"):format(tostring(target.id), tostring(target.enc)))
+
+  local function expandedIndex()
+    for _, tile in ipairs(panel.bossTiles or {}) do
+      if tile:IsShown() and tile.rule and not tile.rule:IsShown() then return tile.bossIndex end
+    end
+    return nil
+  end
+
+  local wasAuto = ns.Settings.Get("autoOpen")
+  ns.Settings.Set("autoOpen", true)
+
+  ns.Panel.Show()
+  check("the panel starts collapsed, which is the state the fault began in",
+        expandedIndex() == nil, expandedIndex())
+
+  drive("a recorded drop opens the panel", function()
+    ns.Loot.AutoOpen("windowHarness", target and target.enc)
+  end)
+  check("...on the boss that dropped it", expandedIndex() == 3, expandedIndex())
+
+  -- An encounter that places nowhere — a boss missing from the payload, or a
+  -- drop seen without an ENCOUNTER_END — must leave the list alone rather than
+  -- expanding a boss nobody killed.
+  ns.Panel.Show()
+  ns.Loot.AutoOpen("windowHarness", 99999)
+  check("an encounter that matches no boss expands nothing",
+        expandedIndex() == nil, expandedIndex())
+
+  -- ⚠️ AND THE COLUMN MUST HOLD THE PIECES THAT DROPPED, NOT THE BOSS'S TABLE
+  -- (Jason, Session 263: "the actual pieces that just dropped"). Landing on the
+  -- right boss is only half of it — the same row expanded in Full Loot Table
+  -- lists everything the boss CAN drop, which is the wrong screen and looks
+  -- almost right. MEASURED off the drawn rows, because reasoning about which
+  -- source the panel picked is exactly what was wrong the first time.
+  do
+    local killEnc, tileId = target and target.enc, target and target.id
+
+    -- Two real drops from that boss, through the path retail actually uses.
+    -- ⚠️ ONE THE HARNESS'S HUNTER CAN WEAR AND ONE IT CANNOT, DELIBERATELY.
+    -- Usable Only is the default and it used to filter this list too, so a
+    -- Hunter opening on a kill saw only their own armour type — with the pane
+    -- ranking the whole raid for each item, that removed exactly the drops
+    -- being decided. 268198 is a Strength two-hander: on the old behaviour it
+    -- was invisible here, which is what makes it the value worth staging.
+    local dropped = {}
+    for i, id in ipairs({ 268204, 268198 }) do
+      stub.items[id] = { name = "Staged Drop " .. i, quality = 4, ilvl = 300, itemType = "Armor" }
+      dropped[id] = true
+    end
+    stub.instance = { name = "The Tidebound Grotto", instanceType = "raid",
+                      difficultyID = 16, difficultyName = "Mythic (Raid)", instanceID = 2987 }
+    stub.Fire("ENCOUNTER_END", killEnc, target.name, 16, 20, 1)
+    stub.lootHistory[killEnc] = {
+      stub.drop(1, 268204, "Staged Drop 1", { 12825 }, { { name = "Gloomrift", state = 0, roll = 0 } }),
+      stub.drop(2, 268198, "Staged Drop 2", { 12825 }, { { name = "Gloomrift", state = 0, roll = 0 } }),
+    }
+    -- ⚠️ DRIVEN BY THE RECORDER, NOT BY CALLING AutoOpen BY HAND. The setting is
+    -- turned on BEFORE the drops land so the addon's own loot-history path is
+    -- what opens the panel — which is the wiring under test. Calling the opener
+    -- directly would prove the panel can do this and nothing about whether a
+    -- real kill reaches it.
+    ns.Settings.Set("autoOpen", true)
+    ns.Panel.Show()
+    stub.Fire("LOOT_HISTORY_UPDATE_DROP", killEnc, 1)
+    stub.RunTimers(); ns.Record.ScanAll()
+
+    local drew, strays = 0, {}
+    for _, row in ipairs(panel.itemRows or {}) do
+      if row:IsShown() and row.itemID then
+        drew = drew + 1
+        if not dropped[row.itemID] then strays[#strays + 1] = row.itemID end
+      end
+    end
+    check("the column draws the pieces that dropped", drew == 2, drew)
+    -- The half that Usable Only used to remove. Named separately from the count
+    -- above so a regression says WHICH property broke.
+    local sawUnusable = false
+    for _, row in ipairs(panel.itemRows or {}) do
+      if row:IsShown() and row.itemID == 268198 then sawUnusable = true end
+    end
+    check("...including one this character cannot equip", sawUnusable)
+    check("...and nothing the boss merely CAN drop", #strays == 0,
+          table.concat(strays, ", "))
+
+    -- The guard that makes the one above mean something: this boss's full table
+    -- is much longer, so "2 rows" is a real discrimination and not a boss that
+    -- happens to have two items.
+    local full = 0
+    for _, rec in pairs((ns.Data() or {}).items or {}) do
+      if rec.boss == tileId then full = full + 1 end
+    end
+    check("...where its full table would have been longer", full > 2, full)
+
+    -- ⚠️ AND THE DROP ITSELF IS SELECTED, so the pane answers "who is this for"
+    -- rather than "choose an item". A kill is not a browsing session: the
+    -- ranking is the whole reason to open on a drop. Asserted by WHICH item the
+    -- pane is about, not merely that the empty state went away — the second
+    -- drop and the first are both on the column, and landing on the wrong one
+    -- would look identical.
+    check("the pane is open on the drop rather than the empty state",
+          panel.paneEmpty and not panel.paneEmpty:IsShown(),
+          panel.paneEmpty and panel.paneEmpty:GetText())
+    check("...and it is about the piece that just dropped",
+          ns.Panel.CurrentItemID() == 268198, tostring(ns.Panel.CurrentItemID()))
+
+    -- ⚠️ AND A DROP THAT LANDS AFTER YOU LEAVE STILL OPENS ON THE DROPS. The
+    -- rescan ladder runs four minutes past a kill, so a brand-new drop can
+    -- arrive once you are back in a city — where "the opening list follows
+    -- where you stand" answers Full Loot Table and would open a CATALOGUE in
+    -- response to a drop.
+    local wasInstance = stub.instance
+    stub.instance = { name = "Stormwind", instanceType = "none",
+                      difficultyID = 0, difficultyName = "", instanceID = 0 }
+    ns.Panel.Show()
+    ns.Loot.AutoOpen("windowHarness", killEnc, 268198)
+    -- ⚠️ COUNT EVERY ROW, NOT THE DROPPED ONES. Both staged items are also real
+    -- payload entries for this boss, so the FULL LOOT TABLE contains them too —
+    -- counting only the ones I recognised passed in either mode and proved
+    -- nothing. What separates the two lists is everything ELSE the boss can
+    -- drop, so the discriminating question is how LONG the column is.
+    local outside, outsideStray = 0, {}
+    for _, row in ipairs(panel.itemRows or {}) do
+      if row:IsShown() and row.itemID then
+        outside = outside + 1
+        if not dropped[row.itemID] then outsideStray[#outsideStray + 1] = row.itemID end
+      end
+    end
+    check("a drop arriving after you leave the instance still opens on the drops",
+          outside == 2 and #outsideStray == 0,
+          ("%d rows, strays: %s"):format(outside, table.concat(outsideStray, ", ")))
+    stub.instance = wasInstance
+  end
+
+  -- The setting is the raider's, not the harness's.
+  ns.Settings.Set("autoOpen", wasAuto)
+  ns.Panel.Show()
+end
+
 header("The control rim is the gradient the design asks for")
 
 -- ⚠️ ORIENTATION IS THE WHOLE RISK HERE. WoW's SetGradient puts its FIRST
@@ -485,46 +655,59 @@ do
   check("a rim asked for one colour draws no ramp", flat.left._gradient == nil)
 end
 
-header("Panel size is a knob, and it compounds from one baseline")
+header("Panel size is an ABSOLUTE scale, and 0 hands it back to the client")
 
 drive("the panel size knob behaves", function()
   local panel = _G.HoDLootAdvisorPanel
   local base = panel._baseScale or 1
-  ns.Settings.Set("panelScale", 80)
+  ns.Settings.Set("panelScale", 0.8)
   ns.Panel.ApplyScale()
   local at80 = panel:GetScale()
-  ns.Settings.Set("panelScale", 120)
+  ns.Settings.Set("panelScale", 1.2)
   ns.Panel.ApplyScale()
   local at120 = panel:GetScale()
-  ns.Settings.Set("panelScale", 100)
+  ns.Settings.Set("panelScale", 1.0)
   ns.Panel.ApplyScale()
   local at100 = panel:GetScale()
 
-  check("80% is smaller than 100%", at80 < at100, ("%.3f vs %.3f"):format(at80, at100))
-  check("120% is larger than 100%", at120 > at100)
+  check("a smaller scale draws smaller", at80 < at100, ("%.3f vs %.3f"):format(at80, at100))
+  check("a larger scale draws larger", at120 > at100)
+  -- ⚠️ THE NUMBER TYPED IS THE NUMBER APPLIED, which is the whole reason this
+  -- changed: the footer prints the scale that lands one unit on one pixel, and
+  -- that is only actionable if entering it produces exactly it.
+  check("the scale entered is the scale applied", math.abs(at80 - 0.8) < 1e-9,
+        ("%.4f"):format(at80))
   -- ⚠️ THE BASELINE MUST NOT DRIFT. Applying 80 then 120 then 100 has to land
   -- back exactly where it started; multiplying each change onto the CURRENT
   -- scale rather than a remembered baseline would compound and shrink the
   -- window a little every time the setting was touched.
-  check("returning to 100% lands exactly back on the baseline",
-        math.abs(at100 - base) < 1e-9, ("%.6f vs %.6f"):format(at100, base))
+  check("a scale of 1.0 draws at exactly 1.0", math.abs(at100 - 1.0) < 1e-9,
+        ("%.6f"):format(at100))
 
   -- ⚠️ THE APPLY HOOK IS WHAT MAKES THE SLIDER LIVE. Settings.Set runs it, so a
   -- value stored by ANY route — the slider, a slash command, a restored
   -- SavedVariable — resizes the window. Without it the setting would take
   -- effect only on the next open, which is unusable for a control you judge by
   -- looking at the thing it changes.
-  ns.Settings.Set("panelScale", 70)
+  ns.Settings.Set("panelScale", 0.7)
   check("setting the size applies it immediately, without reopening",
-        math.abs(panel:GetScale() - base * 0.7) < 1e-9,
-        ("%.4f vs %.4f"):format(panel:GetScale(), base * 0.7))
+        math.abs(panel:GetScale() - 0.7) < 1e-9,
+        ("%.4f vs %.4f"):format(panel:GetScale(), 0.7))
 
   -- Out-of-range values are clamped rather than obeyed: a 0 would make the
   -- window disappear with no way to reach the setting that did it.
+  -- 0 is not nonsense any more: it is the default, and it means "whatever the
+  -- client gives", so the window goes back to the size it had before anyone
+  -- touched this setting.
   ns.Settings.Set("panelScale", 0)
   ns.Panel.ApplyScale()
-  check("a nonsense size is clamped, never applied", panel:GetScale() >= base * 0.5 - 1e-9)
-  ns.Settings.Set("panelScale", 100)
+  check("a scale of 0 returns the window to the client's own size",
+        math.abs(panel:GetScale() - base) < 1e-9,
+        ("%.4f vs base %.4f"):format(panel:GetScale(), base))
+  -- And a value outside the range is still refused rather than obeyed.
+  local ok = ns.Settings.Set("panelScale", 99)
+  check("a scale far outside the range is refused", ok == false)
+  ns.Settings.Set("panelScale", 0)
   ns.Panel.ApplyScale()
 end)
 
@@ -1499,6 +1682,41 @@ do
     check("...and none of them is a label with nothing beside it",
           #missing == 0, table.concat(missing, ", "))
   end
+
+  -- ⚠️ THE SELECTED LOOT LOG FILTER MUST LOOK SELECTED (Jason, Session 263:
+  -- "none of them light up / show selected"). Selection was marked by DISABLING
+  -- the chosen one, which blocks its click and paints NOTHING: Style.Control
+  -- draws its own fontstring, so the client's disabled treatment never reaches
+  -- it. Three identical outlined boxes, with no way to tell which list you were
+  -- reading. Read back off the widget's own state, never from "it refreshed".
+  do
+    local log = _G.HoDLootAdvisorLootLog
+    ns.RecordWindow.Toggle()
+    ns.RecordWindow.Refresh()
+
+    local function marked()
+      local on = {}
+      for _, b in ipairs(log and log.filters or {}) do
+        if b._on then on[#on + 1] = b._label or "?" end
+      end
+      return on
+    end
+
+    local on = marked()
+    check("exactly one Loot Log filter is marked selected", #on == 1,
+          ("%d marked: %s"):format(#on, table.concat(on, ", ")))
+
+    -- Pressed in turn rather than compared to a hardcoded default, so a change
+    -- to which list the window opens on does not silently retire the check.
+    for i, b in ipairs(log and log.filters or {}) do
+      if b.scripts.OnClick then b.scripts.OnClick(b) end
+      local now = marked()
+      check(("...and pressing %s moves the mark onto it"):format(b._label or i),
+            #now == 1 and now[1] == b._label, table.concat(now, ", "))
+    end
+
+    ns.RecordWindow.Toggle()
+  end
 end
 
 
@@ -1909,18 +2127,18 @@ do
   do
     check("all four windows are registered for scaling",
           #ns.scaledWindows >= 4, #ns.scaledWindows)
-    ns.Settings.Set("panelScale", 80)
+    ns.Settings.Set("panelScale", 0.8)
     ns.ApplyWindowScale()
     local missed = {}
     for _, f in ipairs(ns.scaledWindows) do
-      local want = (f._baseScale or 1) * 0.8
+      local want = 0.8
       if math.abs((f:GetScale() or 1) - want) > 0.001 then
         missed[#missed + 1] = tostring(f:GetName())
       end
     end
     check("...and every one of them took the new size", #missed == 0,
           table.concat(missed, ", "))
-    ns.Settings.Set("panelScale", 100)
+    ns.Settings.Set("panelScale", 0)
     ns.ApplyWindowScale()
   end
 
@@ -2091,33 +2309,31 @@ do
     local cfg = _G.HoDLootAdvisorConfigFrame
     local slider
     for _, row in ipairs(cfg.rows) do
-      if row.spec.kind == "slider" then slider = row.control end
+      if row.spec.kind == "scale" then slider = row.control end
     end
     check("the size setting has a slider", slider ~= nil)
 
     -- (a) APPLYING REPEATEDLY MUST NOT COMPOUND. A baseline captured after a
     -- scale had already been applied would multiply on every call, which is one
     -- way to get "flickers in and out at a HUGE size".
-    ns.Settings.Set("panelScale", 80)
-    local base = panel._baseScale or 1
+    ns.Settings.Set("panelScale", 0.8)
     for _ = 1, 10 do ns.ApplyWindowScale() end
     check("applying the scale ten times lands where applying it once does",
-          math.abs(panel:GetScale() - base * 0.8) < 0.0001,
-          ("%.4f vs %.4f"):format(panel:GetScale(), base * 0.8))
+          math.abs(panel:GetScale() - 0.8) < 0.0001,
+          ("%.4f vs %.4f"):format(panel:GetScale(), 0.8))
 
     -- (b) THE WINDOW HOLDING THE KNOB IS HELD OUT OF THE LIVE RESIZE. Resizing
     -- it moves the slider under the cursor, which changes the value, which
     -- resizes it again — the loop that made this control unusable.
     if slider then
-      ns.Settings.Set("panelScale", 100)
+      ns.Settings.Set("panelScale", 1.0)
       ns.ApplyWindowScale()
       local settingsScaleBefore = cfg:GetScale()
       slider.scripts.OnMouseDown(slider)
       check("the slider reports itself as being dragged", slider:IsDragging())
-      slider.scripts.OnValueChanged(slider, 60)
+      slider.scripts.OnValueChanged(slider, 0.6)
       check("...the panel resizes live while it is dragged",
-            math.abs(panel:GetScale() - (panel._baseScale or 1) * 0.6) < 0.0001,
-            panel:GetScale())
+            math.abs(panel:GetScale() - 0.6) < 0.0001, panel:GetScale())
       check("...and the window holding the slider does NOT",
             math.abs(cfg:GetScale() - settingsScaleBefore) < 0.0001,
             ("%.4f vs %.4f"):format(cfg:GetScale(), settingsScaleBefore))
@@ -2125,8 +2341,7 @@ do
       slider.scripts.OnMouseUp(slider)
       check("...until the knob is released", not slider:IsDragging())
       check("...when it catches up in one step",
-            math.abs(cfg:GetScale() - (cfg._baseScale or 1) * 0.6) < 0.0001,
-            cfg:GetScale())
+            math.abs(cfg:GetScale() - 0.6) < 0.0001, cfg:GetScale())
 
       -- A drag that ends because the window closed still ends, or the hold
       -- would never lift and the window could never be scaled again.
@@ -2171,18 +2386,323 @@ do
     -- ⚠️ AND NO HELP TEXT MAY RUN UNDER A CONTROL. It was sized against the
     -- CHECKBOX at x496 while the dropdown starts at 403, so it ran 93px into
     -- the dropdown's column on every row that has one.
-    local widest = 0
+    -- ⚠️ PER ROW, AGAINST ITS OWN CONTROL (Session 263). One shared width taken
+    -- from the narrowest control wrapped every checkbox row far too early — the
+    -- mock runs those sentences to 462 and stops dropdown rows at 390, because
+    -- the controls start in different places. Asserting one global limit would
+    -- now be asserting the bug.
+    local over = {}
     for _, row in ipairs(cfg.rows) do
-      widest = math.max(widest, row.help:GetWidth() or 0)
+      local c = row.control
+      -- ⚠️ SetPoint IS CALLED WITH TWO DIFFERENT ARITIES here — ("TOPLEFT", x, y)
+      -- and ("TOPRIGHT", frame, "TOPLEFT", x, y) — so a fixed argument index
+      -- reads the anchor name as a number on half the rows. Take the FIRST
+      -- number instead, whichever position it lands in.
+      local function leftOf(f)
+        local pt = { f:GetPoint(1) }
+        local x
+        for i = 1, #pt do
+          if type(pt[i]) == "number" then x = pt[i]; break end
+        end
+        x = x or 0
+        if pt[1] == "TOPRIGHT" then return x - (f:GetWidth() or 0) end
+        return x
+      end
+      if c and c.GetPoint then
+        local reach = 40 + (row.help:GetWidth() or 0)
+        if reach > leftOf(c) then over[#over + 1] = row.spec.key end
+      end
     end
-    check("help text stops before the leftmost control", 40 + widest <= 403,
-          ("help reaches %d, control starts at 403"):format(40 + widest))
+    check("every help sentence stops before its own control", #over == 0,
+          table.concat(over, ", "))
+
+    -- ⚠️ THE ROWS ARE AUTOLAYOUT WITH A 20px GAP (Jason; node 650:147 places
+    -- them at 0, 55, 110, 165, 220 …, blocks of 35 and 51). Asserted as the gap
+    -- BETWEEN blocks rather than as a row pitch, because the blocks are two
+    -- different heights and a pitch cannot describe both.
+    local gaps = {}
+    for i = 1, #cfg.rows - 1 do
+      local function topOf(f)
+        local pt = { f:GetPoint(1) }
+        for j = #pt, 1, -1 do if type(pt[j]) == "number" then return -pt[j] end end
+      end
+      -- ⚠️ THE BLOCK, NOT THE INK. A one-line block is floored at the node's 35
+      -- even though its text only reaches 33, so measuring to the last glyph
+      -- reports 22 for a gap that is really 20. The design's blocks are 35 and
+      -- 51; the gap is what sits between them.
+      local h = cfg.rows[i].help:GetStringHeight() or 0
+      local block = math.max(35, 17 + math.ceil(h) + 2)
+      local top = topOf(cfg.rows[i].label)
+      local nextTop = topOf(cfg.rows[i + 1].label)
+      local gap = nextTop - (top + block)
+      if math.abs(gap - 20) > 1.5 then
+        gaps[#gaps + 1] = ("%s:%.0f"):format(cfg.rows[i].spec.key, gap)
+      end
+    end
+    check("every gap between setting blocks is the design's 20px", #gaps == 0,
+          table.concat(gaps, ", "))
   end
 
   -- The settings window may not be taller than the addon window.
   check("the Settings window is no taller than the panel",
         ns.Settings.WindowHeight() <= 600, ns.Settings.WindowHeight())
-  check("...and its rows scroll", _G.HoDLootAdvisorConfigFrame.scroll ~= nil)
+  local sf = _G.HoDLootAdvisorConfigFrame.scroll
+  check("...and its rows scroll", sf ~= nil)
+
+  -- ⚠️ THE WHEEL IS THE ONLY WAY TO SCROLL IT NOW, so the handler existing is
+  -- the whole feature rather than a detail. Asserted by DRIVING it and reading
+  -- the offset back, not by checking a script is attached: a handler that
+  -- throws, or one that never moves anything, is attached just the same.
+  if sf and sf.scripts and sf.scripts.OnMouseWheel then
+    sf:SetVerticalScroll(0)
+    sf.scripts.OnMouseWheel(sf, -1)
+    local down = sf:GetVerticalScroll() or 0
+    check("a wheel notch scrolls the settings down", down > 0, down)
+    for _ = 1, 200 do sf.scripts.OnMouseWheel(sf, 1) end
+    local top = sf:GetVerticalScroll() or 0
+    check("...and scrolling back up stops at the top, never past it", top == 0, top)
+    for _ = 1, 400 do sf.scripts.OnMouseWheel(sf, -1) end
+    local bottom = sf:GetVerticalScroll() or 0
+    local maxScroll = (sf:GetScrollChild():GetHeight() or 0) - (sf:GetHeight() or 0)
+    check("...and scrolling past the end stops at the last row", bottom <= maxScroll + 0.5,
+          ("stopped at %.0f, content ends at %.0f"):format(bottom, maxScroll))
+    sf:SetVerticalScroll(0)
+  else
+    check("the settings window has a mouse-wheel handler", false, "none attached")
+  end
+
+  -- ⚠️ NO BLIZZARD SCROLL FURNITURE. The previous version inherited a template
+  -- and hid its parts BY NAME, which stopped matching on current retail and put
+  -- parchment arrows back in the corner. A bare frame cannot regress that way,
+  -- and this is what says so.
+  check("the settings window inherits no Blizzard scroll template",
+        sf ~= nil and sf._template == nil, sf and tostring(sf._template))
+
+  -- Every help sentence must be readable in full — no ellipsis, no cap.
+  local cfgRows = (_G.HoDLootAdvisorConfigFrame or {}).rows or {}
+  local capped = {}
+  for _, row in ipairs(cfgRows) do
+    if row.help and row.help._maxLines then capped[#capped + 1] = row.spec.key end
+  end
+  check("no help sentence is capped to a line count", #capped == 0,
+        table.concat(capped, ", "))
+
+  -- ⚠️ THE LAST ROW HAS NO NEXT ROW TO OVERLAP, so the check above cannot see
+  -- it — and it is the one that ran off the bottom before. Removing the line cap
+  -- makes the content taller, so the scrollable area has to have grown with it
+  -- or the final sentence is simply unreachable, which is the fault being fixed
+  -- wearing different clothes.
+  local last = cfgRows[#cfgRows]
+  if last and last.help then
+    local pt = { last.help:GetPoint(1) }
+    local top = 0
+    for i = #pt, 1, -1 do if type(pt[i]) == "number" then top = -pt[i]; break end end
+    local bottom = top + (last.help:GetStringHeight() or 0)
+    -- ⚠️ THE SCROLL CHILD'S REAL HEIGHT, NOT Settings.ContentHeight(). That one
+    -- is the character-count ESTIMATE used to size the window before anything is
+    -- drawn; Settings.Layout re-measures from the font and writes the true total
+    -- onto the content frame. Asserting against the estimate tests a number the
+    -- scrolling does not use — and it fails by 65px precisely because the
+    -- estimate still assumes the two-line cap that is now gone.
+    local real = _G.HoDLootAdvisorConfigFrame.content:GetHeight() or 0
+    check("the last setting's help fits inside the scrollable area", real >= bottom,
+          ("scroll child %d, last help ends at %d"):format(real, bottom))
+  end
+
+  -- ── The chrome the mock asks for ──────────────────────────────────────────
+  local cfgF = _G.HoDLootAdvisorConfigFrame
+  local S = ns.Style
+
+  -- Bands, not rules: the header and footer are the PANEL's darker ground laid
+  -- over the window's lighter violet. Read the colour back, not merely presence.
+  local function isGround(tex)
+    local c = tex and tex._color
+    return c ~= nil and math.abs(c[1] - S.COLOR.ground.r) < 0.01
+                    and math.abs(c[2] - S.COLOR.ground.g) < 0.01
+                    and math.abs(c[3] - S.COLOR.ground.b) < 0.01
+  end
+  -- ⚠️ THE FOOTER IS BANDED AND THE HEADER IS NOT (Jason, Session 263). I read a
+  -- darker rectangle off the top of the mock and built it, and side by side it
+  -- was a hard seam the design has not got — the title sits on the window's own
+  -- ground. Asserting the ABSENCE, because it was added once already.
+  check("the settings footer is a band in the panel ground", isGround(cfgF.footBand))
+  check("...and the header is NOT banded", cfgF.headBand == nil)
+
+  -- Controls line up with the text beside them rather than floating above it.
+  do
+    local off = {}
+    for _, row in ipairs(cfgF.rows or {}) do
+      local c = row.control
+      if c and c.GetPoint and row.help then
+        local function topOf(f)
+          local pt = { f:GetPoint(1) }
+          for i = #pt, 1, -1 do if type(pt[i]) == "number" then return -pt[i] end end
+        end
+        local ct, ch = topOf(c), (c:GetHeight() or 0)
+        local ht = topOf(row.help)
+        if ct and ht then
+          -- The control's centre against the text block's centre.
+          local textTop = ht - 17
+          local textMid = textTop + (17 + (row.help:GetStringHeight() or 0)) / 2
+          if math.abs((ct + ch / 2) - textMid) > 3 then
+            off[#off + 1] = row.spec.key
+          end
+        end
+      end
+    end
+    check("every control is centred against its own text", #off == 0,
+          table.concat(off, ", "))
+  end
+
+  -- ⚠️ THE TITLE MUST NOT SCROLL. It is anchored to the window, not to the
+  -- scrolling child — if it ever moved into the content it would slide away
+  -- under the header band and the window would look decapitated.
+  check("the SETTINGS title is anchored, not scrolled",
+        cfgF.heading ~= nil and cfgF.heading._parent ~= cfgF.content)
+
+  -- The scrollbar: ours, 5px, the accent purple, and dim at rest.
+  local bar = cfgF.bar
+  check("the settings window draws its own scrollbar", bar ~= nil)
+  if bar then
+    check("...5px wide, as the mock draws it",
+          math.abs((bar:GetWidth() or 0) - 5) < 0.5, bar:GetWidth())
+    local v = bar._vertex
+    check("...in the accent purple", v ~= nil and math.abs(v[1] - S.COLOR.accent.r) < 0.01,
+          v and table.concat(v, ","))
+    -- ⚠️ DRIVEN, NOT ASSUMED. A bar that never moves is the same bug as no bar.
+    local sf = cfgF.scroll
+    -- ⚠️ THE VIEWPORT HEIGHT IS SET EXPLICITLY. This stub does not resolve a
+    -- size that comes from anchors, so the scroll frame reports the widget
+    -- default of 20 — and a thumb is floored at 24, so "shorter than the track"
+    -- would fail against a number the addon never chose. Giving it a real
+    -- viewport is what makes the proportion below mean anything.
+    sf:SetHeight(400)
+    sf:SetVerticalScroll(0); cfgF.UpdateBar()
+    local topY = ({ bar:GetPoint(1) })[5]
+
+    -- ⚠️ AT THE BOTTOM OF THE LIST THE THUMB MUST STILL CLEAR THE FOOTER (Jason,
+    -- Session 263). Scrolled fully down it used to finish flush against the
+    -- footer band, so the two read as one shape. Driven to the end and measured.
+    do
+      local child = sf:GetScrollChild()
+      sf:SetVerticalScroll((child:GetHeight() or 0) - (sf:GetHeight() or 0))
+      cfgF.UpdateBar()
+      local y = -(({ bar:GetPoint(1) })[5] or 0)   -- distance below the frame top
+      local bottom = y + (bar:GetHeight() or 0)
+      local footerTop = (cfgF:GetHeight() or 0)    -- measured from the frame top
+      check("...and at the end of the list it still clears the footer",
+            bottom < footerTop, ("thumb ends at %.0f"):format(bottom))
+      sf:SetVerticalScroll(0); cfgF.UpdateBar()
+    end
+
+    -- A thumb is a fraction of the track, in the same ratio as what is on
+    -- screen to what exists. Asserted as a RATIO so it survives the list
+    -- growing or shrinking.
+    -- The track is the visible height LESS the clearance kept above the footer,
+    -- so the thumb is that fraction of the shortened track rather than of the
+    -- viewport. Written in terms of the clearance so the two cannot drift.
+    local BAR_BOTTOM = 20
+    local total = cfgF.content:GetHeight() or 1
+    local track = 400 - BAR_BOTTOM
+    local want = track * (400 / total)
+    check("...and is as long as the visible fraction of the list",
+          math.abs((bar:GetHeight() or 0) - want) < 1,
+          ("%.0f, expected %.0f of a %.0f track"):format(bar:GetHeight() or 0, want, track))
+
+    -- ⚠️ DIMNESS IS DRIVEN BY THE CLOCK, so the clock is advanced rather than
+    -- waited on. Without this the bar is still bright from an earlier check and
+    -- the assertion reads whatever the last test left behind.
+    stub.clock = stub.clock + 5
+    cfgF.scripts.OnUpdate(cfgF)
+    check("...dim while nothing is happening",
+          math.abs((bar:GetAlpha() or 1) - 0.3) < 0.01, bar:GetAlpha())
+
+    sf.scripts.OnMouseWheel(sf, -1)
+    check("...and brighter the moment it is used", (bar:GetAlpha() or 0) > 0.3, bar:GetAlpha())
+    local movedY = ({ bar:GetPoint(1) })[5]
+    check("...and the thumb travels as the list scrolls", movedY ~= topY,
+          ("%s -> %s"):format(tostring(topY), tostring(movedY)))
+
+    -- ...and fades again once the wheel stops, or "dim at rest" is only true
+    -- until the first time anybody scrolls.
+    stub.clock = stub.clock + 5
+    cfgF.scripts.OnUpdate(cfgF)
+    check("...and fades back once scrolling stops",
+          math.abs((bar:GetAlpha() or 1) - 0.3) < 0.01, bar:GetAlpha())
+
+    sf:SetVerticalScroll(0); cfgF.UpdateBar()
+  end
+
+  -- ⚠️ THE READOUT MUST DESCRIBE THE WINDOW THE SETTING RESIZES (Session 263).
+  -- It reported UIParent's scale — the GAME's UI scale — while Panel Size sets
+  -- the WINDOW's, so the number it told Jason to type was for a quantity the
+  -- field does not control. He typed it and the panel came out half size.
+  -- The test is that moving Panel Size MOVES the reported scale.
+  do
+    -- The report refuses to answer without a screen size, and an earlier block
+    -- restored whatever this client had — so it is supplied here rather than
+    -- inherited, or both checks below pass on a nil report saying nothing.
+    local savedGPSS = _G.GetPhysicalScreenSize
+    _G.GetPhysicalScreenSize = function() return 3840, 2160 end
+
+    ns.Settings.Set("panelScale", 0.5)
+    local a = ns.DisplayReport()
+    ns.Settings.Set("panelScale", 1.0)
+    local b = ns.DisplayReport()
+    check("the display readout follows Panel Size, not the game's UI scale",
+          a and b and math.abs(a.scale - b.scale) > 0.01,
+          a and b and ("%.4f vs %.4f"):format(a.scale, b.scale))
+
+    -- ...and the value it prints is the FRAME scale, which is what the field
+    -- takes — printing the effective scale is the same class of mistake.
+    check("...and it recommends a value the Panel Size field can accept",
+          b and b.perfectPanelSize ~= nil
+            and b.perfectPanelSize >= 0.20 and b.perfectPanelSize <= 1.50,
+          b and b.perfectPanelSize)
+    ns.Settings.Set("panelScale", 0)
+    _G.GetPhysicalScreenSize = savedGPSS
+  end
+
+  -- The data date, which is the one fact a CurseForge user has no other way to
+  -- check. Asserted on the STRING, not on the field existing.
+  -- ⚠️ READ OFF THE NODE, NOT EYEBALLED (Jason, Session 263). Node 649:123 sets
+  -- both footer lines at 10px in FULL-OPACITY WHITE, with the date line in Saira
+  -- Bold. It shipped as one dim 9px Light string — wrong on weight, size and
+  -- colour simultaneously — so all three are asserted rather than assumed.
+  do
+    local S2, f = ns.Style, _G.HoDLootAdvisorConfigFrame
+    local function isWhite(fs)
+      local c = fs and fs._textColor
+      return c ~= nil and c[1] > 0.99 and c[2] > 0.99 and c[3] > 0.99
+             and (c[4] == nil or c[4] > 0.99)
+    end
+    check("the data date is white at full opacity", isWhite(f.dataLine),
+          f.dataLine and f.dataLine._textColor and table.concat(f.dataLine._textColor, ","))
+    check("...and so is the display line", isWhite(f.display))
+    check("...both at the node's 10px",
+          f.dataLine and f.dataLine._size == 10 and f.display and f.display._size == 10,
+          ("%s / %s"):format(tostring(f.dataLine and f.dataLine._size),
+                             tostring(f.display and f.display._size)))
+    check("...and the date line is BOLD, which a colour escape cannot do",
+          f.dataLine and f.dataLine._font == S2.FONT.bold, f.dataLine and f.dataLine._font)
+    -- The design's own spacing: a 10px line box above a 14px one.
+    local pt = { f.display:GetPoint(1) }
+    check("...with the node's 4px gap between them", pt[5] == -4, tostring(pt[5]))
+  end
+
+  -- ⚠️ AND NO HINT LINE. The footer node is a text block and a button row; the
+  -- "changes apply as you make them" sentence was mine, not the design's.
+  do
+    local found
+    for _, fs in ipairs(allText) do
+      if (fs._text or ""):find("Changes apply", 1, true) then found = fs._text end
+    end
+    check("the settings footer carries no hint line", found == nil, found)
+  end
+
+  local dl = ns.Settings.DataLine()
+  check("the settings window states when the loot data was generated",
+        type(dl) == "string" and dl:match("%d%d%d%d%-%d%d%-%d%d") ~= nil, dl)
   check("...because its content is genuinely taller than it fits",
         ns.Settings.ContentHeight() > ns.Settings.WindowHeight() - 234,
         ns.Settings.ContentHeight())

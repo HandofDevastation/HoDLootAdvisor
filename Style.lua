@@ -1173,12 +1173,13 @@ end
 --- Built on Blizzard's Slider template for the drag behaviour — hit testing,
 --- clamping and the click-anywhere-on-the-track behaviour are genuinely fiddly
 --- — with its artwork stripped, the same trade Style.Window makes.
-function Style.Slider(parent, width, minV, maxV, step)
+function Style.Slider(parent, width, minV, maxV, step, decimals)
   local s = CreateFrame("Slider", nil, parent)
   s._hodStyled = true
   s:SetOrientation("HORIZONTAL")
   s:SetSize(width or 160, 16)
   s:SetMinMaxValues(minV or 0, maxV or 100)
+  s._decimals = decimals
   s:SetValueStep(step or 1)
   s:SetObeyStepOnDrag(true)
 
@@ -1208,23 +1209,38 @@ function Style.Slider(parent, width, minV, maxV, step)
   --- caller that resizes anything needs to know whether the user still has hold
   --- of the knob — and Settings.Refresh needs it too, because writing a value
   --- into a slider mid-drag fights the drag.
+  --- ⚠️ ROUNDS TO WHOLE NUMBERS UNLESS TOLD OTHERWISE (Session 263). This
+  --- slider was built for an integer percentage and floored every value, so the
+  --- moment Panel Size became a real SCALE it turned 0.6 into 1 — the control
+  --- moved and the window did not, which reads as the slider being broken.
+  --- s._decimals is set by Style.Slider when the caller asks for a fractional
+  --- range; nothing else changes for the integer sliders.
+  local function quantize(self2, v)
+    local d = self2._decimals
+    if not d or d <= 0 then return math.floor(v + 0.5) end
+    local m = 10 ^ d
+    return math.floor(v * m + 0.5) / m
+  end
+
   function s:Wire(suffix, onChange, onRelease)
     self:SetScript("OnValueChanged", function(self2, v)
-      v = math.floor(v + 0.5)
-      self2.value:SetText(tostring(v) .. (suffix or ""))
+      v = quantize(self2, v)
+      local shown = self2._decimals and ("%." .. self2._decimals .. "f"):format(v)
+                    or tostring(v)
+      self2.value:SetText(shown .. (suffix or ""))
       if onChange then onChange(v) end
     end)
     self:SetScript("OnMouseDown", function(self2) self2._dragging = true end)
     self:SetScript("OnMouseUp", function(self2)
       self2._dragging = false
-      if onRelease then onRelease(math.floor((self2:GetValue() or 0) + 0.5)) end
+      if onRelease then onRelease(quantize(self2, self2:GetValue() or 0)) end
     end)
     -- A drag that ends off the control still ends. Without this the hold below
     -- would never be released and the window would stay unscalable.
     self:HookScript("OnHide", function(self2)
       if self2._dragging then
         self2._dragging = false
-        if onRelease then onRelease(math.floor((self2:GetValue() or 0) + 0.5)) end
+        if onRelease then onRelease(quantize(self2, self2:GetValue() or 0)) end
       end
     end)
   end

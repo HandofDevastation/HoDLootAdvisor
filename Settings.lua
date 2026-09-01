@@ -21,32 +21,18 @@ ns.Settings = Settings
 -- the config window, so a new setting is added in exactly ONE place.
 Settings.SPEC = {
   {
-    key = "names", label = "Names Per Chat Line", default = 3,
-    kind = "number", min = 1, max = 10,
-    help = "How many raiders to list when you post an item to chat.",
-  },
-  {
-    key = "channel", label = "Chat Channel", default = "AUTO",
-    kind = "choice", choices = { "AUTO", "RAID", "RAID_WARNING", "PARTY", "SAY" },
-    help = "AUTO picks raid, then party, then say — whatever you are actually in.",
-  },
-  {
-    key = "showGap", label = "Include Scoring Gap From Leader", default = true,
-    kind = "toggle",
-    help = "Adds the -4 / -7 margin after each badge.",
-  },
-  {
-    key = "difficulty", label = "Announcement Content", default = "AUTO",
-    -- MPLUS selects CONTENT, not a difficulty: it swaps the Loot tab to the
-    -- season's dungeons. Kept on this one setting because it is one control in
-    -- the panel — the design has a single dropdown reading "Raid: Heroic".
-    kind = "choice", choices = { "AUTO", "NORMAL", "HEROIC", "MYTHIC", "MPLUS" },
-    help = "Which loot to show, and at what item level. AUTO follows the raid you are in; "
-        .. "Dungeons shows the season's Mythic+ loot at its fixed drop level.",
-  },
-  {
-    key = "panelScale", label = "Panel Size (%)", default = 100,
-    kind = "slider", min = 50, max = 200, step = 1, suffix = "%",
+    key = "panelScale", label = "Panel Size", default = 0,
+    -- ⚠️ A TRUE SCALE, NOT A PERCENTAGE OF THE CLIENT'S (Jason, Session 263).
+    -- It used to be a MULTIPLIER on whatever scale the client handed the window,
+    -- which made the readout beneath it useless: it says "a scale of 0.3556
+    -- would put one unit on one pixel", and typing 0.3556 into a multiplier
+    -- produced 0.3556 x 0.65 and not that at all. The number in the footer is
+    -- only worth printing if it can be typed in, so the field IS the scale.
+    --
+    -- ZERO MEANS "WHATEVER THE CLIENT GIVES", which is what makes an untouched
+    -- install identical to before and what Restore Defaults returns to. A real
+    -- scale can never be 0, so the sentinel cannot collide with a chosen value.
+    kind = "scale", min = 0.20, max = 1.50, step = 0.0001, decimals = 4,
     -- ⚠️ APPLIED ON EVERY STEP, NOT ON RELEASE. This is the one setting whose
     -- effect you can only judge by looking at it, so the window resizes under
     -- the drag. `apply` is a general hook on the spec rather than a special
@@ -67,8 +53,31 @@ Settings.SPEC = {
     --
     -- So it is a knob. 100 means whatever the client gives, which is what every
     -- other addon does, and anyone comparing against the design can dial it.
-    help = "How large the Loot Advisor window draws. 100 is the size your client gives it; "
-        .. "lower it if the window is bigger than you want on your monitor.",
+    help = "Scaling for the add-on display",
+  },
+  {
+    key = "names", label = "Names Per Chat Line", default = 3,
+    kind = "number", min = 1, max = 10,
+    help = "How many raiders to list when you post an item to chat",
+  },
+  {
+    key = "channel", label = "Chat Channel", default = "AUTO",
+    kind = "choice", choices = { "AUTO", "RAID", "RAID_WARNING", "PARTY", "SAY" },
+    help = "“AUTO” picks Raid, then Party, then Say — whatever you're actually in",
+  },
+  {
+    key = "showGap", label = "Include Scoring Gap From Leader", default = true,
+    kind = "toggle",
+    help = "Adds the -4 / -7 margin after each badge",
+  },
+  {
+    key = "difficulty", label = "Announcement Content", default = "AUTO",
+    -- MPLUS selects CONTENT, not a difficulty: it swaps the Loot tab to the
+    -- season's dungeons. Kept on this one setting because it is one control in
+    -- the panel — the design has a single dropdown reading "Raid: Heroic".
+    kind = "choice", choices = { "AUTO", "NORMAL", "HEROIC", "MYTHIC", "MPLUS" },
+    help = "Which loot to show and at what item level. AUTO follows the raid you are in; "
+        .. "Dungeons show the season's Mythic+ loot at its fixed drop level",
   },
   {
     key = "vault", label = "Vault / Voidcore Levels", default = false,
@@ -83,34 +92,31 @@ Settings.SPEC = {
     -- as a Heroic vault slot does. Blizzard states it directly ("the power of
     -- items acquired with Nebulous Voidcores is aligned with the equivalent
     -- Great Vault reward for that content"), so this is one number, not two.
-    help = "Show each item at the level it would arrive at from the WEEKLY CHEST or a "
-        .. "Voidcore bonus roll rather than the level the boss drops — a full track "
-        .. "higher, so a Heroic kill is worth Myth 1/6 either way. Only offered once "
-        .. "a difficulty is chosen.",
+    help = "Show each item at the level it would arrive in the Great Vault or from a bonus roll",
   },
   {
     key = "hideMinimap", label = "Hide Minimap Button", default = false,
     kind = "toggle",
-    help = "The button is the only way in that is not a typed command, so it is "
-        .. "shown by default.",
+    -- The slash command is NAMED here on purpose: this is the one setting that can
+    -- take away the only other way in, so the alternative has to be on screen.
+    help = "The minimap button is the only way to open the addon without a typed command: |cfff2bdad/la|r",
   },
   {
     key = "autoOpen", label = "Open Panel On A Drop", default = false,
     kind = "toggle",
-    help = "Off by default — the window stays out of your way until you open it.",
+    help = "Off by default — the window stays out of your way until you manually open it",
   },
   {
     key = "autoPost", label = "Auto-Post Drops To Chat", default = false,
     kind = "toggle",
     help = "The runner's addon posts each drop's shortlist to chat automatically. "
         .. "Only ever fires on a GUILD run — never in LFR or a pug — and only for "
-        .. "whoever is running loot. Off by default; the Post button is unaffected.",
+        .. "whomever is running loot",
   },
   {
-    key = "minQuality", label = "Record Loot Down To", default = 4,
+    key = "minQuality", label = "Record Loot Down To:", default = 4,
     kind = "number", min = 2, max = 5,
-    help = "4 = Epic, which is all raid loot. Lower to 3 to record blues — how "
-        .. "you test the recorder in a follower dungeon.",
+    help = "4 = Epic, which is all raid loot. Lower to 3 to record blues",
   },
   {
     -- ⚠️ THE ONE ROW THE MOCK DRAWS THAT THE CODE DID NOT HAVE (Session 258).
@@ -131,13 +137,13 @@ Settings.SPEC = {
     -- this hides the EPGP half and nothing else.
     key = "noRoster", label = "Disable Roster Import/EPGP System", default = false,
     kind = "toggle",
-    help = "Roster data import is only used by HoD guild members. Others should "
-        .. "check this box.",
+    help = "Roster data import is only used by HoD guild members. Others should check this box",
     apply = function()
       if ns.Panel and ns.Panel.Refresh then pcall(ns.Panel.Refresh) end
     end,
   },
 }
+
 
 -- Looked up CASE-INSENSITIVELY, and the canonical key is taken from the SPEC
 -- rather than from what the user typed.
@@ -193,7 +199,23 @@ function Settings.Set(key, value)
   -- ⚠️ A SLIDER IS A NUMBER THAT IS DRAWN DIFFERENTLY. It validates, clamps and
   -- stores through this same branch, so the range can never disagree between
   -- the control and the slash command that sets the same key.
-  if spec.kind == "number" or spec.kind == "slider" then
+  -- ⚠️ A SCALE KEEPS ITS DECIMALS. The branch below floors, which is right for a
+  -- count of names and destroys the one value this control exists to accept:
+  -- 0.3556 would store as 0. Zero is also the sentinel for "use the client's own
+  -- scale", so flooring turned every typed scale into "leave it alone" silently.
+  if spec.kind == "scale" then
+    local n = tonumber(value)
+    if not n then return false, ("%s needs a number"):format(spec.label) end
+    -- 0 is always allowed: it is how the setting is switched off.
+    if n ~= 0 and (n < spec.min or n > spec.max) then
+      return false, ("%s must be between %.2f and %.2f, or 0 for your client's own")
+        :format(spec.label, spec.min, spec.max)
+    end
+    ns.db.settings[key] = n
+    runApply(spec)
+    return true
+
+  elseif spec.kind == "number" or spec.kind == "slider" then
     local n = tonumber(value)
     if not n then return false, ("%s needs a number"):format(spec.label) end
     n = math.floor(n)
@@ -333,12 +355,48 @@ local SET_X    = 40             -- the window's own margin, both sides
 local SET_LABEL_Y = 0           -- label at the row's top, help 17 beneath it
 local SET_HELP_Y  = 17
 -- The controls, each right-aligned to its own edge as the mock places them.
-local SET_CHECK_X, SET_CHECK_SZ = 496, 24
-local SET_INPUT_X, SET_INPUT_W, SET_INPUT_H = 440, 80, 30
+-- ⚠️ MEASURED FROM THE CONTENT COLUMN, NOT THE WINDOW EDGE (Jason, Session
+-- 263; node 650:147). The mock's frame starts at x=40 and its controls are
+-- placed WITHIN it — the checkbox at 496 of a 522-wide column, so 536 from the
+-- window. Read as window offsets they landed 40px too far left, which is the
+-- gap between the content and the scrollbar that Jason called too much.
+--
+-- THE COLUMN'S RIGHT EDGE IS 562 (40 + 522) and every control right-aligns just
+-- inside it: checkbox and field to 560, dropdowns to 561.
+local SET_COL_W  = 522                       -- node 591:2402
+local SET_COL_R  = SET_X + SET_COL_W         -- 562, the column's right edge
+local SET_CHECK_X, SET_CHECK_SZ = SET_X + 496, 24
+local SET_INPUT_X, SET_INPUT_W, SET_INPUT_H = SET_X + 440, 80, 30
 local SET_DROP_W = 131
 -- The leftmost edge any control occupies, and the help's right boundary 16
 -- short of it. Derived rather than typed, so moving a control moves the text.
-local SET_CTRL_L = math.min(SET_CHECK_X, SET_INPUT_X, FRAME_W - SET_X - SET_DROP_W - 26)
+-- ⚠️ THE HELP COLUMN IS PER KIND, NOT ONE WIDTH FOR EVERY ROW (node 650:147).
+-- The mock's sentences run to 462 beside a checkbox and stop at 390 beside a
+-- dropdown, because those controls start in different places. One shared width
+-- taken from the narrowest control wrapped every checkbox row far too early —
+-- three lines where the design has two.
+local SET_DROP_L = SET_COL_R - 1 - SET_DROP_W   -- the wider dropdown's left edge
+
+--- Where a row's leftmost control starts, in content coordinates.
+---
+--- ⚠️ MEASURED FROM THE CONTROL, NOT ASSUMED FROM ITS KIND. A dropdown sizes
+--- itself to its longest choice — ours are 170 wide where the mock's are 131 —
+--- so a constant put the help text under them. And a SCALE row's leftmost
+--- control is the SLIDER, which begins far left of the field beside it; sizing
+--- that help against the field ran the sentence straight through the slider.
+local function controlLeft(kind, ctrl)
+  local w = (ctrl and ctrl.GetWidth and ctrl:GetWidth()) or 0
+  if kind == "toggle" then return SET_CHECK_X end
+  if kind == "number" then return SET_INPUT_X end
+  if kind == "scale"  then return (SET_INPUT_X - 14) - w end
+  if kind == "slider" then return FRAME_W - 60 - w end
+  return (SET_COL_R - 1) - (w > 0 and w or SET_DROP_W)
+end
+
+local function helpWidthFor(kind, ctrl)
+  return math.max(80, controlLeft(kind, ctrl) - SET_X - 16)
+end
+local SET_CTRL_L = math.min(SET_CHECK_X, SET_INPUT_X, SET_DROP_L)
 local SET_HELP_W = SET_CTRL_L - SET_X - 16
 local FOOTER_H = 48
 -- ⚠️ THE READOUT NEEDS ITS OWN BAND IN THE HEIGHT, and adding it without one is
@@ -346,7 +404,10 @@ local FOOTER_H = 48
 -- help text, because WoW frames do not clip their children so nothing looked
 -- broken, it just overlapped. Three lines of GameFontDisableSmall plus breathing
 -- room. If the readout ever gains a fourth line, this number moves with it.
-local READOUT_H = 58
+local READOUT_H = 72
+-- One wheel notch, in pixels. A row is ~55, so this moves about a third of a
+-- row per notch — enough to feel responsive without skipping a setting.
+local SCROLL_STEP = 20
 
 --- The window's height, derived rather than fixed. Exposed so the harness can
 --- assert every band is accounted for: a region added without a band of its own
@@ -380,22 +441,55 @@ function Settings.Layout()
     local h = row.help and row.help:GetStringHeight() or 0
     -- The label sits above the help; the row is whichever is taller than the
     -- one-line minimum.
-    local rowH = math.max(ROW_H, SET_HELP_Y + math.ceil(h))
+    -- ⚠️ THE BLOCK'S OWN HEIGHT, WHICH THE NODE GIVES AS 35 AND 51 (Jason,
+    -- Session 263: the rows are autolayout with a 20px gap). The help starts 17
+    -- down and its line box adds 2 below the last line, so a one-line row is
+    -- 17 + 16 + 2 = 35 and a two-line one 51 — the gap between blocks is then
+    -- ROW_GAP alone, which is the 20 the autolayout applies.
+    local rowH = math.max(ROW_H, SET_HELP_Y + math.ceil(h) + 2)
     row.label:ClearAllPoints()
     row.label:SetPoint("TOPLEFT", SET_X, -(y + SET_LABEL_Y))
     row.help:ClearAllPoints()
+    row.help:SetWidth(helpWidthFor(row.spec.kind, row.control))
     row.help:SetPoint("TOPLEFT", SET_X, -(y + SET_HELP_Y))
+    -- ⚠️ CONTROLS ARE CENTRED ON THE TEXT BLOCK, NOT PINNED NEAR ITS TOP (Jason,
+    -- Session 263 side-by-side). Every control sat at a fixed offset from the
+    -- row's top, so a one-line row looked right and a three-line row left the
+    -- checkbox floating up beside the label with the sentence running past it.
+    -- The mock hand-tunes a different top offset on every single row — 2, 6, 13,
+    -- 14, 21 — which is that same centring, measured by eye in Figma. Deriving
+    -- it means a row that grows or shrinks keeps its control where it belongs
+    -- instead of needing the number retuned.
+    local textH = SET_HELP_Y + math.ceil(h)
+    local function centred(ctrl, fallbackH)
+      local ch = (ctrl and ctrl.GetHeight and ctrl:GetHeight()) or fallbackH
+      if not ch or ch <= 0 then ch = fallbackH end
+      return y + math.max(0, math.floor((textH - ch) / 2 + 0.5))
+    end
+
+    if row.field and row.field.ClearAllPoints then
+      row.field:ClearAllPoints()
+      row.field:SetPoint("TOPLEFT", SET_INPUT_X, -centred(row.field, SET_INPUT_H))
+    end
     if row.control and row.control.ClearAllPoints then
       row.control:ClearAllPoints()
       local kind = row.spec.kind
       if kind == "toggle" then
-        row.control:SetPoint("TOPLEFT", SET_CHECK_X, -(y + 4))
+        row.control:SetPoint("TOPLEFT", SET_CHECK_X, -centred(row.control, SET_CHECK_SZ))
       elseif kind == "number" then
-        row.control:SetPoint("TOPLEFT", SET_INPUT_X, -y)
+        row.control:SetPoint("TOPLEFT", SET_INPUT_X, -centred(row.control, SET_INPUT_H))
+      elseif kind == "scale" then
+        -- The slider runs from the text column's right edge to just short of the
+        -- field, so the pair reads as one control rather than two.
+        row.control:SetPoint("TOPRIGHT", frame.content, "TOPLEFT",
+                             SET_INPUT_X - 14, -centred(row.control, 14))
       elseif kind == "slider" then
-        row.control:SetPoint("TOPRIGHT", -60, -y)
+        row.control:SetPoint("TOPRIGHT", -60, -centred(row.control, 14))
       else
-        row.control:SetPoint("TOPLEFT", FRAME_W - SET_X - SET_DROP_W - 26, -y)
+        -- Right-aligned to the column, so the two dropdown widths in the mock
+        -- (131 and 81) both finish on the same edge.
+        row.control:SetPoint("TOPRIGHT", frame.content, "TOPLEFT", SET_COL_R - 1,
+                             -centred(row.control, 30))
       end
     end
     y = y + rowH + ROW_GAP
@@ -460,6 +554,25 @@ local function build()
     frame.close = S.CloseButton(frame)
   end
 
+  -- ── The header band ───────────────────────────────────────────────────────
+  -- ⚠️ A BAND, NOT A RULE (Jason's mock, Session 263). The lockup and the word
+  -- SETTINGS sit on the panel's OWN darker ground, over the window's lighter
+  -- violet — so the header is separated by SURFACE, the same idea the Loot
+  -- tab's footer already uses, rather than by a line drawn across the window.
+  -- It also gives the scrolling rows something to disappear behind.
+  if S then
+    -- ⚠️ NO HEADER BAND (Jason, Session 263 side-by-side: "there's a dark header
+    -- background on addon"). I added one reading a darker rectangle off the top
+    -- of the mock, and on screen it reads as a hard seam the design has not got —
+    -- the title simply sits on the window's own ground. Only the FOOTER is
+    -- banded, which is what closes the scrolling area off at the bottom.
+    frame.footBand = frame:CreateTexture(nil, "BACKGROUND", nil, 1)
+    frame.footBand:SetColorTexture(S.rgb(S.COLOR.ground))
+    frame.footBand:SetPoint("BOTTOMLEFT")
+    frame.footBand:SetPoint("BOTTOMRIGHT")
+    frame.footBand:SetHeight(FOOTER_H + READOUT_H)
+  end
+
   frame.heading = S and S.Text(frame, "light", "title", S.COLOR.white, "LEFT")
     or frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   if S then S.SetFont(frame.heading, S.FONT.light, 18) end
@@ -471,42 +584,103 @@ local function build()
   -- The rows live in a scroll child rather than on the window, so the window
   -- can be shorter than its own content. Everything below places rows at
   -- offsets from the CONTENT's top; the scroll frame supplies the rest.
-  frame.scroll = CreateFrame("ScrollFrame", "$parentRows", frame,
-    "UIPanelScrollFrameTemplate")
+  -- ⚠️ NO TEMPLATE, ON PURPOSE (Jason, Session 263: the scrollbar "looks
+  -- awful"). This was UIPanelScrollFrameTemplate, which brings Blizzard's own
+  -- parchment track and arrow buttons into a window whose whole design has no
+  -- chrome at all. The previous attempt HID that furniture by NAME — and the
+  -- names it knew are the old ones, so on current retail the buttons came back
+  -- and sat in the corner of the settings window looking like a different addon.
+  --
+  -- Hiding a template's internals is guessing at something that is explicitly
+  -- not contractual and changes between patches. Not inheriting them cannot
+  -- fail that way: a bare ScrollFrame has no furniture to hide.
+  --
+  -- THE WHEEL IS HOW EVERYTHING ELSE HERE SCROLLS — the loot column, the
+  -- standings table and the ranking list all do exactly this and none of them
+  -- draws a bar. Consistent with the rest of the addon, and with a design that
+  -- has no scrollbar drawn in any of its frames.
+  frame.scroll = CreateFrame("ScrollFrame", nil, frame)
   frame.scroll:SetPoint("TOPLEFT", 0, -HEADER_H)
   frame.scroll:SetPoint("BOTTOMRIGHT", -26, FOOTER_H + READOUT_H)
 
-  -- ⚠️ THE SCROLL TEMPLATE BRINGS ITS OWN CHROME. UIPanelScrollFrameTemplate
-  -- adds a track and two arrow buttons in Blizzard's parchment styling, which
-  -- appeared in the top-right corner of a window that is meant to have none.
-  -- Hidden the same way Style.Window strips the frame templates — by name, and
-  -- guarded, because template internals are not contractual.
-  -- ⚠️ TYPE-CHECKED, NOT JUST NIL-CHECKED. A named region on a template is a
-  -- TABLE or absent; anything else is not one. The headless stub answers any
-  -- CamelCase key with a function, so `if bar then` was true for a scrollbar
-  -- that does not exist and the next line indexed a function. The real client
-  -- can hand back something unexpected too — template internals are not
-  -- contractual, which is the whole reason this is guarded at all.
-  local function hideRegion(r)
-    if type(r) == "table" and type(r.Hide) == "function" then r:Hide() end
+  frame.scroll:EnableMouseWheel(true)
+  frame.scroll:SetScript("OnMouseWheel", function(self, delta)
+    -- Clamped at both ends: WoW does not clamp for you, and scrolling past the
+    -- bottom leaves the rows parked off-screen with no way back but the wheel.
+    local max = math.max(0, (self:GetScrollChild() and self:GetScrollChild():GetHeight() or 0)
+                            - (self:GetHeight() or 0))
+    local to = (self:GetVerticalScroll() or 0) - delta * SCROLL_STEP
+    if to < 0 then to = 0 elseif to > max then to = max end
+    self:SetVerticalScroll(to)
+    if frame.UpdateBar then frame.UpdateBar() end
+    if frame.NudgeBar then frame.NudgeBar() end
+  end)
+
+  -- ── The scrollbar ─────────────────────────────────────────────────────────
+  -- ⚠️ OURS, DRAWN FROM THE MOCK: a 5px fully-rounded thumb in the accent
+  -- purple at 30%, down the right edge. Blizzard's went out because its
+  -- parchment arrows belong to a different addon; this is what the design puts
+  -- there instead, and it is a plain texture rather than a Slider so there is
+  -- no template chrome to come back.
+  --
+  -- IT IS AN INDICATOR, NOT A HANDLE. The wheel does the scrolling — everything
+  -- in this addon scrolls that way — so this reports position and length and
+  -- takes no input, which is also why it needs no hit area or arrows.
+  -- Node 649:130: a 5px bar whose right edge sits 10px inside the window.
+  local BAR_W, BAR_INSET = 5, 10
+  -- ⚠️ THE TRACK STOPS SHORT OF THE FOOTER (Jason, Session 263). Running it to
+  -- the full height of the scroll area put the thumb's bottom edge against the
+  -- footer band at the end of a scroll, so the two read as touching. The node
+  -- has the bar ending well above it; the exact figure is not specified and he
+  -- said he did not mind, so this is one named constant to change.
+  local BAR_BOTTOM = 20
+  frame.bar = frame:CreateTexture(nil, "OVERLAY")
+  frame.bar:SetColorTexture(1, 1, 1, 1)
+  -- A rounded cap needs a mask; without one this is a 5px rectangle, which the
+  -- mock's 100px radius is explicitly not.
+  if frame.bar.SetTexture then
+    frame.bar:SetTexture("Interface\\Buttons\\WHITE8X8")
   end
-  for _, key in ipairs({ "ScrollBar", "scrollBar" }) do
-    local bar = frame.scroll[key]
-    if type(bar) == "table" then
-      hideRegion(bar)
-      for _, part in ipairs({ "ScrollUpButton", "ScrollDownButton", "Background",
-                              "Track", "Top", "Middle", "Bottom", "ThumbTexture" }) do
-        hideRegion(bar[part])
-      end
+  if S then frame.bar:SetVertexColor(S.rgb(S.COLOR.accent)) end
+  frame.bar:SetWidth(BAR_W)
+  frame.bar:SetAlpha(0.3)
+  frame.bar:Hide()
+
+  --- Put the thumb where the scroll offset says, and size it to how much of the
+  --- content is on screen. Hidden outright when everything already fits, since a
+  --- full-height bar that cannot move is furniture rather than information.
+  function frame.UpdateBar()
+    local sf, child = frame.scroll, frame.content
+    if not (sf and child) then return end
+    local view, total = sf:GetHeight() or 0, child:GetHeight() or 0
+    if total <= view + 1 then frame.bar:Hide(); return end
+    -- The travel available to the thumb, which is the visible height less the
+    -- clearance kept at the bottom. The thumb is that same fraction of it, so a
+    -- longer list still gives a shorter thumb.
+    local track = math.max(1, view - BAR_BOTTOM)
+    local thumb = math.max(24, track * (view / total))
+    local at = (sf:GetVerticalScroll() or 0) / math.max(1, total - view)
+    frame.bar:ClearAllPoints()
+    frame.bar:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -BAR_INSET,
+                       -(HEADER_H + at * (track - thumb)))
+    frame.bar:SetHeight(thumb)
+    frame.bar:Show()
+  end
+
+  --- ⚠️ DIM WHEN IT IS NOT IN USE (Jason). Brightens on a wheel notch and fades
+  --- back a moment later, so the bar says where you are while you are moving and
+  --- stays out of the way when you are reading.
+  local fadeAt
+  function frame.NudgeBar()
+    frame.bar:SetAlpha(0.65)
+    fadeAt = GetTime and GetTime() + 1.2 or nil
+  end
+  frame:HookScript("OnUpdate", function()
+    if fadeAt and GetTime and GetTime() >= fadeAt then
+      fadeAt = nil
+      frame.bar:SetAlpha(0.3)
     end
-  end
-  local sbName = frame.scroll.GetName and frame.scroll:GetName()
-  if type(sbName) == "string" then
-    for _, suffix in ipairs({ "ScrollBar", "ScrollBarScrollUpButton",
-                             "ScrollBarScrollDownButton", "ScrollBarBackground" }) do
-      hideRegion(_G[sbName .. suffix])
-    end
-  end
+  end)
 
   frame.content = CreateFrame("Frame", nil, frame.scroll)
   frame.content:SetSize(FRAME_W - 26, math.max(1, Settings.ContentHeight()))
@@ -538,7 +712,7 @@ local function build()
     label:SetPoint("TOPLEFT", SET_X, -(y + SET_LABEL_Y))
     label:SetText((spec.label or ""):upper())
 
-    local help = S and S.Text(frame.content, "light", "name", S.COLOR.white, "LEFT")
+    local help = S and S.Text(frame.content, "light", "label", S.COLOR.white, "LEFT")
       or frame.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     help:ClearAllPoints()
     help:SetPoint("TOPLEFT", SET_X, -(y + SET_HELP_Y))
@@ -549,14 +723,20 @@ local function build()
     -- checkbox starts at 496 and the DROPDOWN at 403, so sizing the help
     -- against the checkbox let it run 93px into the dropdown's column. One
     -- width for every row, taken from whichever control starts furthest left.
-    help:SetWidth(SET_HELP_W)
+    help:SetWidth(helpWidthFor(spec.kind, control))
     help:SetJustifyH("LEFT")
     help:SetWordWrap(true)
-    -- Capped so a long help line cannot grow the row it was measured for.
-    if help.SetMaxLines then help:SetMaxLines(2) end
+    -- ⚠️ NOT CAPPED (Jason, Session 263: "truncated with no way to actually read
+    -- the full description"). This was SetMaxLines(2), so any sentence longer
+    -- than two lines ended in an ellipsis and the rest was simply unreachable —
+    -- there is no tooltip on these and no way to widen the column. The cap was
+    -- there to stop a row growing past the height it had been measured for, but
+    -- Settings.Layout re-measures every row from GetStringHeight on show, so the
+    -- row grows to fit and nothing overlaps. The cap was defending against a
+    -- problem the layout had already solved.
     help:SetText(spec.help)
 
-    local control
+    local control, field
     if spec.kind == "toggle" then
       -- ⚠️ THE DESIGN'S OWN CHECKBOX, not Blizzard's — a 24px square with the
       -- control's gradient rim and the mock's 10x7 tick, which is what
@@ -583,6 +763,54 @@ local function build()
         end
         Settings.Set(spec.key, on and "on" or "off")
       end)
+
+    elseif spec.kind == "scale" then
+      -- ⚠️ TWO CONTROLS ON ONE ROW (Jason's mock, Session 263): the slider to
+      -- drag, and a field to type an exact value into. The field is the reason
+      -- the readout in the footer is worth printing — "a scale of 0.3556 would
+      -- put one unit on one pixel" is only useful if 0.3556 can be entered.
+      control = ns.Style and ns.Style.Slider(frame.content, 210, spec.min, spec.max,
+                                             spec.step, spec.decimals)
+      field = S and S.Input(frame.content, SET_INPUT_W, SET_INPUT_H)
+        or CreateFrame("EditBox", nil, frame.content)
+      field:SetSize(SET_INPUT_W, SET_INPUT_H)
+      field:SetPoint("TOPLEFT", SET_INPUT_X, -(y + 2))
+      field:SetAutoFocus(false)
+      -- ⚠️ NOT SetNumeric — it refuses the decimal point, so the one format this
+      -- field exists to accept could not be typed into it at all.
+      field:SetMaxLetters(8)
+
+      local function commitField(self)
+        local ok, err = Settings.Set(spec.key, self:GetText())
+        if not ok then ns.Warn(err) end
+        self:SetText(("%.4f"):format(ns.CurrentWindowScale()))
+        self:ClearFocus()
+        Settings.Refresh()
+      end
+      field:SetScript("OnEnterPressed", commitField)
+      field:SetScript("OnEditFocusLost", commitField)
+      field:SetScript("OnEscapePressed", function(self)
+        self:SetText(("%.4f"):format(ns.CurrentWindowScale()))
+        self:ClearFocus()
+      end)
+
+      if control then
+        -- ⚠️ THE SLIDER'S OWN READOUT IS HIDDEN HERE. Style.Slider draws a value
+        -- label beside itself, which is right for a lone slider and wrong beside
+        -- a field showing the same number — it rendered as a stray "1" wedged
+        -- between the two controls, which is exactly how Jason described it.
+        if control.value then control.value:Hide() end
+        -- Left of the field, on the same line, as the mock draws it.
+        control:SetPoint("TOPRIGHT", frame.content, "TOPLEFT",
+                         SET_INPUT_X - 14, -(y + 10))
+        control:Wire(nil, function(v)
+          if v == Settings.Get(spec.key) then return end
+          if control:IsDragging() then ns.HoldWindowScale(frame) end
+          Settings.Set(spec.key, v)
+          if not field:HasFocus() then field:SetText(("%.4f"):format(v)) end
+        end,
+        function() ns.ReleaseWindowScale() end)
+      end
 
     elseif spec.kind == "slider" then
       control = ns.Style and ns.Style.Slider(frame.content, 150, spec.min, spec.max, spec.step)
@@ -681,7 +909,7 @@ local function build()
     end
 
     frame.rows[#frame.rows + 1] =
-      { spec = spec, control = control, label = label, help = help }
+      { spec = spec, control = control, label = label, help = help, field = field }
     y = y + Settings.RowHeight(spec) + ROW_GAP
   end
 
@@ -707,9 +935,9 @@ local function build()
   -- change it, and a Save button would be a lie in the other direction, implying
   -- that nothing had happened until you pressed it. Done says the truth, and the
   -- line beside it removes the doubt rather than leaving the button to carry it.
-  local note = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  note:SetPoint("BOTTOM", 0, 19)
-  note:SetText("Changes apply as you make them.")
+  -- ⚠️ NO HINT LINE. The reasoning above is sound and the design does not carry
+  -- it: node 649:129 is the whole footer — a 34-tall text block and a 29-tall
+  -- button row, and nothing else. Read from the node rather than argued about.
 
   -- ── Display readout ────────────────────────────────────────────────────────
   --
@@ -729,14 +957,31 @@ local function build()
   -- size is a SETTING precisely because the client cannot see the monitor's own
   -- scaling (Core §1.1, S257), and this readout is the only feedback anyone has
   -- while turning that dial. Say the word and it goes.
-  frame.display = S2 and S2.Text(frame, "light", "chip", S2.COLOR.textDim, "LEFT")
+  -- ⚠️ TWO STRINGS, BECAUSE ONE FONTSTRING CARRIES ONE FONT. Node 649:123 sets
+  -- the date line in Saira BOLD and the display line in Light, both 10px and
+  -- both WHITE at full opacity — it was one dim 9px Light string, which is
+  -- wrong on weight, size and colour at once. A colour escape can recolour a
+  -- run but cannot reweight it, which is the rule the tag lines already follow.
+  --
+  -- THE GAP IS THE NODE'S OWN: the date line has a 10px line box and the display
+  -- line a 14px one, so the 4px difference is the space between them rather than
+  -- a number chosen to look right.
+  frame.dataLine = S2 and S2.Text(frame, "bold", "label", S2.COLOR.white, "LEFT")
+    or frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  frame.dataLine:ClearAllPoints()
+  frame.dataLine:SetPoint("BOTTOMLEFT", SET_X, FOOTER_H + READOUT_H - 24)
+  frame.dataLine:SetPoint("BOTTOMRIGHT", -SET_X, FOOTER_H + READOUT_H - 24)
+  frame.dataLine:SetJustifyH("LEFT")
+  frame.dataLine:SetHeight(10)
+
+  frame.display = S2 and S2.Text(frame, "light", "label", S2.COLOR.white, "LEFT")
     or frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   frame.display:ClearAllPoints()
-  frame.display:SetPoint("BOTTOMLEFT", 18, FOOTER_H)
-  frame.display:SetPoint("BOTTOMRIGHT", -18, FOOTER_H)
-  frame.display:SetHeight(READOUT_H - 10)
+  frame.display:SetPoint("TOPLEFT", frame.dataLine, "BOTTOMLEFT", 0, -4)
+  frame.display:SetPoint("TOPRIGHT", frame.dataLine, "BOTTOMRIGHT", 0, -4)
   frame.display:SetJustifyH("LEFT")
   frame.display:SetJustifyV("TOP")
+  frame.display:SetHeight(24)
   frame.display:SetWordWrap(true)
 
   local close = S2 and S2.Control(frame, "DONE")
@@ -757,31 +1002,64 @@ end
 
 --- The display readout's text. Separate from Refresh so the harness can check
 --- the WORDING against a known report rather than only the arithmetic.
+--- The one useful sentence about this display, and nothing else.
+---
+--- ⚠️ IT USED TO REPORT THREE NUMBERS AND CONFUSE ALL THREE (Jason, Session
+--- 263). It printed the EFFECTIVE scale — the setting multiplied by the game's
+--- own UI scale — under the bare word "scale", so it matched neither what was
+--- typed into Panel Size nor anything in the game's settings, and it moved
+--- whenever the dial moved. Pixels-per-unit and the worst drift were engineering
+--- telemetry that answered a question nobody was asking.
+---
+--- What remains is the only actionable fact: the Panel Size that makes text land
+--- on whole pixels here. It is anchored to the window's natural size, so it does
+--- not move as the dial does, and it is in the same units as the field above it.
 function Settings.DisplayLine(r)
-  if not r then return "Display: this client did not report a screen size." end
-  local head = ("Display: %d x %d  ·  scale %.4f  ·  1 unit = %.2f px")
-    :format(r.screenWidth, r.screenHeight, r.scale, r.pixelsPerUnit)
-  if r.aligned then
-    return head .. "\nText is landing on whole pixels — this is as sharp as it gets."
+  if not r then return "" end
+  local line = ("Display %d x %d  ·  text is sharpest at Panel Size %.4f")
+    :format(r.screenWidth, r.screenHeight, r.perfectPanelSize or 1)
+  if not r.aligned then
+    line = line .. "\nText is currently landing between pixels, which is what reads as blur."
   end
-  local worstPx = 0
-  for _, s in ipairs(r.sizes) do
-    if s.drift > worstPx then worstPx = s.drift end
+  return line
+end
+
+
+--- When the BIS and loot data this addon carries was generated, as a date.
+---
+--- ⚠️ THIS IS THE ONE FACT NOBODY COULD SEE (Jason, Session 263). The addon has
+--- always known its data's date, but only as a line printed by a typed command,
+--- so the question "is my BIS list current?" had no answer inside the window —
+--- and the way it surfaced was Jason spotting a trinket that disagreed with Icy
+--- Veins, which is the expensive way to find out.
+---
+--- It matters most for the people this addon reaches through CurseForge, who
+--- have no other way to tell whether their copy is behind.
+---
+--- The date alone, not the timestamp: this answers "how old is this", and an
+--- hour and minute invites a precision the weekly refresh does not have.
+function Settings.DataLine()
+  local meta = (ns.Data() or {}).meta or {}
+  local gen = meta.generatedAt
+  if type(gen) ~= "string" or gen == "" then
+    return "Loot and BIS data: this copy carries no generation date."
   end
-  return head .. ("\nText is landing BETWEEN pixels (worst size is %.2f px off), which is what")
-    :format(worstPx)
-    .. ("\nreads as blur. A scale of %.4f would put one unit on one pixel.")
-    :format(r.perfectScale)
+  return ("Loot and BIS data generated %s."):format(gen:sub(1, 10))
 end
 
 function Settings.Refresh()
   if not frame then return end
   if frame.display and ns.DisplayReport then
+    frame.dataLine:SetText(Settings.DataLine())
     frame.display:SetText(Settings.DisplayLine(ns.DisplayReport()))
   end
   -- Re-flow before writing values in: the rows have to be where they belong
   -- before anything is measured against them.
   Settings.Layout()
+  -- The bar's length is a fraction of the content height, which Layout has just
+  -- recomputed — so it is updated here rather than only on a wheel notch, or it
+  -- would describe the list as it was before the last change.
+  if frame.UpdateBar then frame.UpdateBar() end
 
   for _, row in ipairs(frame.rows) do
     local v = Settings.Get(row.spec.key)
@@ -793,6 +1071,17 @@ function Settings.Refresh()
       -- was rather than where the finger is.
       if not (row.control.IsDragging and row.control:IsDragging()) then
         row.control:SetValue(tonumber(v) or row.spec.default)
+      end
+    elseif row.spec.kind == "scale" then
+      local n = tonumber(v) or 0
+      -- 0 means "the client's own", and showing the number it resolves to is
+      -- more use than showing a zero nobody typed.
+      local shown = (n > 0) and n or (ns.CurrentWindowScale and ns.CurrentWindowScale()) or 0
+      if row.control and not (row.control.IsDragging and row.control:IsDragging()) then
+        row.control:SetValue(shown)
+      end
+      if row.field and not row.field:HasFocus() then
+        row.field:SetText(("%.4f"):format(shown))
       end
     elseif row.spec.kind == "number" then
       row.control:SetText(tostring(v))

@@ -795,16 +795,24 @@ end
 --- The decision is recorded on EVERY branch, including the "setting is off" one
 --- — a log that goes quiet in exactly the case it was added to explain is the
 --- S249 trap, and this is a feature whose whole failure mode is silence.
-function Loot.AutoOpen(why)
+---
+--- ⚠️ IT OPENS ON THE BOSS THAT DROPPED (Session 263). Opening the panel is only
+--- half of what the setting promises: with no encounter to land on, the window
+--- appeared showing the season's whole boss list collapsed, which answers "what
+--- can drop here" when the question is "what just dropped". encounterID is the
+--- one the RECORDER stored for the drop; ns.BossIndexForEncounter reconciles it
+--- against the strip's own id space.
+function Loot.AutoOpen(why, encounterID, itemID)
   local on = ns.Settings and ns.Settings.Get("autoOpen") and true or false
   if ns.Diagnostics then
-    ns.Diagnostics.Note("autoOpen", { why = why, enabled = on, havePanel = ns.Panel ~= nil })
+    ns.Diagnostics.Note("autoOpen", { why = why, enabled = on, havePanel = ns.Panel ~= nil,
+                                      encounterID = encounterID, itemID = itemID })
   end
   if not (on and ns.Panel) then return false end
 
   -- pcall'd on its own so a fault in the panel can never break the scoring and
   -- recording path, which is the half that matters when loot is on the line.
-  local shown, err = pcall(ns.Panel.Show)
+  local shown, err = pcall(ns.Panel.ShowForDrop, encounterID, itemID)
   if not shown and ns.Diagnostics then
     ns.Diagnostics.Note("panelShowError", { why = why, err = tostring(err) })
   end
@@ -831,7 +839,11 @@ function Loot.HandleRoll(roll)
   -- pcall'd on its own so the reverse is also true — a fault in the panel can
   -- never break the scoring and recording path, which is the half that matters
   -- when loot is actually on the line.
-  Loot.AutoOpen("startLootRoll")
+  -- A roll carries no encounter of its own, so the boss to open on is the one
+  -- the recorder is currently filing drops against.
+  Loot.AutoOpen("startLootRoll",
+    ns.Record and ns.Record.CurrentEncounterID and ns.Record.CurrentEncounterID(),
+    roll.itemID)
 
   local out = Loot.ScoreItem(roll.itemID, {
     itemLink   = roll.itemLink,

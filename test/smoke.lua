@@ -4424,8 +4424,16 @@ header("Auto-open fires even when the rest of the roll handler breaks")
   local savedScore, savedPanel = ns.Loot.ScoreItem, ns.Panel
   local savedGet = ns.Settings.Get
 
-  local shown = 0
-  ns.Panel = { Show = function() shown = shown + 1 end, Refresh = function() end }
+  -- ⚠️ THE DOUBLE STANDS IN FOR ShowForDrop, WHICH IS THE SEAM NOW (Session
+  -- 263). The panel no longer just opens on a drop, it opens ON THE BOSS that
+  -- dropped — so a stub offering only Show is quieter than the real thing and
+  -- would report a green pass on a call the addon never makes.
+  local shown, lastEnc, lastItem = 0, nil, nil
+  ns.Panel = {
+    Show        = function() shown = shown + 1 end,
+    ShowForDrop = function(enc, itemID) shown = shown + 1; lastEnc, lastItem = enc, itemID end,
+    Refresh     = function() end,
+  }
   ns.Settings.Get = function(key)
     if key == "autoOpen" then return true end
     return savedGet(key)
@@ -4437,6 +4445,20 @@ header("Auto-open fires even when the rest of the roll handler breaks")
   local ok = pcall(ns.Loot.HandleRoll, { itemID = 270160, name = "Anything" })
   check("the handler still fails loudly rather than swallowing the error", not ok)
   check("...and the panel opened ANYWAY, before the failure", shown == 1, shown)
+
+  -- ⚠️ A ROLL CARRIES NO ENCOUNTER OF ITS OWN, so the boss to open on comes
+  -- from the recorder. Reading nil here would look exactly like the old
+  -- behaviour and open on the collapsed list, which is the reported fault.
+  do
+    local savedCur = ns.Record.CurrentEncounterID
+    ns.Record.CurrentEncounterID = function() return 3445 end
+    shown, lastEnc = 0, nil
+    ns.Loot.ScoreItem = savedScore
+    pcall(ns.Loot.HandleRoll, { itemID = 270160, name = "Anything" })
+    check("...and it is handed the encounter the recorder is filing against",
+          lastEnc == 3445, tostring(lastEnc))
+    ns.Record.CurrentEncounterID = savedCur
+  end
 
   -- And the ordinary path still opens exactly once, not twice.
   ns.Loot.ScoreItem = savedScore
@@ -4452,6 +4474,54 @@ header("Auto-open fires even when the rest of the roll handler breaks")
   shown = 0
   pcall(ns.Loot.HandleRoll, { itemID = 270160, name = "Anything" })
   check("with the setting off it never opens", shown == 0, shown)
+
+  -- ⚠️ AND THE PATH A REAL RETAIL DROP TAKES, which is not HandleRoll at all.
+  -- Modern group loot arrives through C_LootHistory (Session 253) and files a
+  -- recorded entry carrying its OWN encounter — the id the panel must open on.
+  -- The roll path above cannot prove this one: the two reach AutoOpen from
+  -- different files, and only this one has a drop to read an encounter off.
+  do
+    ns.Settings.Get = function(key)
+      if key == "autoOpen" then return true end
+      return savedGet(key)
+    end
+    stub.instance = {
+      name = "The Tidebound Grotto", difficultyID = 16,
+      difficultyName = "Mythic (Raid)", instanceID = 2987,
+    }
+    stub.items[268239] = { name = "Autoopen Test Cuffs", quality = 4, ilvl = 279, itemType = "Armor" }
+    stub.lootHistory[3445] = {
+      stub.drop(1, 268239, "Autoopen Test Cuffs", { 12825 }, {
+        { name = "Gloomrift", state = 0, roll = 0 },
+      }),
+    }
+    -- ⚠️ THE KILL DECIDES THE ID, NOT C_LootHistory. A recorded drop takes the
+    -- encounter ENCOUNTER_END reported and falls back to loot-history's own id
+    -- only when there was no kill to hear — so without this the drop would
+    -- carry whichever boss a previous block killed, and the check below would
+    -- have been comparing against a stale number rather than this drop's.
+    stub.Fire("ENCOUNTER_END", 3445, "Entombed Sentinels", 16, 20, 1)
+    shown, lastEnc = 0, nil
+    stub.Fire("LOOT_HISTORY_UPDATE_DROP", 3445, 1)
+    stub.RunTimers(); ns.Record.ScanAll()
+
+    -- Read back off the RECORDED entry rather than the literal, so the check
+    -- keeps testing "the drop's own encounter reaches the panel" if the fixture
+    -- ever moves. nil is the pre-fix answer, so it still bites on a revert.
+    local recorded
+    for _, r in ipairs(ns.Record.Sessions()) do
+      for _, e in ipairs((r.session or {}).items or {}) do
+        if e.itemID == 268239 then recorded = e end
+      end
+    end
+    check("a group-loot drop opens the panel on its own encounter",
+          recorded ~= nil and lastEnc ~= nil and lastEnc == recorded.encounterID,
+          ("shown %d, handed %s, recorded %s")
+            :format(shown, tostring(lastEnc), tostring(recorded and recorded.encounterID)))
+    -- ⚠️ AND ON THE PIECE. The encounter alone lands on the right boss and
+    -- leaves the raider to click the drop they opened it for.
+    check("...and on the piece that dropped", lastItem == 268239, tostring(lastItem))
+  end
 
   ns.Loot.ScoreItem, ns.Panel, ns.Settings.Get = savedScore, savedPanel, savedGet
 end)()
@@ -4488,7 +4558,21 @@ header("Pixel alignment — the arithmetic behind a blurry panel")
 
   check("an unaligned scale is REPORTED as unaligned, not rounded away",
         r and r.aligned == false, r and tostring(r.aligned))
-  check("...and it says which scale would fix it", r and math.abs(r.perfectScale - 768 / 1440) < 1e-9)
+  -- ⚠️ THE ADVICE IS THE NEAREST SHARP SCALE, NOT 1:1 (Session 263). It used to
+  -- recommend one unit on one pixel, which is the sharpest mapping and also
+  -- draws a 740-unit panel 740 physical pixels wide — Jason typed it and got a
+  -- window a fifth of his screen. Text is sharp at ANY whole number of pixels
+  -- per unit, so the useful answer is the closest one to where you already are.
+  check("...and it says which scale would fix it",
+        r and r.perfectScale ~= nil and r.perfectScale > 0, r and r.perfectScale)
+  check("...which is a WHOLE number of pixels per unit",
+        r and math.abs(r.perfectScale / (768 / 1440) - r.perfectSteps) < 1e-9,
+        r and ("%.4f = %sx the 1:1 scale"):format(r.perfectScale, tostring(r.perfectSteps)))
+  check("...and is the NEAREST such scale, not the smallest",
+        r and r.perfectSteps == 2, r and r.perfectSteps)
+  -- The true 1:1 value is still reported, just no longer recommended.
+  check("...while the 1:1 scale is still available to anyone who wants it",
+        r and math.abs(r.onePixelScale - 768 / 1440) < 1e-9, r and r.onePixelScale)
 
   -- Every named size is measured, so none can drift unnoticed.
   check("every role in the type scale is measured", r and #r.sizes == 5, r and #r.sizes)
@@ -4497,18 +4581,35 @@ header("Pixel alignment — the arithmetic behind a blurry panel")
   _G.GetPhysicalScreenSize = nil
   check("a client with no screen size reports nothing rather than guessing",
         ns.DisplayReport(1) == nil)
-  check("...and the readout says so in words",
-        ns.Settings.DisplayLine(nil):find("did not report", 1, true) ~= nil,
-        ns.Settings.DisplayLine(nil))
+  -- ⚠️ NOTHING RATHER THAN AN APOLOGY (Session 263). A client that cannot report
+  -- its screen has nothing useful to say, and a sentence explaining that is
+  -- engineering noise in a settings window.
+  check("...and the readout stays silent rather than explaining itself",
+        ns.Settings.DisplayLine(nil) == "", ns.Settings.DisplayLine(nil))
 
   -- The wording branches: aligned vs not. Both must be reachable and truthful.
   _G.GetPhysicalScreenSize = function() return 2560, 1440 end
   local sharp = ns.Settings.DisplayLine(ns.DisplayReport(768 / 1440))
   local soft  = ns.Settings.DisplayLine(ns.DisplayReport(1))
-  check("an aligned client is told it is as sharp as it gets",
-        sharp:find("whole pixels", 1, true) ~= nil, sharp)
-  check("an unaligned client is told text lands between pixels",
-        soft:find("BETWEEN pixels", 1, true) ~= nil, soft)
+
+  -- ⚠️ THE RECOMMENDATION IS IN THE FIELD'S OWN UNITS AND IS THE POINT OF THE
+  -- LINE. It used to print an EFFECTIVE scale under the bare word "scale",
+  -- which matched neither the Panel Size box nor anything in the game's
+  -- settings — Jason read it as broken, and he was right to.
+  check("the readout names the Panel Size to use",
+        sharp:find("Panel Size", 1, true) ~= nil, sharp)
+  check("...and says nothing about blur when text is already sharp",
+        sharp:find("blur", 1, true) == nil, sharp)
+  check("an unaligned client is told its text is blurring",
+        soft:find("between pixels", 1, true) ~= nil, soft)
+  -- ⚠️ AND THE NUMBER MUST NOT MOVE WITH THE DIAL. It is a property of the
+  -- display and the window's natural size; deriving it from the scale in force
+  -- made it change every time the setting did, which is not a reference value.
+  local a = ns.DisplayReport(0.4)
+  local b = ns.DisplayReport(1.2)
+  check("...and the recommended Panel Size does not move when the scale does",
+        a and b and math.abs(a.perfectPanelSize - b.perfectPanelSize) < 1e-9,
+        a and b and ("%.4f vs %.4f"):format(a.perfectPanelSize, b.perfectPanelSize))
 
   -- ⚠️ THE READOUT SHIPPED OVERLAPPING THE LAST SETTING'S HELP TEXT. It was
   -- given no band in the window height, and WoW frames do not clip children, so

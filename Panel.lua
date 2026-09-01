@@ -3031,18 +3031,17 @@ local function bossList()
   if ns.ContentMode() == "mplus" then
     return ns.DungeonList()
   end
-  local data = ns.Data()
+  -- ⚠️ THE ORDER IS ns.SortedBosses' AND IS NOT RE-DERIVED HERE. It used to be,
+  -- and then ns.BossIndexForEncounter needed the same order to answer "which
+  -- row is this drop" — two copies of one ordering, with the copy that decides
+  -- what you see living in a file no harness loads.
   local counts = ns.BisCountsByBoss()
   local targets = ns.TargetCountsByBoss()
   local out = {}
-  for id, b in pairs((data or {}).bosses or {}) do
-    out[#out + 1] = { id = id, name = b.name, order = b.order or 99,
-                      bis = counts[id] or 0, targeted = targets[id] or 0 }
+  for i, b in ipairs(ns.SortedBosses()) do
+    out[i] = { id = b.id, name = b.name, order = b.order,
+               bis = counts[b.id] or 0, targeted = targets[b.id] or 0 }
   end
-  table.sort(out, function(a, b)
-    if a.order ~= b.order then return a.order < b.order end
-    return (a.name or "") < (b.name or "")
-  end)
   return out
 end
 
@@ -5153,6 +5152,76 @@ function Panel.Show()
   frame:Raise()
   frame:Show()
   Panel.Refresh()
+end
+
+--- Open on a drop that has just been recorded, with its boss already expanded.
+---
+--- ⚠️ A COLLAPSED ACCORDION IS THE WRONG ANSWER TO "WHAT DROPPED" (Jason,
+--- Session 263). Panel.Show deliberately opens with nothing expanded, which is
+--- right when a person opened it themselves and has not said what they want to
+--- look at. A DROP has said: an LFR kill opened the panel onto the full list of
+--- the season's bosses and none of their loot, so the one screen the setting
+--- exists to produce was the one it could not produce.
+---
+--- FALLS BACK TO THE PLAIN OPEN. An encounter we cannot place — a boss missing
+--- from the payload, a drop seen without an ENCOUNTER_END whose loot-history id
+--- matches nothing — leaves the collapsed list rather than expanding a boss
+--- nobody killed.
+---
+--- ⚠️ AND IT SELECTS THE PIECE, because a kill is not a browsing session. Left
+--- on "CHOOSE AN ITEM TO VIEW DETAILS" the raider has the drop on screen and
+--- still has to click it to learn the one thing they opened it for, which is
+--- who it is for. Selecting is what makes the ranking the FIRST thing drawn.
+---
+--- ⚠️ THE SELECTION IS AN INDEX INTO A LIST THAT DOES NOT EXIST YET, which is
+--- why this refreshes twice. The column is built, ordered and filtered by
+--- Refresh; only afterwards is there a position to point at. Cheap, and once
+--- per new drop.
+function Panel.ShowForDrop(encounterID, itemID)
+  Panel.Show()
+
+  -- ⚠️ A KILL SHOWS EVERYTHING THAT DROPPED, NOT JUST WHAT YOU CAN WEAR (Jason,
+  -- Session 263). Usable Only is the right default for BROWSING — it is the
+  -- viewer's own question — and it is the wrong one at the moment a boss dies,
+  -- because the pane ranks the WHOLE RAID for each item and the person reading
+  -- it is deciding who gets what. Filtering to the reader's own armour type
+  -- removes precisely the items being decided, and does it silently: the list
+  -- looks complete. A boss that drops nothing for your class showed an empty
+  -- column under an expanded boss row.
+  --
+  -- IT IS RELAXED, NEVER RE-IMPOSED. The switch is on screen showing ALL LOOT,
+  -- so this is visible state rather than a hidden override, and flipping it
+  -- back holds until the next kill.
+  state.filter = "all"
+
+  -- ⚠️ AND THE LIST IS THE DROPS, ASSERTED RATHER THAN INHERITED. Panel.Show
+  -- picks the opening list from where you are standing, which is right for a
+  -- person opening the panel and wrong here: the rescan ladder runs FOUR
+  -- MINUTES past a kill (Session 243) and a brand-new drop can land after you
+  -- have stepped out of the instance — at which point "where you stand" answers
+  -- Full Loot Table and the panel opens on a catalogue in response to a drop.
+  state.source = "drops"
+
+  local index = ns.BossIndexForEncounter and ns.BossIndexForEncounter(encounterID)
+  if not index then return false end
+  state.bossIndex = index
+  -- The column scroll is an ENTRY index into a list whose length just changed,
+  -- so it is reset with the selection rather than left pointing into the middle
+  -- of the boss that was expanded before.
+  state.sel, state.colScroll = nil, 0
+  Panel.Refresh()
+
+  -- ⚠️ IT CAN STILL FIND NOTHING and must then leave the pane empty rather than
+  -- pointing at a row that is not drawn. Relaxing the filter above means an
+  -- ordinary drop is always on the column, so what is left is the genuine
+  -- absence: a drop the ordering dropped, or an item the boss list cannot place.
+  if itemID then
+    for i, e in ipairs(Panel._entries or {}) do
+      if e.itemID == itemID then state.sel = i; break end
+    end
+    if state.sel then Panel.Refresh() end
+  end
+  return true
 end
 
 function Panel.Toggle()

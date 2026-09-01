@@ -715,7 +715,11 @@ local function upsertDrop(encounterID, info)
     -- BRAND NEW drop only: this function re-enumerates the whole encounter for
     -- four minutes after a kill, and reopening on every pass would fight anyone
     -- who closed it.
-    if ns.Loot and ns.Loot.AutoOpen then ns.Loot.AutoOpen("lootHistoryDrop") end
+    -- The drop's own encounter, so the panel lands on the boss that dropped it
+    -- rather than on a collapsed list of every boss in the season.
+    if ns.Loot and ns.Loot.AutoOpen then
+      ns.Loot.AutoOpen("lootHistoryDrop", e.encounterID, e.itemID)
+    end
   end
 
   -- Refresh anything that was not resolvable on an earlier pass.
@@ -1389,6 +1393,20 @@ function Record.CurrentRun()
     end
   end
   return newest
+end
+
+--- The encounter the recorder is currently filing drops against, or nil.
+---
+--- ⚠️ THIS IS THE DungeonEncounter ID FROM ENCOUNTER_END, not the journal id the
+--- boss strip is keyed by — the two disagree for every raid boss. Anything
+--- comparing it to a tile goes through ns.EncounterIdsFor.
+---
+--- It is nil before the first kill of a session and stays set afterwards, which
+--- is deliberate: the rescan ladder runs four minutes past a kill and the winner
+--- lands later still, so the last boss to die is still the right answer while
+--- its drops are arriving.
+function Record.CurrentEncounterID()
+  return currentEncounterID
 end
 
 function Record.RecentDrops(limit, bossID)
