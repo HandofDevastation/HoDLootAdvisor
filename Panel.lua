@@ -349,6 +349,13 @@ local SL = {
   chipH = 15, chipGap = 6,
 }
 
+-- The separator between two list items, halfway down the space BETWEEN their
+-- blocks rather than at the bottom of the row that owns it. A block is the
+-- icon's own height, so the gap runs blockH..listPitch and this is its middle.
+-- Derived rather than typed: the two numbers it sits between have both moved
+-- twice this session.
+SL.listRuleY = SL.blockH + math.floor((SL.listPitch - SL.blockH) / 2)
+
 -- ── Runner tab — RE-READ FROM NODE 589:1735 (Session 258) ──────────────────
 --
 -- ⚠️ EVERY NUMBER MOVED, for the same reason Standings did: this was built
@@ -2285,7 +2292,13 @@ local function buildSlotListRow(parent, i)
   row.source = buildSourceLine(row, SL.textX, SL.listSourceY, SL.paneW - SL.textX,
     SL.routeLineH)
 
-  row.rule = divider(row, 0, SL.listPitch - 1, SL.paneW)
+  -- ⚠️ CENTRED IN THE GAP, NOT PINNED TO THE ROW'S BOTTOM EDGE (Jason, Session
+  -- 262: "the separator line should be centered equally between the items …
+  -- it's smashed against the lower item"). It sat at pitch-1 = 51, but a row's
+  -- visible block is only the icon's 32 tall and the next block starts at 52 —
+  -- so the rule had 19 above it and 1 below. Derived from the two numbers it
+  -- sits between, so it follows if either moves.
+  row.rule = divider(row, 0, SL.listRuleY, SL.paneW)
 
   row:Hide()
   return row

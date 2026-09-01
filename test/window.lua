@@ -987,6 +987,28 @@ do
           math.abs((iconTop + iconH / 2) - (textTop + textH / 2)) <= 1,
           ("icon %d..%d, text %d..%d"):format(iconTop, iconTop + iconH,
             textTop, textTop + textH))
+
+    -- ⚠️ THE SEPARATOR SITS IN THE GAP, NOT ON THE ROW'S EDGE (Jason, Session
+    -- 262: "smashed against the lower item"). Asserted as EQUAL CLEARANCE above
+    -- and below rather than as the number 42 — the literal would pass with the
+    -- rule anywhere the constants happened to put it, and both constants it
+    -- depends on moved twice in this session alone.
+    local lr2 = panel.slotListRows and panel.slotListRows[2]
+    if lr.rule and lr2 then
+      -- The pitch is read off the ROWS, not from a constant the harness cannot
+      -- see, so this measures the real spacing.
+      local _, _, y1 = pointOf(lr)
+      local _, _, y2 = pointOf(lr2)
+      local pitch = (-y2) - (-y1)
+      local _, _, ry = pointOf(lr.rule)
+      local ruleY = -ry
+      local above = ruleY - (iconTop + iconH)   -- clearance below this block
+      local below = pitch - ruleY               -- clearance above the next one
+      check("...and the separator is centred between the two item blocks",
+            pitch > 0 and math.abs(above - below) <= 1,
+            ("pitch %s, rule at %s: %s above, %s below"):format(
+              pitch, ruleY, above, below))
+    end
   end
 
   -- ── THE RAIL READS LEFT TO RIGHT NOW (Session 262) ────────────────────
