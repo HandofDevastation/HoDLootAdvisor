@@ -30,6 +30,8 @@ local BADGE = {
   moderate  = { label = "Moderate",  color = "C8962E" },
   minor     = { label = "Minor",     color = "a0a0b0" },
   sidegrade = { label = "Sidegrade", color = "888899" },
+  -- Rogue yellow. Never grey — see the note on Style.COLOR.conditional.
+  conditional = { label = "Needs Pairing", color = "FFF468" },
 }
 
 local function badgeText(badge)
@@ -368,6 +370,17 @@ function Loot.RankRaiders(itemID, opts)
       local pieces = r.tier or 0
       if r.me and ns.TierPieceCount then pieces = (ns.TierPieceCount()) or 0 end
 
+      -- Their weapon configuration comes from the EXPORT (`wc`), resolved
+      -- server-side off the gear audit — nothing in game can tell a two-hander
+      -- from a one-hander, since both occupy MAIN_HAND and gear reaches us as
+      -- slot -> item level. YOURS is read live for the same reason your tier
+      -- pieces are: the client can answer it exactly and the snapshot may be a
+      -- day old. Absent = unknown, and the scorer applies no condition.
+      local weaponConfig = r.wc
+      if r.me and ns.MyWeaponConfig then
+        weaponConfig = ns.MyWeaponConfig() or weaponConfig
+      end
+
       local result = ns.Scoring.scoreCandidate(
         {
           equipped_ilvl  = state.ilvl or 0,
@@ -378,6 +391,7 @@ function Loot.RankRaiders(itemID, opts)
           bis            = quality and quality.bis or nil,
           already_owns   = owns,
           owned_ilvl     = ownedIlvl,
+          weapon_config  = weaponConfig,
         },
         { slot = slot, is_tier = rec.tier == true, stats = rec.stats or {} },
         spec, candidateIlvl, candidateTrack
@@ -425,7 +439,15 @@ function Loot.RankRaiders(itemID, opts)
         -- ranking received from the runner carries no equipped state to
         -- subtract from, so every consumer reading this field is what lets a
         -- received row and a locally computed one render through one path.
-        ilvlGain = candidateIlvl - (state.ilvl or 0),
+        --
+        -- ⚠️ NIL FOR A CONDITIONAL, and that is the whole point of the verdict.
+        -- The gap would be measured against the wrong piece — an empty off-hand
+        -- reads 0 and produced "+305 Item Levels · MAJOR" for a raider holding
+        -- a two-hander. The size of the real gain depends on an item nobody can
+        -- see, so there is no honest number to print.
+        ilvlGain = (result.pairing_required == nil)
+          and (candidateIlvl - (state.ilvl or 0)) or nil,
+        pairing = result.pairing_required,
         pr = r.pr, rank = r.rank,
         adhoc = r.adhoc,
         sortGroup = ns.Scoring.getRankedSortGroup(result, slot),
@@ -445,7 +467,21 @@ function Loot.RankRaiders(itemID, opts)
   for _, row in ipairs(rows) do
     if row.eligible and row.result.is_upgrade then ranked[#ranked + 1] = row end
   end
+
+  -- THREE TIERS, in the order a raid leader decides in: people who can equip it
+  -- tonight, then people who could once they acquire the other half of a weapon
+  -- pairing, then nobody. Mirrors sortTier() in app/lib/loot-advisor.ts.
+  --
+  -- ABOVE the ranked-slot grouping, deliberately: a conditional row carries no
+  -- gain figure at all, so letting a grade float one to the top of the list
+  -- would lead the raid with a row that cannot say what it is worth.
+  local function sortTier(row)
+    return row.result.pairing_required and 1 or 0
+  end
+
   table.sort(ranked, function(a, b)
+    local ta, tb = sortTier(a), sortTier(b)
+    if ta ~= tb then return ta < tb end
     if a.sortGroup ~= b.sortGroup then return a.sortGroup < b.sortGroup end
     if a.result.raw_score ~= b.result.raw_score then
       return a.result.raw_score > b.result.raw_score
@@ -458,17 +494,28 @@ function Loot.RankRaiders(itemID, opts)
   -- sorting on tier group first. Check monotonicity and omit the gaps entirely
   -- rather than special-casing the slot — BIS will generalise this failure to
   -- more slots, and a negative gap in front of the raid is worse than none.
+  --
+  -- ⚠️ CONDITIONALS ARE EXCLUDED FROM THE GAP ENTIRELY. Their F1 is zeroed, so
+  -- their scores are not on the same scale as the rows above them, and a gap
+  -- measured across that boundary would read as "this raider is 30 behind"
+  -- when the two numbers were never comparable.
+  local gapEnd = 0
+  for i, row in ipairs(ranked) do
+    if row.result.pairing_required then break end
+    gapEnd = i
+  end
+
   local monotonic = true
-  for i = 2, #ranked do
+  for i = 2, gapEnd do
     if ranked[i].result.raw_score > ranked[i - 1].result.raw_score then
       monotonic = false
       break
     end
   end
-  if monotonic and #ranked > 0 then
+  if monotonic and gapEnd > 0 then
     local top = ranked[1].result.raw_score
-    for i, row in ipairs(ranked) do
-      row.gap = (i == 1) and 0 or (row.result.raw_score - top)
+    for i = 1, gapEnd do
+      ranked[i].gap = (i == 1) and 0 or (ranked[i].result.raw_score - top)
     end
   end
 
@@ -523,7 +570,7 @@ function Loot.RankingFor(itemID, opts)
         display[i] = {
           name = r.name,
           class = r.class,
-          result = { badge = r.badge },
+          result = { badge = r.badge, pairing_required = r.pairing },
           -- Rebuilt from the raw grade/bis rather than a rendered tag, so
           -- ns.QualityTag formats it here exactly as it did on the runner's
           -- screen. Absent quality stays absent — never invented locally,
@@ -531,6 +578,7 @@ function Loot.RankingFor(itemID, opts)
           quality = (r.grade or r.bis) and { grade = r.grade, bis = r.bis } or nil,
           gap = r.gap,
           ilvlGain = r.gain,
+          pairing = r.pairing,
           pr = r.pr,
           adhoc = r.adhoc,
           fromRunner = true,
@@ -610,7 +658,14 @@ function Loot.ReportRanking(itemID, opts)
     elseif row.gap == 0 and i > 1 then
       bits[#bits + 1] = "tie"
     end
-    bits[#bits + 1] = ("+%d ilvl"):format(row.ilvlGain or 0)
+    -- A CONDITIONAL HAS NO GAIN TO POST. "+0 ilvl" beside "Needs Pairing" is a
+    -- number standing in for an answer we do not have; the condition itself is
+    -- what the raid needs to read.
+    if row.ilvlGain then
+      bits[#bits + 1] = ("+%d ilvl"):format(row.ilvlGain)
+    elseif row.pairing then
+      bits[#bits + 1] = (ns.PAIRING_LABEL[row.pairing] or "needs a weapon pairing"):lower()
+    end
     if row.pr then
       bits[#bits + 1] = ("PR %.2f"):format(row.pr)
     else

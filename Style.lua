@@ -223,6 +223,12 @@ Style.COLOR = {
   -- Rust. Aliased to darkOrange above rather than a second literal: one Figma
   -- variable, and two literals is one of them going stale.
   minor     = hex("bb3f22"),
+  -- Rogue yellow (Jason, Session 264) for the CONDITIONAL verdict — an item
+  -- that is an upgrade only once the raider acquires the other half of a weapon
+  -- pairing. Deliberately NOT `grey`: grey is the "worth nothing" colour, and a
+  -- conditional is a live upgrade path wearing a condition. Colouring it grey is
+  -- exactly what would make a Myth weapon read as a rejection.
+  conditional = hex("FFF468"),
   -- ⚠️ BIS AND THE TARGET SWAPPED ENDS (Session 261). Session 249 settled that
   -- these two must never share a hue and that BIS holds the gold-ish one. The
   -- first half still holds and is what matters; the second is now FALSE — BIS
@@ -316,6 +322,9 @@ Style.BADGE = {
   moderate  = { label = "Moderate",  color = "moderate" },
   minor     = { label = "Minor",     color = "minor" },
   sidegrade = { label = "Sidegrade", color = "grey" },
+  -- NOT A MAGNITUDE — a different KIND of answer, and it never carries a gain
+  -- figure. See ns.PAIRING_LABEL for the line that says which half is missing.
+  conditional = { label = "Needs Pairing", color = "conditional" },
 }
 
 --- The label and colour for a badge key. Falls back to Sidegrade's greyed

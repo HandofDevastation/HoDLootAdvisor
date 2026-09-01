@@ -479,6 +479,144 @@ if ranked then
   check("priority is carried alongside the upgrade", withPr > 0, withPr)
 end
 
+-- ── Weapon configuration ────────────────────────────────────────────────────
+--
+-- THE END-TO-END PROOF, and it is the one the parity harness cannot give: that
+-- the site's `wc` survives the payload, reaches the scorer, and changes what a
+-- row says. The fixture roster carries all three states on purpose (see
+-- scripts/loot-addon-contract/make-payload.ts): raider 1 is on a two-hander with
+-- NO off-hand, raider 7 has no gear at all so their config is UNKNOWN, and
+-- everybody else is on a one-hander plus an off-hand.
+--
+-- WHAT WENT WRONG WITHOUT IT: an off-hand dropped, the two-handed raider's
+-- off-hand slot read ilvl 0, and the panel ranked them the sole gainer at
+-- "+305 Item Levels · MAJOR". The website skipped them instead — for the wrong
+-- reason, on a proxy that also swallowed anyone with no gear audit — so the two
+-- surfaces disagreed in front of the raid.
+
+header("Weapon configuration — the pairing a two-hander cannot make")
+
+;(function()
+  local roster = ns.Payload.EffectiveRoster()
+  local twoHanded, twoHandedClass, unknown = nil, nil, nil
+  for _, r in ipairs(roster) do
+    if r.wc == "two_hand" and not twoHanded then
+      twoHanded, twoHandedClass = r.n, r.c
+    elseif r.wc == nil and not r.me and not unknown then
+      unknown = r.n
+    end
+  end
+  local oneHanded = nil
+  for _, r in ipairs(roster) do
+    if r.wc == "one_hand" then oneHanded = r.n break end
+  end
+
+  -- ⚠️ THE ITEMS ARE PICKED FOR THE TWO-HANDED RAIDER'S CLASS, not the player's.
+  -- Picking the first item of a slot gave a weapon that raider cannot use, so
+  -- the row came back ineligible and three checks SKIPPED IN SILENCE while the
+  -- section still printed green. Eligibility is emitted per item as `classes`.
+  local function usableBy(it, className)
+    return type(it.classes) ~= "table" or it.classes[className] == true
+  end
+  local offHandId = twoHandedClass and findItem(function(_, it)
+    return it.slot == "OFF_HAND" and usableBy(it, twoHandedClass)
+  end)
+  local oneHandId = twoHandedClass and findItem(function(_, it)
+    return (it.slot == "ONE_HAND" or it.slot == "MAIN_HAND")
+       and usableBy(it, twoHandedClass)
+  end)
+
+  check("the season's loot table carries both halves of a pairing",
+        offHandId ~= nil and oneHandId ~= nil,
+        "without an OFF_HAND and a ONE_HAND item this whole section proves nothing")
+  check("the payload carries a weapon configuration per raider", twoHanded ~= nil,
+        "resolved server-side from the main hand's INVENTORY TYPE — nothing in "
+        .. "Lua can tell a two-hander from a one-hander, both occupy MAIN_HAND")
+  check("...and a raider with no gear audit carries NONE, not a guess", unknown ~= nil,
+        "unknown must stay distinct from 'two-handed'; the old proxy conflated them")
+  check("...while an ordinary raider reads as one-handed", oneHanded ~= nil)
+
+  if offHandId and twoHanded then
+    local _, all = ns.Loot.RankRaiders(offHandId, { difficulty = "h" })
+    local row
+    for _, r in ipairs(all or {}) do if r.name == twoHanded then row = r end end
+
+    if row and row.eligible then
+      check("an OFF-HAND is CONDITIONAL for a raider on a two-hander",
+            row.result.pairing_required == "main_hand",
+            tostring(row.result.pairing_required))
+      check("...badged as a condition, never as a magnitude",
+            row.result.badge == "conditional", tostring(row.result.badge))
+      -- THE ACTUAL BUG. Not "the number is smaller" — there must be NO number.
+      check("...and it carries NO item-level gain at all",
+            row.ilvlGain == nil, tostring(row.ilvlGain))
+      check("...nor an item-level score component",
+            row.result.ilvl_delta == 0, tostring(row.result.ilvl_delta))
+      check("...but is still SHOWN, never silently dropped",
+            row.result.is_upgrade == true,
+            "a missing row is invisible; an honest one is not")
+    else
+      check("the two-handed raider is eligible for the off-hand fixture",
+            false, "fixture cannot exercise the rule")
+    end
+
+    -- Everyone on a one-hander is unaffected: they gain normally. Found by
+    -- WEAPON CONFIG rather than by a remembered name, so a fixture reshuffle
+    -- cannot quietly retire the check.
+    local plain
+    for _, r in ipairs(all or {}) do
+      if r.eligible and r.name ~= twoHanded then
+        for _, m in ipairs(roster) do
+          if m.n == r.name and m.wc == "one_hand" then plain = plain or r end
+        end
+      end
+    end
+    check("a raider on a one-hander scores the off-hand normally",
+          plain ~= nil and plain.result.pairing_required == nil
+            and plain.ilvlGain ~= nil,
+          plain and tostring(plain.result.pairing_required)
+            or "no eligible one-handed raider in the fixture")
+  end
+
+  if oneHandId and twoHanded then
+    local _, all = ns.Loot.RankRaiders(oneHandId, { difficulty = "h" })
+    local row
+    for _, r in ipairs(all or {}) do if r.name == twoHanded then row = r end end
+    check("a ONE-HANDER is CONDITIONAL for a raider on a two-hander",
+          row ~= nil and row.eligible and row.result.pairing_required == "off_hand",
+          row and row.eligible and tostring(row.result.pairing_required)
+            or "the fixture has no one-hander this raider can use")
+    check("...and carries no gain figure either",
+          row ~= nil and row.eligible and row.ilvlGain == nil)
+  end
+
+  -- ORDERING: conditionals sit below everyone who gains tonight.
+  if offHandId then
+    local ranked = ns.Loot.RankRaiders(offHandId, { difficulty = "h" })
+    local seenConditional = false
+    local outOfOrder = false
+    for _, r in ipairs(ranked or {}) do
+      if r.result.pairing_required then
+        seenConditional = true
+      elseif seenConditional then
+        outOfOrder = true
+      end
+    end
+    if seenConditional then
+      check("conditionals rank BELOW everyone who gains tonight", not outOfOrder,
+            "someone who can equip it now outranks someone who must acquire "
+            .. "the other half first")
+      check("...and are excluded from the gap, whose scale they are not on",
+            (function()
+              for _, r in ipairs(ranked or {}) do
+                if r.result.pairing_required and r.gap ~= nil then return false end
+              end
+              return true
+            end)())
+    end
+  end
+end)()
+
 -- A trinket ranks by TIER GROUP first, which is exactly the case where row
 -- order stops matching score order — so the gaps must be withheld.
 local trinketRanked = ns.Loot.RankRaiders(trinketId, { difficulty = "h" })

@@ -1328,6 +1328,28 @@ local function buildRankRow(parent, i)
     row.hl:Show()
     if not r then return end
     ns.Tip:SetOwner(self, "ANCHOR_CURSOR")
+
+    -- A CONDITIONAL EXPLAINS THE CONDITION, NOT AN ARITHMETIC IT DOES NOT HAVE.
+    -- Its item-level factor is deliberately zero and there is no gain figure at
+    -- all, so a breakdown here would show a row of numbers that answer a
+    -- question the verdict has already declined to answer.
+    if r.pairing then
+      ns.Tip:AddLine("Why this needs a pairing", 1, 1, 1)
+      ns.Tip:AddLine(
+        r.pairing == "main_hand"
+          and "They are using a two-handed weapon, so their off-hand slot is "
+              .. "empty. This is a real upgrade only if they also get a "
+              .. "one-hander — and we cannot see anyone's bags, so there is no "
+              .. "honest gain to show."
+          or  "They are using a two-handed weapon. Equipping this leaves their "
+              .. "off-hand empty, so it is a real upgrade only if they also get "
+              .. "an off-hand — and we cannot see anyone's bags, so there is no "
+              .. "honest gain to show.",
+        0.6, 0.6, 0.7, true)
+      ns.Tip:Show()
+      return
+    end
+
     ns.Tip:AddLine("How this score was reached", 1, 1, 1)
 
     if not r.factors then
@@ -4016,8 +4038,19 @@ local function renderRanking(itemID)
     row:AnchorScoreHit()
 
     -- One field on both paths (Loot.RankRaiders sets it, the wire carries it).
-    local gain = r.ilvlGain or 0
-    row.gain:SetText(gain > 0 and ("+%d"):format(gain) or "")
+    --
+    -- ⚠️ NIL, NOT ZERO, FOR A CONDITIONAL — the row is telling the reader that
+    -- no honest gain exists, so the cell carries the CONDITION instead of a
+    -- number. Reading it as 0 would blank the cell and lose the whole verdict.
+    local gain = r.ilvlGain
+    if r.result and r.result.pairing_required then
+      row.gain:SetText(r.result.pairing_required == "main_hand" and "+1H" or "+OH")
+      row.gain:SetTextColor(Style.rgb(Style.COLOR.conditional))
+    else
+      gain = gain or 0
+      row.gain:SetText(gain > 0 and ("+%d"):format(gain) or "")
+      row.gain:SetTextColor(unpack(WHITE))
+    end
 
     -- What the UPGRADE cell's tooltip explains. The FACTORS are present only on
     -- a LOCALLY scored row — a ranking received from the runner carries the
@@ -4025,6 +4058,7 @@ local function renderRanking(itemID)
     -- than rendering an empty breakdown.
     row.scoreInfo = {
       gain    = gain,
+      pairing = r.result and r.result.pairing_required or nil,
       factors = r.result,
       score   = r.result and r.result.raw_score or nil,
       gap     = (idx > 1) and r.gap or nil,

@@ -729,12 +729,21 @@ function Comms.EncodeDrops(itemID, rows, meta)
       escapeField(row.name or "?"),
       escapeField((row.result and row.result.badge) or ""),
       tostring(row.gap or ""),
-      tostring(candidateIlvl - ((row.equipped and row.equipped.ilvl) or 0)),
+      -- ⚠️ THE ROW'S OWN GAIN, NOT A RECOMPUTATION. This subtracted the equipped
+      -- item level inline, which quietly reinstated the very number the
+      -- conditional verdict exists to withhold: a raider on a two-hander has an
+      -- EMPTY off-hand, so the arithmetic here produced the full candidate item
+      -- level as a "gain" even after the scorer had refused to. One field, one
+      -- author — Loot.RankRaiders.
+      tostring(row.ilvlGain or ""),
       tostring(row.pr or ""),
       escapeField(row.class or ""),
       escapeField((q and q.grade) or ""),
       escapeField((q and q.bis) or ""),
       row.adhoc and "1" or "",
+      -- APPENDED, per the field rule above: an older decoder reads nine fields
+      -- and ignores this, a newer one reading an older record gets nil.
+      escapeField(row.pairing or ""),
     }, ",")
   end
   return table.concat(parts, ";")
@@ -773,6 +782,10 @@ function Comms.DecodeDrops(body)
       -- Carried so a received list still answers "who is that" about an alt,
       -- a trial or a pug. The panel marks them with an asterisk.
       adhoc = fields[9] == "1",
+      -- Which half of a weapon pairing they would still need. Absent from a
+      -- pre-Session-264 runner, which reads as no condition — the same answer
+      -- that build itself would have shown.
+      pairing = (fields[10] ~= "" and fields[10]) or nil,
     }
   end
   return itemID, rows, { usable = tonumber(header[2]), total = tonumber(header[3]) }

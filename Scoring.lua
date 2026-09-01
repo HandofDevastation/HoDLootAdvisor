@@ -227,7 +227,11 @@ M.GRADE_BUCKET = { s = 1, a = 2, b = 3, c = 3, d = 3, f = 3, defensive = 3 }
 --- The badge a grade may not exceed, however large the gear gap.
 M.GRADE_BADGE_CEILING = { c = "moderate", d = "minor", f = "sidegrade" }
 
-local BADGE_ORDER = { sidegrade = 1, minor = 2, moderate = 3, major = 4 }
+-- 'conditional' sits BELOW every magnitude: a raider who can equip the item
+-- tonight, even for a negligible gain, outranks one who must acquire something
+-- else first. capBadge can never PRODUCE it — the pairing branch sets it
+-- directly, after the arithmetic.
+local BADGE_ORDER = { conditional = 1, sidegrade = 2, minor = 3, moderate = 4, major = 5 }
 
 --- Clamp a badge down to a ceiling. Never raises it.
 function M.capBadge(badge, ceiling)
@@ -258,6 +262,37 @@ function M.scoreRankedOverride(grade)
   return score, bucket
 end
 
+-- ─── Weapon configuration ───────────────────────────────────────────────────
+--
+-- Mirrors resolvePairingRequired() in app/lib/loot-advisor.ts.
+--
+-- `weapon_config` is READ FROM THE PAYLOAD (`wc`), never derived here. The
+-- addon CANNOT derive it: gear reaches it as slot -> item level and a
+-- two-hander occupies MAIN_HAND exactly as a one-hander does, so there is
+-- nothing in Lua that could tell them apart. The site resolves it from the main
+-- hand's inventory type and ships the answer — the same rule that put `classes`
+-- and `primaryStat` in the payload rather than porting eligibility.
+--
+-- Both directions of one condition:
+--   · on a two-hander, an OFF-HAND drops   -> they need a one-hander
+--   · on a two-hander, a ONE-HANDER drops  -> they need an off-hand
+-- Each is a real upgrade IF the other half is obtained and worthless if not,
+-- and nobody can see anyone's bags — so no gain figure can be honest.
+--
+-- ⚠️ THE REVERSE IS NOT A CONDITION. A raider on a one-hander plus an off-hand
+-- receiving a TWO-HANDER can equip it today, and the main-hand comparison is
+-- arithmetically correct: measured off our own loot table, a two-hander carries
+-- exactly the combined stat budget of a one-hander plus an off-hand at the same
+-- item level. Do not "fix" that direction.
+local ONE_HANDED_SLOTS = { ONE_HAND = true, MAIN_HAND = true }
+
+function M.resolvePairingRequired(weaponConfig, slot)
+  if weaponConfig ~= "two_hand" then return nil end
+  if slot == "OFF_HAND" then return "main_hand" end
+  if ONE_HANDED_SLOTS[slot] then return "off_hand" end
+  return nil
+end
+
 -- ─── Main ───────────────────────────────────────────────────────────────────
 --
 -- candidate = {
@@ -265,6 +300,7 @@ end
 --   ranked_tier,            -- "s"|"a"|"b" or nil
 --   already_owns, owned_ilvl,
 --   class_name, spec_name, hero_tree,
+--   weapon_config,          -- "two_hand"|"one_hand"|"ranged" or nil (unknown)
 -- }
 -- item = { slot, is_tier, stats }
 --
@@ -283,6 +319,7 @@ function M.scoreCandidate(candidate, item, spec, candidateIlvl, candidateTrack)
       is_ranked_override = false, ranked_tier = nil,
       already_owns = alreadyOwns,
       is_upgrade = false,
+      pairing_required = nil,
     }
   end
 
@@ -294,6 +331,17 @@ function M.scoreCandidate(candidate, item, spec, candidateIlvl, candidateTrack)
       return blank(true)
     end
   end
+
+  -- ── Weapon configuration ──────────────────────────────────────────────────
+  --
+  -- Resolved BEFORE the downgrade guard below, because that guard compares the
+  -- candidate against the wrong thing entirely for a conditional. A one-hander
+  -- does not replace the two-hander it is compared against — it replaces it
+  -- TOGETHER WITH an off-hand that does not exist yet, so an equal or lower
+  -- item level says nothing. A crafted 331 two-hander and a Myth 331 one-hander
+  -- are level for level, and the guard would call that "not an upgrade" when
+  -- the track alone makes it worth chasing.
+  local pairingRequired = M.resolvePairingRequired(candidate.weapon_config, item.slot)
 
   -- Downgrade guard. TOKENS compare by TRACK, not raw ilvl: a raider already on
   -- the same or higher track gets nothing from the token regardless of their
@@ -309,7 +357,13 @@ function M.scoreCandidate(candidate, item, spec, candidateIlvl, candidateTrack)
   local isRankedNotOwned = isRankedSlot and hasTier and not candidate.already_owns
 
   local isUpgrade
-  if isToken then
+  if pairingRequired then
+    -- A CONDITIONAL IS JUDGED ON EITHER AXIS. Item level alone cannot decide it
+    -- (see above), and track alone would admit a Myth one-hander 60 levels
+    -- below the two-hander it would replace. Requiring one of the two rejects a
+    -- strictly-worse weapon while keeping every plausible pairing.
+    isUpgrade = isIlvlUpgrade or isTrackUpgrade
+  elseif isToken then
     isUpgrade = (candidate.equipped_ilvl == 0) or isTrackUpgrade
   else
     isUpgrade = isIlvlUpgrade or isRankedNotOwned
@@ -319,11 +373,21 @@ function M.scoreCandidate(candidate, item, spec, candidateIlvl, candidateTrack)
     return blank(candidate.already_owns == true)
   end
 
-  local f1 = M.scoreIlvlDelta(candidateIlvl, candidate.equipped_ilvl)
-  -- HALVING STAYS TRINKET-ONLY, deliberately: it exists because a trinket's
-  -- EFFECT dominates its item level, which is a fact about trinkets and not
-  -- about ranked items generally. A BIS chest keeps its full ilvl delta.
-  if isRankedSlot and hasTier then f1 = round(f1 / 2) end
+  -- A CONDITIONAL SCORES NO ITEM-LEVEL DELTA AT ALL. F1 measures the gap against
+  -- the piece being replaced, and for a conditional we do not know what that
+  -- will be — the off-hand slot reads 0 because it is EMPTY, not because the
+  -- raider is wearing nothing there by choice, and a one-hander's real
+  -- comparison includes an item they have yet to acquire. The remaining factors
+  -- describe the ITEM rather than the trade, so they stand, and they are what
+  -- orders the conditional group among itself.
+  local f1 = 0
+  if not pairingRequired then
+    f1 = M.scoreIlvlDelta(candidateIlvl, candidate.equipped_ilvl)
+    -- HALVING STAYS TRINKET-ONLY, deliberately: it exists because a trinket's
+    -- EFFECT dominates its item level, which is a fact about trinkets and not
+    -- about ranked items generally. A BIS chest keeps its full ilvl delta.
+    if isRankedSlot and hasTier then f1 = round(f1 / 2) end
+  end
 
   local f2 = M.scoreTrackGap(candidateTrack, candidate.equipped_track)
   local f4 = M.scoreTierCompletion(item.is_tier, candidate.piece_count)
@@ -342,16 +406,29 @@ function M.scoreCandidate(candidate, item, spec, candidateIlvl, candidateTrack)
 
   local raw = f1 + f2 + f3 + f4 + f5
 
-  return {
-    raw_score = raw,
+  local badge
+  if pairingRequired then
+    -- A CONDITIONAL OVERRIDES BOTH THRESHOLD AND CEILING, last, so neither can
+    -- dress it up as a magnitude it is not making a claim about.
+    badge = "conditional"
+  else
     -- Ceiling applied AFTER the arithmetic: the score still reflects the real
     -- gear gap while the badge refuses to overstate a poor item.
-    badge = M.capBadge(M.scoreToBadge(raw), ceiling),
+    badge = M.capBadge(M.scoreToBadge(raw), ceiling)
+  end
+
+  return {
+    raw_score = raw,
+    badge = badge,
     ilvl_delta = f1, track_gap = f2, stat_alignment = f3,
     tier_bonus = f4, declared_need = f5,
     is_ranked_override = isOverride, ranked_tier = tierIndex,
     already_owns = candidate.already_owns == true,
+    -- TRUE, deliberately. It IS an upgrade — just not one they can take
+    -- tonight. Marking it false would drop it into the "not an upgrade" bucket
+    -- and make a genuine chase read as a rejection.
     is_upgrade = true,
+    pairing_required = pairingRequired,
   }
 end
 

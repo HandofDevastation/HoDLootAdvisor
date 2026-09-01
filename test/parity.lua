@@ -63,6 +63,10 @@ end
 local FIELDS = {
   "raw_score", "badge", "ilvl_delta", "track_gap", "stat_alignment",
   "tier_bonus", "declared_need", "is_ranked_override", "ranked_tier", "is_upgrade",
+  -- nil across the whole matrix by construction: no weapon slots, no weapon
+  -- config. It is compared ANYWAY, because that pins the DEFAULT — a
+  -- conditional leaking into ordinary scoring fails every case rather than none.
+  "pairing_required",
 }
 
 local function describe(inp)
@@ -94,6 +98,7 @@ for _, case in ipairs(fixtures) do
     bis            = inp.bis,
     already_owns   = inp.already_owns,
     owned_ilvl     = inp.owned_ilvl,
+    weapon_config  = inp.weapon_config,
   }
   local item = { slot = inp.slot, is_tier = inp.is_tier, stats = inp.stats }
 
@@ -210,10 +215,113 @@ if not sampled then
     for _, i in ipairs(picked) do
       out:write("  ", serialize(fixtures[i]), ",\n")
     end
+    -- ⚠️ THE WEAPON BLOCK GOES IN WHOLE, NOT SAMPLED. It is 280 cases against
+    -- the matrix's 276,480, so it costs nothing to carry entire — and it is a
+    -- RULE rather than a numeric spread, so a stride through it could drop the
+    -- only case that exercises one branch. The 5.1 run must see all of it: this
+    -- is the block that proves the conditional verdict, and the 5.1 run is the
+    -- one that matches the interpreter the game actually uses.
+    out:write("  weapons = {\n")
+    for _, c in ipairs(fixtures.weapons or {}) do
+      out:write("    ", serialize(c), ",\n")
+    end
+    out:write("  },\n")
     out:write("}\n")
     out:close()
-    print(string.format("wrote %s — %d of %d cases, for the 5.1 run", SAMPLE_PATH, #picked, total))
+    print(string.format("wrote %s — %d of %d cases plus %d weapon cases, for the 5.1 run",
+      SAMPLE_PATH, #picked, total, #(fixtures.weapons or {})))
   end
+end
+
+-- ── WEAPON CONFIGURATION ────────────────────────────────────────────────────
+--
+-- Its own fixture block, on a named key, so the array matrix above is untouched.
+-- These are the cases the whole verdict exists for: an OFF-HAND scored against
+-- an EMPTY off-hand slot (which is what produced "+305 Item Levels · MAJOR" for
+-- a raider holding a two-handed staff), and a ONE-HANDER scored against the
+-- two-hander it does not actually replace on its own.
+--
+-- ⚠️ THE BLOCK IS REQUIRED WHEN THE FIXTURE IS PRESENT. A missing `weapons` key
+-- means a fixture generated before this rule existed, and it FAILS rather than
+-- skipping — the fixture and the port are versioned together, and a silent pass
+-- here would report parity over a rule neither side had exercised.
+local wTotal, wFailed = 0, 0
+local wFailures = {}
+
+if type(fixtures.weapons) ~= "table" then
+  io.stderr:write("\nFIXTURE TOO OLD: no `weapons` block.\n")
+  io.stderr:write("Regenerate it:\n")
+  io.stderr:write("  curl -s localhost:3000/api/loot-advisor/parity-fixtures -o test/fixtures.lua\n")
+  os.exit(2)
+end
+
+local W_FIELDS = {
+  "raw_score", "badge", "ilvl_delta", "track_gap", "stat_alignment",
+  "is_upgrade", "pairing_required",
+}
+
+for _, c in ipairs(fixtures.weapons) do
+  wTotal = wTotal + 1
+
+  local got = Scoring.scoreCandidate(
+    {
+      equipped_ilvl  = c.equipped_ilvl,
+      equipped_track = c.equipped_track,
+      piece_count    = 0,
+      declared_need  = false,
+      ranked_tier    = nil,
+      bis            = c.bis,
+      already_owns   = false,
+      owned_ilvl     = nil,
+      weapon_config  = c.weapon_config,
+    },
+    { slot = c.slot, is_tier = false, stats = { Haste = 100 } },
+    -- READ FROM THE FIXTURE, never re-declared here. A spec written out on both
+    -- sides is two things to drift, and it drifted immediately: this harness
+    -- asserted a real ranking while the oracle had scored against the NULL
+    -- spec, and 59 cases failed over the test's own assumption.
+    c.spec,
+    c.candidate_ilvl, c.candidate_track
+  )
+
+  local bad = {}
+  for _, f in ipairs(W_FIELDS) do
+    if got[f] ~= c[f] then
+      bad[#bad + 1] = string.format("%s: lua=%s ts=%s", f, tostring(got[f]), tostring(c[f]))
+      byField[f] = (byField[f] or 0) + 1
+    end
+  end
+
+  if #bad > 0 then
+    wFailed = wFailed + 1
+    if #wFailures < 10 then
+      wFailures[#wFailures + 1] = string.format(
+        "wc=%s slot=%s eq=%d/%s bis=%s\n      %s",
+        tostring(c.weapon_config), c.slot, c.equipped_ilvl, c.equipped_track,
+        tostring(c.bis), table.concat(bad, "\n      "))
+    end
+  end
+end
+
+-- NOT VACUOUS. An empty block, or one where the rule never fires, would pass
+-- while proving nothing — so assert that conditionals were actually produced.
+local wConditional = 0
+for _, c in ipairs(fixtures.weapons) do
+  if c.pairing_required then wConditional = wConditional + 1 end
+end
+if wTotal == 0 or wConditional == 0 then
+  io.stderr:write(string.format(
+    "\nWEAPON BLOCK PROVES NOTHING: %d cases, %d conditional.\n", wTotal, wConditional))
+  os.exit(1)
+end
+
+print(string.format("weapons: %d cases, %d matched, %d differed  (%d conditional)",
+  wTotal, wTotal - wFailed, wFailed, wConditional))
+
+if wFailed > 0 then
+  print("\nfirst " .. #wFailures .. " failing weapon cases:")
+  for i, t in ipairs(wFailures) do print("  " .. i .. ". " .. t) end
+  failed = failed + wFailed
 end
 
 print(string.format("parity: %d cases, %d matched, %d differed%s",

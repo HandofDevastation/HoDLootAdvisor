@@ -1188,6 +1188,11 @@ local ITEM_BAND = {
   moderate     = 21,
   minor        = 22,
   sidegrade    = 23,
+  -- Below every magnitude, above "not an upgrade": a raider who can equip it
+  -- tonight for a negligible gain still outranks one who must acquire something
+  -- else first, but a conditional IS a real upgrade path and must not sit with
+  -- the items that are not.
+  conditional  = 25,
   notAnUpgrade = 30,
   notForYou    = 40,
 }
@@ -1203,6 +1208,14 @@ local BADGE_BAND = {
   moderate  = ITEM_BAND.moderate,
   minor     = ITEM_BAND.minor,
   sidegrade = ITEM_BAND.sidegrade,
+  conditional = ITEM_BAND.conditional,
+}
+
+--- What the raider must acquire before a conditional item is equippable.
+--- Mirrors PAIRING_LABELS in app/lib/loot-advisor.ts.
+ns.PAIRING_LABEL = {
+  off_hand  = "Upgrade if paired with an off-hand",
+  main_hand = "Upgrade if paired with a one-hander",
 }
 
 --- Which rung of the ladder one scored item sits on.
@@ -2025,6 +2038,37 @@ function ns.EquippedSlotState(lootSlot)
   local parsed = ns.ParseItemLink(worstLink)
   local track = ns.ResolveTrack(worstIlvl, parsed and parsed.bonusIDs)
   return { ilvl = worstIlvl, track = track, link = worstLink, empty = false }
+end
+
+--- YOUR OWN weapon configuration, read live from your own main hand.
+---
+--- Everyone ELSE's answer arrives in the payload (`wc`), resolved server-side
+--- from the gear audit — the addon cannot derive it for them, because inspected
+--- gear reaches it as slot -> item level and a two-hander occupies MAIN_HAND
+--- exactly as a one-hander does. YOURS the client can answer exactly, right
+--- now, which is the same reasoning that makes ns.TierPieceCount authoritative
+--- for you and the snapshot authoritative for everyone else (Session 256,
+--- "YOUR OWN GEAR IS ASKED FOR, NEVER REMEMBERED").
+---
+--- This is NOT porting eligibility: it reads ONE static field off ONE item and
+--- branches on nothing about classes, specs or armor types.
+---
+--- Returns nil when nothing is equipped in the main hand or the client cannot
+--- answer — UNKNOWN, which the scorer treats as "no condition applies" rather
+--- than guessing either way.
+function ns.MyWeaponConfig()
+  local link = GetInventoryItemLink("player", INVSLOT_MAINHAND)
+  if not link then return nil end
+  local fn = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+  if not fn then return nil end
+  local ok, _, _, _, invType = pcall(fn, link)
+  if not ok or type(invType) ~= "string" then return nil end
+  if invType == "INVTYPE_2HWEAPON" then return "two_hand" end
+  if invType == "INVTYPE_RANGED" or invType == "INVTYPE_RANGEDRIGHT"
+     or invType == "INVTYPE_THROWN" then
+    return "ranged"
+  end
+  return "one_hand"
 end
 
 --- Does the player already have this exact item equipped in the given slot, and
