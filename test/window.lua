@@ -184,7 +184,7 @@ end
 function real.IsShown(self) return self._shown end
 function real.IsVisible(self) return self._shown end
 
-function real.SetWidth(self, w) self._width = w end
+function real.SetWidth(self, w) self._width = w; self._widthSet = true end
 -- ⚠️ RECORDS THAT IT WAS CALLED, NOT JUST THE VALUE (Session 259). Widgets
 -- default to _height = 20, which happens to equal the ranking row's pitch — so a
 -- check reading GetHeight() == 20 passed whether the addon set a height or not,
@@ -198,7 +198,7 @@ function real.SetJustifyV(self, v) self._justifyV = v end
 -- where a thing sat but not what colour it was or which way it read.
 function real.SetJustifyH(self, h) self._justifyH = h end
 function real.SetVertexColor(self, r, g, b, a) self._vertex = { r, g, b, a or 1 } end
-function real.SetSize(self, w, h) self._width, self._height = w, h end
+function real.SetSize(self, w, h) self._width, self._height = w, h; self._widthSet, self._heightSet = true, true end
 function real.GetWidth(self) return self._width end
 function real.GetHeight(self) return self._height end
 
@@ -1307,6 +1307,33 @@ do
   check("the Loot header's name line box is the node's 14",
         panel.itemName:GetHeight() == 14, panel.itemName:GetHeight())
   check("...and its second line 14 too", panel.itemSub:GetHeight() == 14, panel.itemSub:GetHeight())
+
+  -- ── THE FACTS LINE STAYS INSIDE THE DETAIL PANE (Session 262) ───────────
+  --
+  -- ⚠️ THIS IS A REGRESSION GUARD FOR A BUG I SHIPPED EARLIER THE SAME DAY.
+  -- Making the line right-aligned, I gave both runs a fixed 380 width and hung
+  -- the plain half off the tag run's TOPLEFT. But a fontstring's TOPLEFT is the
+  -- edge of its DECLARED RECT, not of the string it drew — so the plain run was
+  -- pinned to a constant x and grew LEFT from there, across the boss column and
+  -- through the item card names. buildSourceLine's own comment already said why
+  -- ("no explicit width on any run … is what makes the RIGHT-edge anchoring
+  -- exact") and I anchored against a rect anyway.
+  do
+    local ft, f = panel.factTags, panel.facts
+    check("neither facts run declares a width",
+          ft and f and not ft._widthSet and not f._widthSet,
+          ("tags=%s plain=%s"):format(tostring(ft and ft._widthSet),
+            tostring(f and f._widthSet)))
+    -- Computed from the anchor chain and the real string widths: the pair hangs
+    -- right-to-left off 760, so its leftmost point is 760 less both strings.
+    if ft and f then
+      local right = 760
+      local left  = right - (ft:GetStringWidth() or 0) - (f:GetStringWidth() or 0)
+      -- 340 is the rules' own left edge; the boss column ends at 315.
+      check("...so the whole line sits inside the rules it lives between",
+            left >= 340, ("line runs %d..%d, rules start at 340"):format(left, right))
+    end
+  end
 end
 
 

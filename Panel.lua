@@ -2708,15 +2708,25 @@ local function buildDetailPane()
   -- LEFTWARD: the tag run is pinned to that edge and the plain run hangs off its
   -- left. Anchored once here rather than at fill time, so the three fill sites
   -- that write only one half cannot leave the other pointing at a stale x.
+  -- ⚠️ NO DECLARED WIDTH ON EITHER RUN, and this is load-bearing rather than
+  -- tidy — buildSourceLine's own comment says the same thing for the same
+  -- reason. A fontstring's TOPLEFT is the edge of its DECLARED RECT, not of the
+  -- string it drew. Giving both runs a fixed 380 and hanging the plain half off
+  -- the tags' TOPLEFT therefore pinned it to a constant x=380 whatever the tags
+  -- said, and a right-aligned run ending there grows LEFT — straight across the
+  -- boss column and through the item card names (Jason, Session 262: the line
+  -- is "way over to the left, and is colliding with the item list name").
+  --
+  -- With no width each rect hugs its own string, so the pair chains right to
+  -- left from the rules' right edge and cannot reach past its own text.
   local FACTS_BAND = DIV2_Y - DIV1_Y
-  local FACTS_W = DIV_W - DET.factsInset * 2
   frame.factTags = text(frame, "bold", "label", "body", "RIGHT")
   frame.factTags:SetPoint("TOPRIGHT", frame, "TOPLEFT", DET.factsR, -DIV1_Y)
-  frame.factTags:SetSize(FACTS_W, FACTS_BAND)
+  frame.factTags:SetHeight(FACTS_BAND)
   frame.factTags:SetJustifyV("MIDDLE")
   frame.facts = text(frame, "light", "label", "white", "RIGHT")
   frame.facts:SetPoint("TOPRIGHT", frame.factTags, "TOPLEFT", 0, 0)
-  frame.facts:SetSize(FACTS_W, FACTS_BAND)
+  frame.facts:SetHeight(FACTS_BAND)
   frame.facts:SetJustifyV("MIDDLE")
   frame.div2 = divider(frame, DIV_X, DIV2_Y, DIV_W)
 
