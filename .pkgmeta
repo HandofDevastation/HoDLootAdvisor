@@ -1,6 +1,28 @@
-# BigWigs packager config. GitHub Releases ONLY — no CurseForge, no Wago. WoWUp
-# installs and auto-updates from those releases via the repo URL, which is the
-# same model all the guild's other addons use.
+# BigWigs packager config.
+#
+# ⚠️ THIS FILE USED TO SAY "GitHub Releases ONLY — no CurseForge, no Wago", and
+# that has been FALSE since Session 250 (corrected Session 262). Every tagged
+# release publishes to BOTH GitHub and CurseForge project 1671489 — the run log
+# for v2026.08.31 reads "Uploading HoDLootAdvisor-v2026.08.31.zip... Success!".
+#
+# WHERE THE SWITCH ACTUALLY IS: publishing is enabled by the CF_API_TOKEN
+# environment variable in release.yml, NOT by anything in this file. That is
+# what made the stale line so easy to believe — nothing here contradicts it,
+# and a reader looking for the CurseForge wiring would not find it here.
+#
+# WHY CURSEFORGE AT ALL: WoWUp can INSTALL a GitHub-sourced addon but cannot
+# UPDATE one, which is the whole reason for the move. Anyone still on a GitHub
+# install has to uninstall and reinstall once from CurseForge.
+
+# ⚠️ THE CHANGELOG IS CURATED, NOT GENERATED — AND THIS IS NOT COSMETIC.
+# Without manual-changelog the packager builds release notes from the FULL
+# COMMIT BODIES between tags and publishes them to GitHub AND CurseForge. This
+# repo is public and its commit messages are written as internal engineering
+# notes: they name the guild lead, narrate mistakes, and carry Co-Authored-By
+# trailers. All of that went onto the addon's public store page.
+#
+# CHANGELOG.md is user-facing. Write it for someone deciding whether to update.
+manual-changelog: CHANGELOG.md
 
 package-as: HoDLootAdvisor
 
