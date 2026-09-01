@@ -969,9 +969,18 @@ function ns.ObtainRoutes(itemID, slotKey, char)
   for tokenID, rec in pairs(data.items) do
     if rec.slot == "TOKEN" and ns.ItemSlot(rec) == slotKey
       and (not char or ns.CanUse(rec, char.className, char.specName)) then
+      -- The token's own BIS contexts, where the rankings know them — see the
+      -- note on the catalyst branch below for why routes carry these now.
+      local contexts
+      local tq = data.rankings and char and ns.Scoring.resolveQuality(
+        data.rankings, tokenID, char.className, char.specName, char.heroTree, nil)
+      if tq and tq.bis and tq.contexts then
+        contexts = {}
+        for _, c in ipairs(tq.contexts) do contexts[c] = true end
+      end
       out[#out + 1] = {
         itemID = tokenID, name = ns.ItemName(tokenID), kind = "TIER TOKEN",
-        source = ns.SourceFor(tokenID, rec),
+        contexts = contexts, source = ns.SourceFor(tokenID, rec),
       }
     end
   end
@@ -982,8 +991,22 @@ function ns.ObtainRoutes(itemID, slotKey, char)
         data.rankings, srcID, char.className, char.specName, char.heroTree, nil)
       if q and q.catalysesInto == itemID then
         local rec = data.items[srcID]
+        -- ⚠️ A ROUTE CARRIES ITS BIS CONTEXTS NOW (Session 262), which REVERSES
+        -- the note in SlotsReport saying a catalyst source "surfaces under
+        -- OBTAINED BY, without a BIS chip, because two BIS chips in one slot
+        -- group say nothing about which to chase". Nodes 626:354 and 626:357
+        -- draw "O-BIS • M-BIS • TIER TOKEN" and "O-BIS • M-BIS • CATALYZE
+        -- TARGET" on the two routes, so the design has answered that question
+        -- the other way. The reasoning is recorded rather than deleted: it was
+        -- made about CHIPS, and the refresh turned chips into text, which is
+        -- much quieter beside a name than a pair of boxes was.
+        local contexts
+        if q.bis and q.contexts then
+          contexts = {}
+          for _, c in ipairs(q.contexts) do contexts[c] = true end
+        end
         out[#out + 1] = {
-          itemID = srcID, name = ns.ItemName(srcID),
+          itemID = srcID, name = ns.ItemName(srcID), contexts = contexts,
           kind = "CATALYZE TARGET", source = ns.SourceFor(srcID, rec, q),
         }
       end
@@ -1117,9 +1140,14 @@ function ns.SlotsReport(view)
     if ownedCount > 0 then
       check = (ownedCount >= (row.sockets or 1)) and "full" or "partial"
     end
+    -- ⚠️ owned IS THE COUNT, AND THE RAIL NEEDS IT (Session 262). The rail draws
+    -- one check per socket and colours each one, so "full/partial/none" is no
+    -- longer enough — two sockets with one filled has to be told from two with
+    -- both. `check` is kept for anything still reading the old shape.
     out.rows[#out.rows + 1] = {
       key = row.key, label = row.label, tex = row.tex,
       sockets = row.sockets or 1, picks = picks, check = check,
+      owned = ownedCount,
     }
   end
 

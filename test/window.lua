@@ -120,6 +120,11 @@ function real.GetStringWidth(self)
   return #(s:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")) * 6
 end
 function real.SetFont(self, path, size) self._font, self._size = path, size; return true end
+-- ⚠️ RECORDED, NOT SWALLOWED (Session 262). This was answering as a no-op, so
+-- the suite could read a fontstring's SIZE and WEIGHT but never its COLOUR —
+-- and colour is half of what the refresh changed. A blush name where the node
+-- says white passed 250 checks.
+function real.SetTextColor(self, r, g, b, a) self._textColor = { r, g, b, a or 1 } end
 
 -- ⚠️ WRAPPING IS MODELLED, BECAUSE THE ADDON LAYS OUT FROM IT (Session 258).
 -- The Settings window re-flows its rows from GetStringHeight, and a stub that
@@ -189,6 +194,10 @@ function real.SetHeight(self, h) self._height = h; self._heightSet = true end
 -- Recorded rather than invented: vertical justification is half of what makes a
 -- cell centre in its row, and a no-op here cannot tell the two apart.
 function real.SetJustifyV(self, v) self._justifyV = v end
+-- Both were no-ops, for the same reason SetTextColor was: the suite could see
+-- where a thing sat but not what colour it was or which way it read.
+function real.SetJustifyH(self, h) self._justifyH = h end
+function real.SetVertexColor(self, r, g, b, a) self._vertex = { r, g, b, a or 1 } end
 function real.SetSize(self, w, h) self._width, self._height = w, h end
 function real.GetWidth(self) return self._width end
 function real.GetHeight(self) return self._height end
@@ -205,7 +214,7 @@ function real.GetAlpha(self) return self._alpha end
 
 function real.SetPoint(self, ...) self._points[#self._points + 1] = { ... } end
 function real.ClearAllPoints(self) self._points = {} end
-function real.GetPoint(self) local p = self._points[1]; if p then return table.unpack(p) end end
+function real.GetPoint(self) local p = self._points[1]; if p then return (table.unpack or unpack)(p) end end
 
 function real.SetScript(self, which, fn) self.scripts[which] = fn end
 function real.GetScript(self, which) return self.scripts[which] end
@@ -226,8 +235,8 @@ end
 function real.SetFontString(self, fs) self._fontString = fs end
 function real.GetFontString(self) return self._fontString end
 function real.GetObjectType(self) return self._kind end
-function real.GetRegions(self) return table.unpack(self._children) end
-function real.GetChildren(self) return table.unpack(self._children) end
+function real.GetRegions(self) return (table.unpack or unpack)(self._children) end
+function real.GetChildren(self) return (table.unpack or unpack)(self._children) end
 function real.GetTexture(self) return self._texture end
 -- Recorded rather than invented, so a test can actually READ what a rim was
 -- painted. Colour is the one property here worth observing: a gradient with its
@@ -696,12 +705,13 @@ do
           panel.slotRoutes and panel.slotRoutes[1]:IsShown())
     -- ⚠️ THE NODE'S ARITHMETIC, NOT ">= SOMETHING" (Session 259). The old form
     -- was ">= 101", which passed for a panel of any height above a floor — so
-    -- the 20px block gap being wrong by half went unseen. Node 590:2055 is 131
-    -- tall for two routes: 14 above the heading, a 17 heading, 10, then 30-per
-    -- route with 10 between, then 20 below.
+    -- the 20px block gap being wrong by half went unseen. Node 590:2055 is 137
+    -- tall for two routes: 14 above the heading, a 19 heading, 10, then 32-per
+    -- route with 10 between, then 20 below. (A route is 32 rather than 30
+    -- because it carries a 32px item icon now — Session 262.)
     local shown = 0
     for _, r in ipairs(panel.slotRoutes or {}) do if r:IsShown() then shown = shown + 1 end end
-    local wantH = 14 + 17 + 10 + shown * 30 + math.max(0, shown - 1) * 10 + 20
+    local wantH = 14 + 19 + 10 + shown * 32 + math.max(0, shown - 1) * 10 + 20
     check("...and the panel is exactly as tall as the routes it holds",
           panel.slotPanel:GetHeight() == wantH,
           ("%s routes: got %s, node says %s"):format(shown,
@@ -923,45 +933,108 @@ do
 
   -- ── The gutter every text run moved into ──────────────────────────────
   if panel.slotHead then
+    -- ⚠️ ONE LINE, NOT TWO (Session 262, node 591:2187). The identity block is
+    -- the icon's own 32 tall holding a single 19-tall run at 6, and the "Tier
+    -- Piece" kind line is gone — the tag beside the name already said it.
     local _, x, y = pointOf(panel.slotHead.icon)
-    check("the Slots icon sits one below the two-line block", x == 0 and y == -1,
+    check("the Slots icon sits at the block's top", x == 0 and y == 0,
           ("%s,%s"):format(x, y))
-    local _, nx = pointOf(panel.slotHead.name)
+    local _, nx, ny = pointOf(panel.slotHead.name)
     check("...with the item name 42 to its right", nx == 42, nx)
-    check("...and the block is 34 tall, not one line's 18",
-          panel.slotHead:GetHeight() == 34, panel.slotHead:GetHeight())
-    local _, sx = pointOf(panel.slotHead.slot)
-    -- 302, not 272: the Slots pane moved right when the window went 740 -> 800
-    -- (Session 261). The RELATIONSHIP is what this guards — the kind line is
-    -- indented to the name rather than to the icon — and it is still 42 in from
-    -- the pane's own left edge.
-    check("...and the kind line is indented to the name, not the icon",
-          sx == 302, sx)
+    check("...and the block is the icon's 32, not a two-line 34",
+          panel.slotHead:GetHeight() == 32, panel.slotHead:GetHeight())
+    check("...holding ONE 19-tall line, centred against the icon",
+          panel.slotHead.name:GetHeight() == 19 and -ny == 6,
+          ("h=%s y=%s"):format(panel.slotHead.name:GetHeight(), -ny))
+    check("...and the kind line is gone entirely", panel.slotHead.slot == nil)
   end
 
   local lr = panel.slotListRows and panel.slotListRows[1]
   if lr then
+    -- Node 626:507 (Session 262): icon 1 down, name at the row's own top, the
+    -- source 14 under it — a 14 leading, the same the routes use.
     local _, ix, iy = pointOf(lr.icon)
-    check("a list row's icon sits at the block's centre line", ix == 0 and iy == -11,
+    check("a list row's icon sits one below the block's top", ix == 0 and iy == -1,
           ("%s,%s"):format(ix, iy))
     local _, nx, ny = pointOf(lr.name)
-    check("...its name is in the gutter at 42", nx == 42 and ny == -10,
+    check("...its name is in the gutter at 42", nx == 42 and ny == 0,
           ("%s,%s"):format(nx, ny))
     local _, px, py = pointOf(lr.source.pre)
     check("...and so is its source line, on the same left edge",
-          px == 42 and py == -28, ("%s,%s"):format(px, py))
+          px == 42 and py == -14, ("%s,%s"):format(px, py))
   end
 
-  -- ── OBTAINED BY moved in under the name and narrowed ──────────────────
+  -- ── THE RAIL READS LEFT TO RIGHT NOW (Session 262) ────────────────────
+  --
+  -- ⚠️ THIS CHANGE WAS CATALOGUED IN SESSION 261 AND NEVER BUILT. The rail was
+  -- still 150 wide with the label RIGHT-aligned at 91, i.e. BEFORE the icon;
+  -- node 590:1960 is 180 wide with the 20px icon first and the label after it.
+  do
+    local rr = panel.slotRows and panel.slotRows[1]
+    if rr then
+      check("the rail is the node's 180 wide", rr:GetWidth() == 180, rr:GetWidth())
+      -- Both anchor with the five-argument SetPoint, so the x is the
+      -- second-to-last stored value rather than pointOf's second return.
+      local function xOf(w)
+        local p = w._points and w._points[1]
+        return p and p[#p - 1]
+      end
+      local ix, lx = xOf(rr.icon), xOf(rr.label)
+      check("...with the slot icon first, at 0", ix == 0, ix)
+      check("...and the label AFTER it at 30", lx == 30, lx)
+      check("...left-aligned, not right", rr.label._justifyH ~= "RIGHT",
+            tostring(rr.label._justifyH))
+      check("...13 Medium white, 26 tall so it centres in the row",
+            rr.label._size == 13 and (rr.label._font or ""):match("Saira%-Medium")
+              and rr.label:GetHeight() == 26,
+            ("%s %s h%s"):format(rr.label._size, rr.label._font or "?",
+              rr.label:GetHeight()))
+
+      -- ⚠️ TWO CHECKS PER PAIRED SLOT, GREEN FOR ACQUIRED (Jason, Session 262).
+      -- The old rail drew ONE violet check and dimmed it to 0.4 for the
+      -- one-of-two case, so a ring you owned looked like a ring you half-owned.
+      check("a rail row carries two check slots", rr.checks and #rr.checks == 2,
+            rr.checks and #rr.checks)
+      local S = ns.Style
+      local shownChecks, greens, greys = 0, 0, 0
+      for _, row in ipairs(panel.slotRows) do
+        for _, chk in ipairs(row.checks or {}) do
+          if chk:IsShown() then
+            shownChecks = shownChecks + 1
+            local c = chk._vertex
+            if c and math.abs(c[1] - S.COLOR.green.r) < 0.01
+                 and math.abs(c[2] - S.COLOR.green.g) < 0.01 then greens = greens + 1
+            elseif c and math.abs(c[1] - S.COLOR.grey.r) < 0.01 then greys = greys + 1 end
+          end
+        end
+      end
+      -- 14 rows, two of them paired, so 16 sockets are always drawn.
+      check("every socket in the rail draws a check", shownChecks == 16, shownChecks)
+      check("...and each is either acquired-green or unacquired-grey",
+            greens + greys == shownChecks,
+            ("green %d + grey %d of %d"):format(greens, greys, shownChecks))
+    end
+  end
+
+  -- ── OBTAINED BY moved out to the node's own 294/465 ───────────────────
+  -- ⚠️ 294 AND 465, NOT 272 AND 428 (Session 262, node 590:2055). The right
+  -- edge still lands on the pane's — 294 + 465 = 759 against a pane running
+  -- 250..750 — but the panel's left now clears the item icon's gutter.
   if panel.slotPanel then
     local _, px = pointOf(panel.slotPanel)
-    check("OBTAINED BY is indented to the text column", px == 272, px)
-    check("...and narrowed to match, so its right edge still lands on the pane's",
-          panel.slotPanel:GetWidth() == 428 and px + 428 == 700,
+    check("OBTAINED BY sits at the node's 294", px == 294, px)
+    check("...and is the node's 465 wide", panel.slotPanel:GetWidth() == 465,
           panel.slotPanel:GetWidth())
     local r = panel.slotRoutes and panel.slotRoutes[1]
-    check("...and a route inside it is 388, not the pane's width less padding",
-          r and r:GetWidth() == 388, r and r:GetWidth())
+    check("...and a route inside it is 425, the panel less its padding",
+          r and r:GetWidth() == 425, r and r:GetWidth())
+    -- ⚠️ A ROUTE CARRIES ITS OWN ITEM ICON (Session 262). It drew text alone.
+    check("...and a route draws a 32px item icon at its top left",
+          r and r.icon and r.icon:GetWidth() == 32,
+          r and r.icon and r.icon:GetWidth())
+    check("...with its name in the same 42 gutter the icon opens",
+          r and select(2, pointOf(r.name)) == 42,
+          r and select(2, pointOf(r.name)))
   end
 
   -- ── The Loot header came down with it ─────────────────────────────────
@@ -970,12 +1043,16 @@ do
     -- 386, not 306: same 80px pane shift as above (Session 261).
     check("the Loot header's name column sits beside the icon",
           nx == 386, nx)
-    -- 32 against a 34-tall block puts the block ONE ABOVE the icon, not three
-    -- below it. Asserting the centres agree is what survives a size change.
+    -- Asserting the CENTRES agree is what survives a size change — which the
+    -- previous version claimed to do while hard-coding 17 and 16, so it failed
+    -- the moment the block came down to the node's 28 (Session 262).
     local _, _, iy = pointOf(panel.itemIcon)
     local _, _, by = pointOf(panel.itemName)
+    local blockH = panel.itemName:GetHeight() + panel.itemSub:GetHeight()
+    local iconH  = panel.itemIcon:GetHeight()
     check("...and the block and the icon still share a centre line",
-          (-by) + 17 == (-iy) + 16, ("block %s, icon %s"):format(-by, -iy))
+          math.abs(((-by) + blockH / 2) - ((-iy) + iconH / 2)) <= 1,
+          ("block %s+%s, icon %s+%s"):format(-by, blockH, -iy, iconH))
   end
 end
 
@@ -1018,7 +1095,14 @@ do
     local a = groundAlpha(f)
     check(("%s's ground is fully opaque"):format(label), a == 1,
           ("alpha %s"):format(tostring(a)))
+
   end
+  -- ⚠️ "NO BLIZZARD FRAME TEMPLATE" CANNOT BE CHECKED HERE, and the attempt is
+  -- worth recording: this stub answers ANY unknown key with a function, so
+  -- `f.NineSlice == nil` is false for every frame whether or not it has one —
+  -- the exact S257 trap the rules already name. That assertion lives in
+  -- smoke.lua, against the SOURCE, where "CreateFrame(... , template)" is a
+  -- string that either appears or does not.
 
   -- ⚠️ AND THE COLOUR, WHICH IS THE THING ACTUALLY BEING ASKED ABOUT. Asserting
   -- the alpha alone passes for a ground painted fully opaque in the WRONG hue —
@@ -1061,8 +1145,15 @@ header("A ranking row's cells share one centre line (Session 259)")
 do
   local r = panel.rows and panel.rows[1]
   if r then
+    -- ⚠️ THE UPGRADE COLUMN IS IN THIS LIST NOW (Session 262). It is the fifth
+    -- cell and the only one that is a TAG LINE rather than a plain fontstring,
+    -- so it was left out of the height pass and drew half a row above the
+    -- raider name on every row — while these four checks stayed green
+    -- throughout. Its whole run hangs off the lead's rect, so the lead is the
+    -- thing that has to carry the height.
     for _, e in ipairs({ { "rank", r.rank }, { "name", r.name },
-                         { "gain", r.gain }, { "priority", r.pr }, { "source", r.src } }) do
+                         { "gain", r.gain }, { "priority", r.pr }, { "source", r.src },
+                         { "upgrade", r.tagLine and r.tagLine.lead } }) do
       local label, fs = e[1], e[2]
       -- _heightSet, not GetHeight(): the stub's default height is 20 and so is
       -- the row pitch, so comparing the value alone cannot fail.
@@ -1077,7 +1168,8 @@ do
     -- The property that actually matters: they all resolve to the same centre.
     -- A cell 20 tall anchored at 0 centres at 10 whatever font it carries.
     local centres = {}
-    for _, fs in ipairs({ r.rank, r.name, r.gain, r.pr, r.src }) do
+    for _, fs in ipairs({ r.rank, r.name, r.gain, r.pr, r.src,
+                          r.tagLine and r.tagLine.lead }) do
       local _, _, y = fs:GetPoint()
       centres[#centres + 1] = (-(y or 0)) + (fs:GetHeight() or 0) / 2
     end
@@ -1088,40 +1180,31 @@ do
 end
 
 
-header("The identity block's two lines (Session 259)")
+header("The identity line (Session 262 — it is ONE line now)")
 
--- ⚠️ SIZE ALONE CANNOT SEPARATE THESE AND IS NOT MEANT TO. Nodes 591:2189 and
--- 591:2195 are 13 Regular blush over 12 Light white — one pixel apart, so what
--- distinguishes them is WEIGHT and COLOUR. That makes the pair easy to "fix"
--- toward a size difference the design does not have, which is what these pin.
+-- ⚠️ THE TWO-LINE BLOCK IS GONE. It was a 13 Regular name over a 12 Light
+-- "Tier Piece", separated by weight and colour rather than size; node 591:2189
+-- is a SINGLE 12 Medium white run carrying its own tags, and the kind it used
+-- to spell out is one of those tags.
 do
   local function fontOf(fs) return fs and fs._font or "" end
 
-  local n, k = panel.slotHead and panel.slotHead.name, panel.slotHead and panel.slotHead.slot
-  check("the Slots item name is 13", n and n._size == 13, n and n._size)
-  -- ⚠️ MEDIUM NOW, NOT REGULAR (Session 261). The refresh sets every item and
-  -- raider NAME in Saira Medium against Light body copy — that pairing is what
-  -- separates a name from the line under it now that the chips are gone.
+  local n = panel.slotHead and panel.slotHead.name
+  check("the Slots item name is the node's 12", n and n._size == 12, n and n._size)
   check("...and Medium, not Light", fontOf(n):match("Saira%-Medium") ~= nil, fontOf(n))
-  check("the kind line is 12", k and k._size == 12, k and k._size)
-  check("...and Light, which is what separates them",
-        fontOf(k):match("Saira%-Light") ~= nil, fontOf(k))
+  local nc = n and n._textColor
+  check("...in white, not the blush it used to draw",
+        nc and nc[1] > 0.9 and nc[2] > 0.9 and nc[3] > 0.9,
+        nc and ("%.2f,%.2f,%.2f"):format(nc[1], nc[2], nc[3]) or "never set")
+  check("...on ONE 19-tall line", n and n:GetHeight() == 19, n and n:GetHeight())
 
-  -- ⚠️ THE LINE BOXES, WHICH IS WHERE THIS BLOCK WAS ACTUALLY WRONG. Both lines
-  -- were the right size and neither had an explicit height, so each drew
-  -- wherever its own line box landed instead of stacking 18-over-16 into the
-  -- node's 34. Sizes passing while the stack is wrong is exactly why this
-  -- asserts the heights separately.
-  check("the name's line box is the node's 18", n and n:GetHeight() == 18, n and n:GetHeight())
-  check("the kind line's is 16", k and k:GetHeight() == 16, k and k:GetHeight())
-  check("...and together they are the block's 34",
-        n and k and (n:GetHeight() + k:GetHeight()) == 34)
-
-  -- The same treatment the Loot detail header already had, asserted so the two
-  -- surfaces cannot drift apart.
-  check("the Loot header's name line box is 18 too",
-        panel.itemName:GetHeight() == 18, panel.itemName:GetHeight())
-  check("...and its second line 16", panel.itemSub:GetHeight() == 16, panel.itemSub:GetHeight())
+  -- ⚠️ THE LOOT HEADER IS 14 OVER 14, NOT 18 OVER 16 (Session 262, node
+  -- 577:880: both lines lead at 14). These two surfaces do NOT share a block
+  -- height, which is why the old "so the two cannot drift apart" pairing was
+  -- asserting the Slots numbers on the Loot header.
+  check("the Loot header's name line box is the node's 14",
+        panel.itemName:GetHeight() == 14, panel.itemName:GetHeight())
+  check("...and its second line 14 too", panel.itemSub:GetHeight() == 14, panel.itemSub:GetHeight())
 end
 
 
@@ -1486,16 +1569,16 @@ do
       return -y
     end
     local row1 = panel.slotListRows[1]
+    -- ⚠️ THE ICON IS WHAT MUST NOT JUMP, and only the icon (Session 262). This
+    -- used to pin the name and the second line too, which was reachable while
+    -- both layouts drew a two-line block. They no longer do: the head is one
+    -- line CENTRED in 32 and a list row is a two-line block starting at its
+    -- top, so their first lines genuinely differ in the design. Jason's S260
+    -- complaint was about the pair moving between states — the icon is the
+    -- element the eye tracks, and it stays within a pixel.
     check("the item icon lands at the same height in both layouts",
-          topOf(panel.slotHead.icon) == topOf(row1.icon),
+          math.abs(topOf(panel.slotHead.icon) - topOf(row1.icon)) <= 1,
           ("single=%s list=%s"):format(topOf(panel.slotHead.icon), topOf(row1.icon)))
-    check("...and so does the item name",
-          topOf(panel.slotHead.name) == topOf(row1.name),
-          ("single=%s list=%s"):format(topOf(panel.slotHead.name), topOf(row1.name)))
-    check("...and the second line under it",
-          topOf(panel.slotHead.slot) == topOf(row1.source.pre),
-          ("single=%s list=%s"):format(topOf(panel.slotHead.slot),
-                                       topOf(row1.source.pre)))
     if g then
       local b, t = g.boss._points[1] or {}, g.rest._points[1] or {}
       check("the boss name is anchored to the RIGHT of \"From \"",
@@ -1528,6 +1611,63 @@ do
     local tile = panel.bossTiles[1]
     check("a boss row has no tooltip of its own", tile.scripts.OnEnter == nil)
     check("...and the diamond carries its own hover target", tile.bisHit ~= nil)
+
+    -- ── OPENING A BOSS SELECTS NOTHING (Session 262) ──────────────────────
+    --
+    -- Jason: "clicking a boss should just show that boss's loot table, NOT
+    -- select the first item". It was setting the selection to 1, which filled
+    -- the detail pane with an item nobody had picked and made the panel's own
+    -- "Choose an Item to View Details" state unreachable — a message that has
+    -- been written, drawn and dead since the accordion was built.
+    --
+    -- ⚠️ ASSERTS THE EMPTY STATE'S OWN WORDS, not merely that the pane is
+    -- blank: the two empty states differ only in their text, and the one this
+    -- change makes reachable is the second of them.
+    do
+      local opened
+      for _, t in ipairs(panel.bossTiles) do
+        if t.bossIndex and t.scripts.OnClick then
+          t.scripts.OnClick(t)
+          if panel.itemRows[1] and panel.itemRows[1]:IsShown() then opened = t break end
+          t.scripts.OnClick(t)   -- collapse again and try the next boss
+        end
+      end
+      check("a boss with loot expands its cards", opened ~= nil)
+      if opened then
+        check("...and NO item is selected by the click",
+              panel.itemName:GetText() == "" or panel.itemName:GetText() == nil,
+              tostring(panel.itemName:GetText()))
+        check("...so the pane asks for an item, not for a boss",
+              panel.paneEmpty:IsShown()
+                and panel.paneEmpty:GetText() == "CHOOSE AN ITEM TO VIEW DETAILS",
+              ("shown=%s text=%s"):format(tostring(panel.paneEmpty:IsShown()),
+                tostring(panel.paneEmpty:GetText())))
+
+        -- ── THE CARDS ARE INDENTED TO THE BOSS NAME (Session 262) ─────────
+        --
+        -- Jason: "the loot items box inset isn't here". buildItemRow anchors
+        -- each card at the indent and renderColumn's ClearAllPoints threw it
+        -- away, re-anchoring at x 0 — so the cards ran from the column's own
+        -- left edge, under the boss ICONS. Node 625:244 puts them at 34, which
+        -- is where the boss NAME starts.
+        --
+        -- ⚠️ 34 IS NOT A DEFAULT ANYWHERE, so this can fail: reverting the
+        -- re-anchor to 0 fails it immediately.
+        -- The x is the second-to-last stored value whether the anchor was set
+        -- with the three-argument form or the five-argument one.
+        local function xOf(w)
+          local p = w._points and w._points[1]
+          return p and p[#p - 1]
+        end
+        local rx = xOf(panel.itemRows[1])
+        check("an expanded item card is indented to the boss name",
+              rx == 34, tostring(rx))
+        check("...which is where the boss name column starts",
+              rx == xOf(tile.name), ("card %s, name %s"):format(tostring(rx), tostring(xOf(tile.name))))
+      end
+      -- Leave the column collapsed for whatever runs next.
+      if opened then opened.scripts.OnClick(opened) end
+    end
 
     -- ── THE COUNTS REACH THE ROW (Session 261) ────────────────────────────
     --
@@ -1782,7 +1922,7 @@ do
     local subY  = offsetY(panel.itemSub)
     local blockTop, blockH = -nameY, panel.itemName:GetHeight() + panel.itemSub:GetHeight()
     local iconTop, iconH = -iconY, panel.itemIcon:GetHeight()
-    check("the two-line block is 34 tall, as the node is", blockH == 34, blockH)
+    check("the two-line block is 28 tall, as the node is", blockH == 28, blockH)
     check("...and its centre is the icon's centre",
           math.abs((blockTop + blockH / 2) - (iconTop + iconH / 2)) <= 1,
           ("block %d..%d, icon %d..%d"):format(blockTop, blockTop + blockH,

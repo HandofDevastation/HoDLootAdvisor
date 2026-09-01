@@ -4661,7 +4661,7 @@ header("Every file compiles under Lua 5.1 — the version the game runs")
   local function headroom(path, want)
     local src = io.open(path):read("a")
     local probe = ("local __hr%d = %d\n"):rep(want):format(
-      table.unpack((function() local t = {} for i = 1, want * 2 do t[i] = i end return t end)()))
+      (table.unpack or unpack)((function() local t = {} for i = 1, want * 2 do t[i] = i end return t end)()))
     local tmp = os.tmpname() .. ".lua"
     local fh = io.open(tmp, "w"); fh:write(probe .. src); fh:close()
     local pipe = io.popen(("luajit -bl %q 2>&1 >/dev/null"):format(tmp))
@@ -4696,6 +4696,39 @@ end)()
 -- be present here would fail on a namespace that is behaving correctly.
 
 header("Window files reference only helpers that exist")
+
+-- ── NO WINDOW INHERITS BLIZZARD CHROME (Session 262) ────────────────────────
+--
+-- Jason found "remnant blizz-styled borders" on the Loot Log and the Settings
+-- window. Both were built on BasicFrameTemplateWithInset for ONE reason — its
+-- CloseButton — and inherited the gold NineSlice and inset artwork with it.
+--
+-- ⚠️ THIS IS A SOURCE CHECK ON PURPOSE. The window harness cannot ask a frame
+-- whether it has a NineSlice: its stub answers any unknown key with a function,
+-- so the field is never nil (the S257 trap, in the rules already). The template
+-- name is a literal string in the source and either appears or does not, which
+-- is the one form of this question that can actually fail.
+;(function()
+  local FILES = { "Panel.lua", "LoadWindow.lua", "RecordWindow.lua",
+                  "Settings.lua", "MinimapButton.lua" }
+  local BLIZZ = { "BasicFrameTemplate", "PortraitFrameTemplate",
+                  "UIPanelDialogTemplate", "InsetFrameTemplate",
+                  "InputBoxTemplate", "UICheckButtonTemplate" }
+  local found = {}
+  for _, path in ipairs(FILES) do
+    local fh = io.open(path, "r")
+    if fh then
+      local src = fh:read("*a")
+      fh:close()
+      src = src:gsub("%-%-%[%[.-%]%]", " "):gsub("%-%-[^\n]*", " ")
+      for _, t in ipairs(BLIZZ) do
+        if src:find(t, 1, true) then found[#found + 1] = path .. ": " .. t end
+      end
+    end
+  end
+  check("no window inherits a Blizzard frame or control template",
+        #found == 0, #found > 0 and table.concat(found, ", ") or nil)
+end)()
 
 ;(function()
   -- The three files no harness loads, and which therefore cannot be on the

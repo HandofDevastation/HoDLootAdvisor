@@ -96,13 +96,22 @@ Style.FONT = {
 -- name the roles the mock actually has.
 Style.SIZE = {
   title   = 20,   -- window title (the panel's own is an image; see Style.Lockup)
-  badge   = 16,   -- the large upgrade badge on the detail header
+  badge   = 16,   -- the Runner column's lead paragraph and section heads
   rank    = 14,   -- the ranking column's position number
-  detail  = 13,   -- detail-pane body
+  -- ⚠️ SAME NUMBER AS `rank`, DELIBERATELY SEPARATE (Session 262). The detail
+  -- header's item name and the verdict badge's grade word are 14 in the mock
+  -- and have nothing to do with a rank; pointing them at `rank` would freeze
+  -- the two together the next time either moves.
+  item    = 14,   -- the detail header's item name; the badge's grade word
+  detail  = 13,   -- detail-pane body; the Slots identity + rail labels
   head    = 12,   -- tabs, buttons, column headers
   row     = 12,   -- ranking rows, the densest text that must stay readable
-  name    = 11,   -- boss, raider and item names
-  small   = 11,
+  -- ⚠️ 12, NOT 11 (Session 262, read off the Loot nodes). Boss names, item-card
+  -- names and raider names are all Saira Medium 12; the ELEVEN belongs to the
+  -- numeric columns beside them, which is `small`. The two had been sharing
+  -- this one role, so every name in the addon rendered a point small.
+  name    = 12,   -- boss, raider and item names
+  small   = 11,   -- ILVL GAIN / PRIORITY / EP / GP, and Runner body copy
   label   = 10,   -- field labels, slot lines, the footer, the meta line
   tiny    = 10,
   chip    = 9,    -- both chip kinds
@@ -1241,10 +1250,19 @@ end
 --- ⚠️ THE TICK IS A TEXTURE, NOT A CHARACTER. The bundled fonts carry no ✓ —
 --- checked directly, along with ★ ◆ and the rest — and a missing glyph in a
 --- custom font renders as NOTHING rather than falling back.
-function Style.Check(parent, label, boxSize)
+--- opts (all optional): { fill = COLOR, rim = COLOR, rimAlpha = n }.
+---
+--- ⚠️ THE TWO CHECKBOXES IN THIS ADDON ARE NOT THE SAME CONTROL, and both
+--- readings are right about their own frame (Session 262). The Loot tab's
+--- Vault box is 16px with a #6f2b57 rim and NO fill, deliberately matching the
+--- inactive tab beside it. The Settings rows draw 24px with a #0c0721 fill and
+--- the rule blush at 30% — read out of node 591:2365's own SVG. Rather than
+--- pick a winner, the difference is a parameter and each call site states it.
+function Style.Check(parent, label, boxSize, opts)
   local btn = CreateFrame("Button", nil, parent)
   btn._hodStyled = true
   local s = boxSize or 16
+  opts = opts or {}
 
   -- ⚠️ READ OFF THE NODE (Session 257): a 16px square with a 1px #6f2b57 rim
   -- and NO fill — the same rim as an inactive tab, which is what makes the two
@@ -1253,18 +1271,31 @@ function Style.Check(parent, label, boxSize)
   btn.box = CreateFrame("Frame", nil, btn)
   btn.box:SetSize(s, s)
   btn.box:SetPoint("LEFT", 0, 0)
+  -- ⚠️ AN OPT-IN FILL (Jason, Session 262: "the checkboxes should have a darker
+  -- background"). The box was rim-only everywhere, so in Settings it took the
+  -- LIGHTER windowGround it sits on and read as an empty outline.
+  if opts.fill then Style.Surface(btn.box, opts.fill, 1) end
   -- The same gradient as a control's rim. Its node reported the same flattened
   -- #6f2b57, and it sits directly above the difficulty control — two borders in
   -- one corner that did not match would be the tell that one of them is wrong.
-  btn.box.rim = Style.Rim(btn.box, Style.COLOR.controlRim, 1, 1, Style.COLOR.rule)
+  -- Default: the control rim gradient, which is the Loot tab's Vault box. A
+  -- caller wanting a FLAT rim passes one colour and its alpha — node 591:2365
+  -- draws the Settings box in the rule blush at 30%, no gradient.
+  btn.box.rim = opts.rim
+    and Style.Rim(btn.box, opts.rim, opts.rimAlpha or 1, 1, opts.rim)
+    or Style.Rim(btn.box, Style.COLOR.controlRim, 1, 1, Style.COLOR.rule)
 
   -- ⚠️ THE TICK IS THE DESIGN'S OWN PATH, EXPORTED, NOT BLIZZARD'S CHECKMARK.
   -- It was UI-CheckBox-Check, which is a chunky gold-ish glyph that overhung
   -- its box. The mock draws a 2px round-capped stroke in #f2bdad, 10x7 inside
   -- 4px of padding, which is what Media/ui/check.png is.
+  -- ⚠️ THE TICK SCALES WITH THE BOX (Session 262). It was pinned at 10x7, which
+  -- is the 16px control's tick — in the Settings window's 24px box that left a
+  -- small mark adrift in a large square. Node 591:2361 draws 14x10 inside 24,
+  -- the same proportion, so it is derived rather than listed per size.
   btn.tick = btn.box:CreateTexture(nil, "OVERLAY")
   btn.tick:SetTexture("Interface\\AddOns\\HoDLootAdvisor\\Media\\ui\\check.png")
-  btn.tick:SetSize(10, 7)
+  btn.tick:SetSize(math.floor(s * 0.58 + 0.5), math.floor(s * 0.42 + 0.5))
   btn.tick:SetPoint("CENTER")
   btn.tick:Hide()
 
@@ -1434,6 +1465,57 @@ function Style.Window(frame)
   frame:HookScript("OnShow", function(self) Style.SkinChildButtons(self) end)
 
   return frame
+end
+
+--- The design's own text field: a dark box with the control rim, no game art.
+---
+--- ⚠️ THIS REPLACES InputBoxTemplate (Jason, Session 262: "the text-input
+--- fields are default blizz style, instead of looking like the figma design").
+--- That template brings a beaded gold border and a lighter inner fill, which is
+--- the last piece of Blizzard chrome on the Settings window now the frame
+--- templates are gone. Node 591:2345 is a plain 80x30 rect on the dark ground.
+---
+--- The caller sizes and places it; this only decides what it looks like.
+function Style.Input(parent, w, h)
+  local e = CreateFrame("EditBox", nil, parent)
+  e._hodStyled = true
+  e:SetSize(w or 80, h or 30)
+  e:SetAutoFocus(false)
+  Style.Surface(e, Style.COLOR.ground, 1)
+  e.rim = Style.Rim(e, Style.COLOR.controlRim, 1, 1, Style.COLOR.rule)
+  Style.SetFont(e, Style.FONT.light, Style.SIZE.head)
+  e:SetTextColor(Style.rgb(Style.COLOR.white))
+  e:SetTextInsets(10, 10, 0, 0)
+  e:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+  return e
+end
+
+--- The design's own close control: a violet "X" at the window's top right.
+---
+--- ⚠️ THIS EXISTS SO A WINDOW DOES NOT HAVE TO INHERIT A BLIZZARD TEMPLATE
+--- (Session 262). The Loot Log and Settings windows were built on
+--- BasicFrameTemplateWithInset for one reason — its CloseButton — and paid for
+--- it with the template's border and inset artwork, which Jason saw as "remnant
+--- blizz-styled borders". Style.Window strips what it can find, but not
+--- inheriting the chrome in the first place is what the panel and the Import
+--- window already do, and they are the two that look right.
+---
+--- Node 626:519: a 9x16 "X" whose right edge sits 10 in from the window's, in
+--- the accent violet at half alpha — NOT the near-white textDim this was drawn
+--- in everywhere before.
+function Style.CloseButton(parent, onClick)
+  local b = CreateFrame("Button", nil, parent)
+  b._hodStyled = true
+  b:SetSize(20, 20)
+  b:SetPoint("TOPRIGHT", -5, -8)
+  b.x = Style.Text(b, "light", "small", Style.COLOR.accent, "CENTER")
+  b.x:SetPoint("CENTER")
+  b.x:SetText("X")
+  b.x:SetAlpha(0.5)
+  b:SetScript("OnClick", onClick or function() parent:Hide() end)
+  b:SetScript("OnEnter", function(s) s.x:SetAlpha(1) end)
+  b:SetScript("OnLeave", function(s) s.x:SetAlpha(0.5) end)
+  return b
 end
 
 --- Skin every text button under a frame, once.

@@ -341,7 +341,13 @@ end
 -- ---------------------------------------------------------------------------
 
 local function build()
-  frame = CreateFrame("Frame", "HoDLootAdvisorLootLog", UIParent, "BasicFrameTemplateWithInset")
+  -- ⚠️ NO BLIZZARD TEMPLATE (Jason, Session 262: "some remnant blizz-styled
+  -- borders on it. There should be none"). BasicFrameTemplateWithInset was here
+  -- only for its CloseButton, and brought a gold NineSlice and an inset frame
+  -- with it — Style.Window strips what it can name, but not inheriting the
+  -- chrome is what the panel and the Import window do, and they look right.
+  -- Style.CloseButton supplies the design's own X.
+  frame = CreateFrame("Frame", "HoDLootAdvisorLootLog", UIParent)
   frame:SetSize(FRAME_W, FRAME_H)
   frame:SetPoint("CENTER")
   frame:SetMovable(true)
@@ -362,6 +368,7 @@ local function build()
     -- No rim: the fill is the window, exactly as on the panel.
     S.Surface(frame, S.COLOR.windowGround, 1)
     S.Lockup(frame, LOG_X, 30)
+    frame.close = S.CloseButton(frame)
   end
 
   frame.heading = S and S.Text(frame, "light", "title", S.COLOR.white, "LEFT")
@@ -531,7 +538,8 @@ end
 -- ---------------------------------------------------------------------------
 
 local function buildExport()
-  exportFrame = CreateFrame("Frame", "HoDLootAdvisorLootExport", UIParent, "BasicFrameTemplateWithInset")
+  -- Same as the Loot Log it opens from: no Blizzard chrome (Session 262).
+  exportFrame = CreateFrame("Frame", "HoDLootAdvisorLootExport", UIParent)
   exportFrame:SetSize(600, 400)
   exportFrame:SetPoint("CENTER", 0, -20)
   exportFrame:SetMovable(true)
@@ -542,6 +550,24 @@ local function buildExport()
   exportFrame:SetFrameStrata("FULLSCREEN_DIALOG")
   ns.MakeWindow(exportFrame)
   exportFrame:Hide()
+  do
+    -- The template's TitleText went with the template, so the heading is our
+    -- own — the same lockup-plus-heading shape the Loot Log itself uses.
+    local S = ns.Style
+    if S then
+      if exportFrame.bgTex then exportFrame.bgTex:Hide() end
+      if exportFrame.headTex then exportFrame.headTex:Hide() end
+      if exportFrame.headLine then exportFrame.headLine:Hide() end
+      S.Surface(exportFrame, S.COLOR.windowGround, 1)
+      exportFrame.close = S.CloseButton(exportFrame)
+      exportFrame.TitleText = S.Text(exportFrame, "light", "title", S.COLOR.white, "LEFT")
+      exportFrame.TitleText:ClearAllPoints()
+      exportFrame.TitleText:SetPoint("TOPLEFT", 16, -12)
+    else
+      exportFrame.TitleText = exportFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+      exportFrame.TitleText:SetPoint("TOPLEFT", 16, -12)
+    end
+  end
   exportFrame.TitleText:SetText("Loot Advisor — Export Loot")
 
   exportFrame.hint = fs(exportFrame, "GameFontNormalSmall", 16, -32, 560)

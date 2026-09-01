@@ -115,7 +115,10 @@ local LOGO_X, LOGO_Y = 40, 30
 -- chips gone from the item cards this is where the refresh buys its room. The
 -- last row is 28 and drops its bottom rule — the same one-pixel tell as before.
 -- The column also WIDENS, 200 -> 275.
-local BOSS_X, BOSS_TOP, BOSS_W = 40, 167, 275
+-- ⚠️ 171, NOT 167 (Session 262). Node 625:202 puts the column's top four below
+-- where it was built, which the eye reads as the whole list riding high against
+-- the filter row above it.
+local BOSS_X, BOSS_TOP, BOSS_W = 40, 171, 275
 local BOSS_ROW_H, BOSS_ICON = 29, 20
 -- The column's content height, bosses and item cards together.
 local COL_AREA_H = 355
@@ -173,8 +176,13 @@ local PANE_X, PANE_Y, PANE_W, PANE_H = 340, 177, 420, 360
 -- rather than a tidy-up of the code.
 local FOOT_Y, FOOT_H = 550, 50
 local FOOT = {
-  textX = 47, right = 34, gap = 10,
-  line1Y = 10, line2Y = 22,
+  -- ⚠️ right IS 40, NOT 34 (Session 262). Re-read on all three Loot frames: the
+  -- button row ends at 760 on the 800-wide ones and 764 on the 804 stray, which
+  -- is a 40 margin in both — the SAME margin the body uses, not a different one.
+  -- The old comment here claimed 34 and that was a misreading, not a design.
+  textX = 47, right = 40, gap = 10,
+  -- Two 16-tall line boxes stacked inside the node's own 32-tall block.
+  line1Y = 10, line2Y = 26,
   -- The button row's own top inset inside the bar (3344 - 3333).
   btnY = 11,
 }
@@ -234,10 +242,20 @@ local VAULT_GAP = 10
 local SL = {
   -- The rail. 14 rows, 29 tall, and the LAST is 26 because it drops its bottom
   -- rule — the same one-pixel tell the boss rows and the item cards use.
-  railX = 40, railY = 129, railW = 150, rowH = 29, lastRowH = 26,
-  -- Right-aligned label, then the client's empty-slot icon, then the check.
-  labelR = 91, iconX = 100, iconSize = 20,
-  checkX = 130, checkW = 10, checkH = 7,
+  -- ⚠️ THE RAIL IS 180 AND THE ROW READS LEFT TO RIGHT (Session 262). It was
+  -- 150 wide with the label RIGHT-aligned BEFORE the icon; node 590:1960 puts
+  -- the 20px icon first at x 0, a 10 gap, then the label. This change was
+  -- catalogued in the Session 261 notes and never built.
+  railX = 40, railY = 129, railW = 180, rowH = 29, lastRowH = 26,
+  -- Icon, gap, then a left-aligned label 26 tall so it centres in the row.
+  iconX = 0, iconSize = 20, labelX = 30, labelH = 26,
+  -- ⚠️ TWO CHECKS, RIGHT-ALIGNED, AND THE GREEN ONE IS THE RIGHTMOST (Jason,
+  -- Session 262: "un-acquired pieces have grey checkmarks and they turn green
+  -- when they've been acquired"). Every row shows one per socket — so Finger
+  -- and Trinket show two — and the 10px right padding puts the outer one at
+  -- 160..170 with the second 10 to its left. This REPLACES the old single
+  -- check drawn at half alpha for the one-of-two case.
+  checkX = 160, checkX2 = 140, checkW = 10, checkH = 7,
 
   -- The caption and the view dropdown, both on the tab row's band.
   capR = 760, capY = 48,
@@ -245,7 +263,7 @@ local SL = {
   caret = 6, caretR = 14,
 
   -- The right-hand region, shared origin, two layouts.
-  paneX = 260, paneW = 500,
+  paneX = 250, paneW = 500,
 
   -- ⚠️ THE ITEM ICON, ADDED SESSION 259 (Jason: "it was oddly confusing without
   -- it"). 32px, the same size the Loot page's selected item dropped to in the
@@ -256,14 +274,14 @@ local SL = {
   -- unaffected because they are right-aligned to the pane's far edge.
   itemIcon = 32, textX = 42,
 
-  -- SINGLE-ITEM: an identity block, then the OBTAINED BY panel beneath it.
-  -- The block is 34 tall now (two lines) with the icon centred against it — the
-  -- icon spans 142..174 inside a block running 141..175.
-  -- The two lines are 18 then 16, stacking to the block's 34. They are NEARLY
-  -- the same size on purpose — node 591:2189 is 13 Regular blush and 591:2195 is
-  -- 12 Light white — so what separates them is WEIGHT AND COLOUR, not size.
-  headY = 141, headBlockH = 34, headNameH = 18, headKindH = 16,
-  headSlotY = 159, chipY = 142,
+  -- SINGLE-ITEM: an identity line, then the OBTAINED BY panel beneath it.
+  --
+  -- ⚠️ ONE LINE, NOT TWO (Session 262, node 591:2187). The block is 32 — the
+  -- icon's own height — holding a single 19-tall line centred against it at 6.
+  -- The second line ("Tier Piece") is GONE: the refresh carries that fact as a
+  -- TIER PIECE tag on the line itself, so the kind line was printing the same
+  -- thing twice, once as a tag and once as a sentence.
+  headY = 141, headBlockH = 32, headNameH = 19, headNameY = 6,
 
   -- ⚠️ THE OBTAINED BY PANEL IS INDENTED TO THE TEXT COLUMN, NOT THE ICON
   -- (node 590:2055, re-read Session 259). It sits at 272 and is 428 wide, so
@@ -271,11 +289,17 @@ local SL = {
   -- and its right edge still lands on the pane's. It was drawn full-width from
   -- paneX before the icon existed, which now reads as the panel hanging out
   -- past the block it belongs to.
-  panelX = 272, panelW = 428, panelY = 186,
+  -- ⚠️ 294 AND 465 (Session 262, re-read from node 590:2055). It was at 272 and
+  -- 428, which was the pre-refresh geometry — the panel's right edge still lands
+  -- on the pane's, but its left now sits under the item icon's own gutter.
+  panelX = 294, panelW = 465, panelY = 186,
   -- The panel's own box: 14 above the heading, 20 below the last route, and 10
-  -- of gap between blocks. A 2-route panel measures 131, which is the mock's.
+  -- of gap between blocks. A 2-route panel measures 137, which is the mock's.
   panelPadT = 14, panelPadB = 20, panelPadX = 20,
-  headingH = 17, blockGap = 10, blockH = 30, routeLineY = 16,
+  -- ⚠️ A ROUTE CARRIES ITS OWN ITEM ICON NOW (Session 262, Jason: "note the
+  -- addition of the item icons"). 32px, the same icon every other surface
+  -- draws, with the same 42 gutter the identity line opens.
+  headingH = 19, blockGap = 10, blockH = 32, routeLineY = 14,
 
   -- MULTI-ITEM: a flat list of candidates, each 55 tall with a 10px top inset.
   -- The icon sits at 11, one below the text block, on the same centre line.
@@ -297,7 +321,17 @@ local SL = {
   -- the panel off the position its node states. Shifting the list costs one,
   -- and lands all three elements exactly on the block's: name 141, icon 142,
   -- second line 159. slotNote derives from listY and follows for free.
-  listY = 131, listPitch = 55, listNameY = 10, listSourceY = 28, listIconY = 11,
+  -- ⚠️ RE-READ FROM NODE 626:507 (Session 262). The list starts at 141 — the
+  -- SAME y as the single-item block, which is what the Session 260 note was
+  -- reaching for by shifting it to 131 against a head that has since become one
+  -- line. Rows: icon at 1, the name at the row's top, the source 14 under it,
+  -- and a 52 pitch (a 32 block with 20 between).
+  --
+  -- THE TWO LAYOUTS NO LONGER PUT THEIR FIRST LINE ON THE SAME PIXEL, and that
+  -- is the design's: the head is ONE line centred in 32, the list row is a TWO
+  -- line block starting at its top. What does not move between them is the
+  -- ICON, 141 against 142, which is the element the eye tracks.
+  listY = 141, listPitch = 52, listNameY = 0, listSourceY = 14, listIconY = 1,
   listRows = 7, routeRows = 4,
 
   chipH = 15, chipGap = 6,
@@ -366,8 +400,10 @@ local RN_SPEC_Y      = 396
 local RN_SPEC_BODY_Y = 420
 local DIFF_CHOICES = { "AUTO", "NORMAL", "HEROIC", "MYTHIC", "MPLUS" }
 local DIFF_LABEL = {
-  AUTO = "Auto", NORMAL = "Raid: Normal", HEROIC = "Raid: Heroic",
-  MYTHIC = "Raid: Mythic", MPLUS = "Dungeons",
+  -- ⚠️ THE PREFIX IS UPPERCASE AND THE DIFFICULTY IS NOT — "RAID: Heroic" is
+  -- the node's own string on all three Loot frames (Session 262).
+  AUTO = "Auto", NORMAL = "RAID: Normal", HEROIC = "RAID: Heroic",
+  MYTHIC = "RAID: Mythic", MPLUS = "Dungeons",
 }
 
 -- ── Standings tab — RE-READ FROM NODE 588:1668 (Session 258) ───────────────
@@ -457,7 +493,7 @@ local COL_ROWS = math.floor(COL_AREA_H / ITEM_PITCH)
 -- Core rule about checking against the runtime's language, not the one on this
 -- machine, and note that luac on this Mac accepts what the game refuses.
 local DET = {
-  headY   = 177,                      -- the header row, 41 tall
+  headY   = 179,                      -- the header block, 34 tall (node 582:983)
   -- ⚠️ 32, NOT 40 (Jason, Session 259, re-read from node 577:878). It came down
   -- to match the item icon the Slots page gained in the same edit — one item
   -- icon, one size, on every surface that draws one. The name column came left
@@ -477,10 +513,15 @@ local DET = {
   -- Standings rail needed it: a fontstring anchored TOPLEFT with no height
   -- draws wherever its own line box lands, so "centred" cannot be arithmetic
   -- on the anchor alone.
-  nameX   = 386,                      -- name (13 Regular) over slot line (12 Light)
-  nameH   = 18, line2H = 16,          -- 34 together, the node's own block
+  -- ⚠️ RE-READ FROM THE NODE (Session 262, and all three were wrong). The name
+  -- is 14 MEDIUM, not 13 Regular; the slot line is 11 Light, not 12; and each
+  -- line's box is 14, not 18 over 16. The extra four pixels of leading are what
+  -- Jason saw as the name block sitting loose beside its own icon — 28 of type
+  -- against a 32 icon centres; 34 does not fit inside it at all.
+  nameX   = 386,                      -- name (14 Medium) over slot line (11 Light)
+  nameH   = 14, line2H = 14,          -- 28 together, the node's own leading
   -- The verdict badge: a 10%-blush box with the grade over the word "Upgrade".
-  badgeX  = 692, badgeY = 178, badgeW = 68, badgeH = 34,
+  badgeX  = 692, badgeY = 179, badgeW = 68, badgeH = 34,
   -- ⚠️ 19, NOT 13 (Jason: "there's not enough space between MAJOR and
   -- Upgrade"). MAJOR is 16px Bold, whose line box is about 19 tall — so a 13px
   -- step put the word inside the grade's own descender space. The pair now runs
@@ -491,24 +532,42 @@ local DET = {
   -- them that the design does not have. These are the VISIBLE heights of the
   -- two lines — 16px Bold and 10px Light at Manrope's 0.72 cap ratio, measured
   -- from the bundled TTF — plus the gap the design puts between them.
-  badgePadX = 10, badgeLine1H = 12, badgeLine2H = 8, badgeGap = 2,
+  -- ⚠️ THE NODE'S TWO LINES ARE BOTH 10 LEADING (Session 262), stacking to 20
+  -- inside the 34 box rather than 22 — and the type is 14 Bold over 9 Light,
+  -- where this was drawing 16 over 10.
+  badgePadX = 10, badgeLine1H = 11, badgeLine2H = 9, badgeGap = 0,
+  -- The meta band between the two rules. factsR is the RIGHT edge the facts
+  -- line ends on — see the note beside DIV1_Y — and inset is how far the band
+  -- is held off each rule's own end.
+  factsR = 760, factsInset = 20,
 }
 
 -- TWO hairlines, not three. The mock separates header / meta / table and
 -- nothing else; the old third rule under the item row has no counterpart
 -- because the item row IS the header now.
+-- ⚠️ RE-READ FROM NODE 627:524 (Session 262). EVERY VERTICAL BELOW THE HEADER
+-- WAS TOO LOW, and by a growing amount — the rules by 9 and 12, the table by a
+-- full 20 — which is what Jason saw as "too much room under the item icon/name
+-- and upgrade label". The horizontals were all correct and are unchanged.
 local DIV_X, DIV_W = 340, 420
-local DIV1_Y, DIV2_Y = 238, 269
-local FACTS_X, FACTS_Y = 360, 246
+local DIV1_Y, DIV2_Y = 229, 257
+-- ⚠️ THE FACTS LINE IS RIGHT-ALIGNED TO THE RULES' RIGHT EDGE, not inset from
+-- their left. The node sits at 420 and is 340 wide, ending at 760 — the same
+-- edge the badge, the PRIORITY column and the button row all stop at. Written
+-- as a right edge so the line grows LEFTWARD as it gains tags, which is what
+-- the mock's longest state ("… • OVERALL BIS • TARGETED") does.
+-- Grouped into DET rather than added as top-level locals: Panel.lua sits within
+-- a handful of names of Lua 5.1's 200-per-chunk ceiling and the smoke harness
+-- fails the moment that shrinks further (Core §1.1).
 
 -- The ranked table.
-local RANK_HEAD_Y = 299     -- RAIDER / UPGRADE / ILVL GAIN / PRIORITY
-local RANK_TOP    = 320
+local RANK_HEAD_Y = 279     -- RAIDER / UPGRADE / ILVL GAIN / PRIORITY
+local RANK_TOP    = 300
 local RANK_PITCH  = 20
 local RANK_ROWS   = 9
--- Under the last row. 320 + 9 * 20 = 500, then the mock's own gap.
-local MORE_Y      = 505
-local NOTE_Y      = 521
+-- Under the last row. 300 + 9 * 20 = 480, then the mock's own gap.
+local MORE_Y      = 485
+local NOTE_Y      = 501
 
 -- Column x positions inside the ranked table. GAIN and PRIORITY are RIGHT
 -- edges, because both are numbers and numbers align on their right — confirmed
@@ -564,6 +623,10 @@ end
 --- A literal pipe, for WoW's escape syntax. A single "|" starts a colour or a
 --- link sequence; "||" is how you draw one.
 local BAR = "||"
+-- The refresh's one separator, everywhere a run of facts or tags is joined.
+-- The same U+2022 buildTagLine draws between tags, named once so the two cannot
+-- drift apart.
+local DOT = "\226\128\162"
 
 --- Relabel a control, whichever kind it turned out to be.
 ---
@@ -745,9 +808,25 @@ end
 --- item's name on the same line rather than sitting in a column of their own.
 --- The anchored widget must size to its own string, or its right edge is its
 --- declared width and the tags start in the middle of nowhere.
-local function buildTagLine(parent, x, y, maxTags, anchorTo)
+local function buildTagLine(parent, x, y, maxTags, anchorTo, height)
   local g = { tags = {}, seps = {} }
-  g.lead = at(text(parent, "light", "label", "body"), x, y)
+  -- ⚠️ THE LEAD IS WHITE (Session 262, Jason: the card's second line "is
+  -- supposed to be white, like in Figma"). Node 625:247 paints "Back, Cloth"
+  -- white and reserves #606060 for the "•" separators alone — the blush this
+  -- used to draw was never in the design.
+  g.lead = at(text(parent, "light", "label", "white"), x, y)
+  -- ⚠️ THE WHOLE LINE IS PLACED BY THE LEAD'S RECT. Every separator and tag
+  -- anchors LEFT to the run before it, so all of them inherit the LEAD's
+  -- vertical centre; with no height that rect IS the lead's own line box and
+  -- lands wherever the font puts it (Core §1.1, S260). A caller that aligns the
+  -- line against other cells in a row passes THAT ROW'S height, and the client
+  -- then centres the run in a KNOWN rect. Without it the UPGRADE column sat
+  -- half a row above the raider name it belongs to, while rank / name / gain /
+  -- priority — the four cells that DID get a height — centred correctly.
+  if height then
+    g.lead:SetHeight(height)
+    g.lead:SetJustifyV("MIDDLE")
+  end
   if anchorTo then
     g.lead:ClearAllPoints()
     g.lead:SetPoint("LEFT", anchorTo, "RIGHT", x or 0, 0)
@@ -797,6 +876,22 @@ local function buildTagLine(parent, x, y, maxTags, anchorTo)
         self.seps[i]:Hide(); tagFs:Hide()
       end
     end
+  end
+
+  --- The last run the line actually drew, for anything that has to sit AFTER
+  --- the whole thing. Falls back to the lead when no tag is shown.
+  ---
+  --- ⚠️ WITHOUT THIS A TRAILING MARK LANDS ON TOP OF THE FIRST TAG (Session
+  --- 262). The Slots list row anchored its owned-tick 6px past the NAME — the
+  --- same anchor the tag run starts from — so the tick and the first tag drew
+  --- on the same pixels. Node 626:497 puts that tick after the tags.
+  function g:Tail()
+    for i = #self.tags, 1, -1 do
+      if self.tags[i]:IsShown() and (self.tags[i]:GetText() or "") ~= "" then
+        return self.tags[i]
+      end
+    end
+    return self.lead
   end
 
   function g:SetShown(on)
@@ -1036,7 +1131,12 @@ local function buildBossTile(parent, i)
     else
       state.bossIndex = self.bossIndex
     end
-    state.sel, state.colScroll, state.rankScroll = 1, 0, 0
+    -- ⚠️ NIL, NOT 1 (Session 262, Jason: "clicking a boss should just show that
+    -- boss's loot table, NOT select the first item"). Opening a boss was
+    -- selecting its first card and filling the detail pane with an item nobody
+    -- picked — which also made the "Choose an Item to View Details" empty state
+    -- unreachable, though it has been written and drawn all along.
+    state.sel, state.colScroll, state.rankScroll = nil, 0, 0
     Panel.Refresh()
   end
 
@@ -1103,8 +1203,8 @@ local function buildRankRow(parent, i)
   -- class colour and leaves the ad-hoc "*" white, so the marker stays legible on
   -- a dark class and does not read as part of the name.
   row.name    = at(text(row, "medium", "name", "white"), C_NAME - o, 0, 90)
-  row.gain    = atRight(text(row, "light", "name", "white"), C_GAIN_R - o, 0, 44)
-  row.pr      = atRight(text(row, "light", "name", "white"), C_PRIORITY_R - o, 0, 48)
+  row.gain    = atRight(text(row, "light", "small", "white"), C_GAIN_R - o, 0, 44)
+  row.pr      = atRight(text(row, "light", "small", "white"), C_PRIORITY_R - o, 0, 48)
 
   -- ⚠️ EVERY CELL IS THE ROW'S FULL HEIGHT AND CENTRES IN IT (Jason, Session
   -- 259: "the name isn't vertically aligned with the other elements in the
@@ -1121,6 +1221,11 @@ local function buildRankRow(parent, i)
     fs:SetHeight(RANK_PITCH)
     fs:SetJustifyV("MIDDLE")
   end
+  -- ⚠️ AND THE UPGRADE COLUMN IS THE FIFTH CELL, WHICH THIS LOOP DID NOT COVER
+  -- (Session 262). It is a tag line rather than a plain fontstring, so it was
+  -- skipped — and it drew half a row ABOVE the raider name it belongs to, on
+  -- every row, while the four cells above centred correctly. The height goes to
+  -- buildTagLine, which places the whole run off its lead's rect.
 
   -- ⚠️ THE UPGRADE COLUMN WAS CHIPS AND IS NOW TEXT (Session 261). It read
   -- "MAJOR  O-BIS  -16" as three bordered boxes; it reads "MAJOR • O-BIS • -16"
@@ -1133,7 +1238,7 @@ local function buildRankRow(parent, i)
   -- best-in-slot could not read as one person's opinion. With the boxes gone
   -- that distinction survives only as colour, which is weaker. Jason's call:
   -- the outline "takes up too much vertical space and was distracting".
-  row.tagLine = buildTagLine(row, C_UPGRADE - o, 0, 4)
+  row.tagLine = buildTagLine(row, C_UPGRADE - o, 0, 4, nil, RANK_PITCH)
   -- Gear provenance, in the space between GAIN and PRIORITY. Blank is the common
   -- case and that is deliberate: almost every row is scored from the site
   -- snapshot, so tagging all twenty turns the signal into wallpaper. What is
@@ -1322,10 +1427,10 @@ local function buildStandingsRow(parent, i)
   -- The name is the one cell that takes a colour from the DATA rather than from
   -- the design — the mock's six sample rows are six real class colours.
   row.name = at(text(row, "medium", "name", "white"), ST_NAME - o, 3, 110)
-  row.ep   = atRight(text(row, "light", "name", "white"), ST_EP_R - o, 3, 60)
-  row.gp   = atRight(text(row, "light", "name", "white"), ST_GP_R - o, 3, 50)
-  row.pr   = atRight(text(row, "light", "name", "white"), ST_PR_R - o, 3, 50)
-  row.last = atRight(text(row, "light", "name", "white"), ST_LAST_R - o, 3, 60)
+  row.ep   = atRight(text(row, "light", "small", "white"), ST_EP_R - o, 3, 60)
+  row.gp   = atRight(text(row, "light", "small", "white"), ST_GP_R - o, 3, 50)
+  row.pr   = atRight(text(row, "light", "small", "white"), ST_PR_R - o, 3, 50)
+  row.last = atRight(text(row, "light", "small", "white"), ST_LAST_R - o, 3, 60)
   return row
 end
 
@@ -1396,14 +1501,14 @@ local function buildRailBlock(parent, y, index, h)
     -- The third line is the flat grey the mock names for the age — the least
     -- important line on the tab and the only one given its own hue.
     local colour = (i == 3) and "grey" or "white"
-    lines[i] = pinLine(text(b.box, "light", "name", colour), ly, innerW,
+    lines[i] = pinLine(text(b.box, "light", "small", colour), ly, innerW,
       L.lineSize + 5)
     if ns.Style then ns.Style.SetFont(lines[i], ns.Style.FONT.light, L.lineSize) end
   end
   -- Blocks have two or three lines; the absent one is a real fontstring parked
   -- off the layout so every call site can write to it without checking.
   for i = #lines + 1, 3 do
-    lines[i] = pinLine(text(b.box, "light", "name", "white"), 0, innerW, 1)
+    lines[i] = pinLine(text(b.box, "light", "small", "white"), 0, innerW, 1)
     lines[i]:Hide()
   end
   b.line1, b.line2, b.line3 = lines[1], lines[2], lines[3]
@@ -1468,20 +1573,11 @@ local function buildChrome()
   frame.logo = ns.Style and ns.Style.Lockup(frame, LOGO_X, LOGO_Y)
 
   -- The close button the template used to supply.
-  frame.close = CreateFrame("Button", nil, frame)
-  frame.close._hodStyled = true
-  frame.close:SetSize(20, 20)
-  frame.close:SetPoint("TOPRIGHT", -8, -8)
-  frame.close.x = text(frame.close, "label", "small", "textDim", "CENTER")
-  frame.close.x:SetPoint("CENTER")
-  frame.close.x:SetText("X")
-  frame.close:SetScript("OnClick", function() frame:Hide() end)
-  frame.close:SetScript("OnEnter", function(s)
-    if ns.Style then s.x:SetTextColor(ns.Style.rgb(ns.Style.COLOR.orange)) end
-  end)
-  frame.close:SetScript("OnLeave", function(s)
-    if ns.Style then s.x:SetTextColor(ns.Style.rgb(ns.Style.COLOR.textDim)) end
-  end)
+  -- ⚠️ VIOLET AT HALF ALPHA, NOT NEAR-WHITE (Session 262, node 626:519). It was
+  -- drawn in textDim, which reads as a bright Blizzard-ish X against a design
+  -- whose every other mark is in the palette. Shared with the secondary windows
+  -- now, which is what let them drop their Blizzard frame templates.
+  frame.close = ns.Style and ns.Style.CloseButton(frame)
 
   -- ── Tabs ──────────────────────────────────────────────────────────────────
   --
@@ -1574,7 +1670,7 @@ local function buildLootControls()
       if ns.Settings then
         ns.Settings.Set("vault", self:GetChecked() and "on" or "off")
       end
-      state.sel, state.colScroll, state.rankScroll = 1, 0, 0
+      state.sel, state.colScroll, state.rankScroll = nil, 0, 0
       Panel.Refresh()
     end)
   end
@@ -1629,7 +1725,7 @@ local function buildLootControls()
     b:SetScript("OnClick", function()
       frame.diffMenu:Hide()
       if ns.Settings then ns.Settings.Set("difficulty", choice) end
-      state.sel, state.colScroll, state.rankScroll = 1, 0, 0
+      state.sel, state.colScroll, state.rankScroll = nil, 0, 0
       Panel.Refresh()
     end)
     frame.diffItems[i] = b
@@ -1693,7 +1789,7 @@ local function buildLootControls()
   local function pick(field, which)
     return function()
       state[field] = which
-      state.sel, state.colScroll, state.rankScroll = 1, 0, 0
+      state.sel, state.colScroll, state.rankScroll = nil, 0, 0
       Panel.Refresh()
     end
   end
@@ -1776,7 +1872,7 @@ local function buildRunnerTab()
   -- Bold 14 in the green, wrapping to two lines — not the 20px title it was.
   R.status = at(text(frame, "bold", "rank", "green"), innerX, RN_STATUS_Y, innerW)
   R.status:SetWordWrap(true)
-  R.since  = at(text(frame, "light", "name", "white"), innerX, RN_SINCE_Y, innerW)
+  R.since  = at(text(frame, "light", "small", "white"), innerX, RN_SINCE_Y, innerW)
 
   -- The heading purple, same as every other block heading in the redesign.
   R.dataHead = at(text(frame, "bold", "head", "accent"), innerX, RN_DATA_Y, innerW)
@@ -1793,7 +1889,7 @@ local function buildRunnerTab()
   -- colour and means "you are running loot"; reusing it on a sentence that
   -- merely describes what that implies spends the signal twice.
   R.lead    = at(text(frame, "regular", "badge", "white"), RN_COL_X, RN_LEAD_Y, RN_COL_W)
-  R.leadSub = at(text(frame, "light", "name", "white"), RN_COL_X, RN_LEAD_SUB_Y, RN_LEAD_SUB_W)
+  R.leadSub = at(text(frame, "light", "small", "white"), RN_COL_X, RN_LEAD_SUB_Y, RN_LEAD_SUB_W)
   R.leadSub:SetWordWrap(true)
 
   local function hairline(y)
@@ -1816,21 +1912,21 @@ local function buildRunnerTab()
   for i = 1, RN_PEER_ROWS do
     local y = RN_PEER_TOP + (i - 1) * RN_PEER_PITCH
     R.peers[i] = {
-      name = at(text(frame, "light", "name", "white"),
+      name = at(text(frame, "light", "small", "white"),
                 RN_COL_X + RN_PEER_NAME_X, y, 90),
-      ver  = atRight(text(frame, "light", "name", "white"),
+      ver  = atRight(text(frame, "light", "small", "white"),
                 RN_COL_X + RN_PEER_VER_R, y, 110),
-      gear = atRight(text(frame, "light", "name", "white"),
+      gear = atRight(text(frame, "light", "small", "white"),
                 RN_COL_X + RN_PEER_GEAR_R, y, 110),
     }
   end
 
   R.missHead = at(text(frame, "regular", "badge", "white"), RN_COL_X, RN_MISS_Y, RN_COL_W)
-  R.missBody = at(text(frame, "light", "name", "white"), RN_COL_X, RN_MISS_BODY_Y, RN_COL_W)
+  R.missBody = at(text(frame, "light", "small", "white"), RN_COL_X, RN_MISS_BODY_Y, RN_COL_W)
   R.missBody:SetWordWrap(true)
 
   R.specHead = at(text(frame, "regular", "badge", "white"), RN_COL_X, RN_SPEC_Y, RN_COL_W)
-  R.specBody = at(text(frame, "light", "name", "white"), RN_COL_X, RN_SPEC_BODY_Y, RN_COL_W)
+  R.specBody = at(text(frame, "light", "small", "white"), RN_COL_X, RN_SPEC_BODY_Y, RN_COL_W)
   R.specBody:SetWordWrap(true)
 
   -- Everything above is hidden until the tab is on screen.
@@ -2012,9 +2108,13 @@ local function buildSourceLine(parent, x, y, width)
   local g = {}
   -- NO EXPLICIT WIDTH ON ANY RUN: each sizes itself to its own string, which is
   -- what makes the RIGHT-edge anchoring below exact.
-  g.pre  = at(text(parent, "light", "label", "body"), x, y)
-  g.boss = text(parent, "bold", "label", "white")
-  g.rest = text(parent, "light", "label", "body")
+  -- ⚠️ ALL THREE RUNS ARE WHITE, AND THE WEIGHTS ARE REGULAR / BLACK / REGULAR
+  -- (Session 262, node 590:2008). It was Light blush around a Bold boss name —
+  -- so the line was doing its emphasis with COLOUR as well as weight, where the
+  -- design does it with weight alone and paints the whole line white.
+  g.pre  = at(text(parent, "regular", "label", "white"), x, y)
+  g.boss = text(parent, "black", "label", "white")
+  g.rest = text(parent, "regular", "label", "white")
 
   -- ⚠️ ANCHORED TO EACH OTHER'S RIGHT EDGE, ONCE, AT BUILD TIME (Session 260).
   -- These three runs used to be positioned by reading GetStringWidth in the very
@@ -2165,9 +2265,24 @@ local function buildSlotRoute(parent, i)
   -- width would run 42px past the panel it sits inside.
   r:SetSize(SL.panelW - SL.panelPadX * 2, SL.blockH)
 
-  r.name = at(text(r, "medium", "row", "body"), 0, 0, 300)
-  r.tagLine = buildTagLine(r, 6, 0, 4, r.name)
-  r.source = buildSourceLine(r, 0, SL.routeLineY, SL.panelW - SL.panelPadX * 2)
+  -- ⚠️ ITS OWN ITEM ICON (Session 262, node 626:354). A route is the same
+  -- shape as the identity line above it — 32px round icon, the same 42 gutter,
+  -- then two lines — and it was drawing text alone.
+  r.icon = ITEM.BuildIcon(r, SL.itemIcon)
+  r.icon:SetPoint("TOPLEFT", 0, 0)
+
+  r.name = at(text(r, "medium", "row", "white"), SL.textX, 0, 300)
+  -- ⚠️ ANCHORED TO A FITTED HIT FRAME, NOT TO THE FONTSTRING (Session 262).
+  -- r.name carries a 300px wrapping ceiling, so hanging the tags off its RIGHT
+  -- edge started them at a fixed 306 — which is why the route kinds read as a
+  -- right-hand column rather than flowing after the name the way the identity
+  -- line and the list rows already do. FitTip measures the STRING.
+  r.nameHit = ITEM.AttachTip(CreateFrame("Frame", nil, r))
+  r.nameHit:SetPoint("TOPLEFT", r.name, "TOPLEFT", 0, 0)
+  r.nameHit:Hide()
+  r.tagLine = buildTagLine(r, 6, 0, 4, r.nameHit)
+  r.source = buildSourceLine(r, SL.textX, SL.routeLineY,
+    SL.panelW - SL.panelPadX * 2 - SL.textX)
 
   r:Hide()
   return r
@@ -2207,24 +2322,37 @@ local function buildSlotsTab()
     -- 29 tall with a 26-tall text box in them, so the label sits on the row's
     -- middle beside a 20px icon that is itself centred. A TOPLEFT anchor at
     -- y=1 put the text above the icon's centre line on every row.
-    row.label = text(row, "light", "head", "body", "RIGHT")
-    row.label:ClearAllPoints()
-    row.label:SetPoint("RIGHT", row, "LEFT", SL.labelR, 0)
-    row.label:SetWidth(80)
-
     row.icon = row:CreateTexture(nil, "ARTWORK")
     row.icon:SetSize(SL.iconSize, SL.iconSize)
-    -- Centred for the same reason: the last row is 26 tall and the rest 29, so
-    -- one constant top inset cannot centre the icon in both.
+    -- Centred rather than top-inset: the last row is 26 tall and the rest 29,
+    -- so one constant top inset cannot centre the icon in both.
     row.icon:SetPoint("LEFT", row, "LEFT", SL.iconX, 0)
     local tex = ns.SlotIcon and ns.SlotIcon(def)
     if tex then row.icon:SetTexture(tex) end
 
-    row.check = row:CreateTexture(nil, "OVERLAY")
-    row.check:SetSize(SL.checkW, SL.checkH)
-    row.check:SetPoint("LEFT", row, "LEFT", SL.checkX, 0)
-    row.check:SetTexture(SLOT_CHECK_TEX)
-    row.check:Hide()
+    -- ⚠️ AFTER THE ICON AND LEFT-ALIGNED (Session 262). It was right-aligned to
+    -- x 91, i.e. BEFORE the icon, which is the pre-refresh rail. 13 Medium
+    -- white in a 26-tall box, so it centres against the icon beside it.
+    row.label = text(row, "medium", "detail", "white", "LEFT")
+    row.label:ClearAllPoints()
+    row.label:SetPoint("LEFT", row, "LEFT", SL.labelX, 0)
+    row.label:SetWidth(SL.checkX2 - SL.labelX)
+    row.label:SetHeight(SL.labelH)
+    row.label:SetJustifyV("MIDDLE")
+
+    -- ONE PER SOCKET, outermost first. checks[1] is the rightmost and is the
+    -- first to turn green, which is what the node draws on Trinket — grey at
+    -- 140, green at 160 — and what puts a single-socket row's only check in the
+    -- same place as a paired row's outer one.
+    row.checks = {}
+    for c, cx in ipairs({ SL.checkX, SL.checkX2 }) do
+      local chk = row:CreateTexture(nil, "OVERLAY")
+      chk:SetSize(SL.checkW, SL.checkH)
+      chk:SetPoint("LEFT", row, "LEFT", cx, 0)
+      chk:SetTexture(SLOT_CHECK_TEX)
+      chk:Hide()
+      row.checks[c] = chk
+    end
 
     -- The last row drops its rule, which is the whole of why it measures 26.
     if not last then row.rule = divider(row, 0, h - 1, SL.railW) end
@@ -2294,23 +2422,20 @@ local function buildSlotsTab()
   -- ── The single-item layout ────────────────────────────────────────────────
   frame.slotHead = CreateFrame("Frame", nil, frame)
   frame.slotHead:SetPoint("TOPLEFT", SL.paneX, -SL.headY)
-  -- 34, the two-line block's own height — not the name line's 18. The icon is
-  -- centred against the BLOCK, so a frame sized to one line cannot hold it.
+  -- 32 — the icon's own height. The block is ONE line now, centred against it.
   frame.slotHead:SetSize(SL.paneW, SL.headBlockH)
 
   frame.slotHead.icon = ITEM.BuildIcon(frame.slotHead, SL.itemIcon)
-  frame.slotHead.icon:SetPoint("TOPLEFT", 0, -1)
+  frame.slotHead.icon:SetPoint("TOPLEFT", 0, 0)
 
-  frame.slotHead.name = at(text(frame.slotHead, "medium", "detail", "body"),
-    SL.textX, 0, 300)
-  -- ⚠️ EXPLICIT HEIGHT + TOP JUSTIFY, the S258 rule this block was built without
-  -- (Jason, Session 259: "check line height"). A fontstring anchored TOPLEFT
-  -- with no height draws wherever its own line box happens to land, so the
-  -- node's 18-over-16 stack cannot be arithmetic on the anchors alone — which is
-  -- why the two lines sat tighter together here than in the mock while both
-  -- were the right SIZE. The Loot detail header already does exactly this.
+  -- ⚠️ 12 MEDIUM WHITE, ON ONE LINE (Session 262, node 591:2189). It was 13 in
+  -- the blush over a second "Tier Piece" line; the refresh puts the name and its
+  -- tags on a single 19-tall run sitting 6 down, which centres it against the
+  -- 32px icon beside it.
+  frame.slotHead.name = at(text(frame.slotHead, "medium", "row", "white"),
+    SL.textX, SL.headNameY, 300)
   frame.slotHead.name:SetHeight(SL.headNameH)
-  frame.slotHead.name:SetJustifyV("TOP")
+  frame.slotHead.name:SetJustifyV("MIDDLE")
   frame.slotHead.nameHit = ITEM.AttachTip(CreateFrame("Frame", nil, frame.slotHead))
   frame.slotHead.nameHit:SetPoint("TOPLEFT", frame.slotHead.name, "TOPLEFT", 0, 0)
   frame.slotHead.nameHit:Hide()
@@ -2321,13 +2446,6 @@ local function buildSlotsTab()
   -- FOUR SLOTS STILL, because three BIS contexts can apply before the
   -- classification (Session 258) — the count did not change, the widget did.
   frame.slotHead.tagLine = buildTagLine(frame.slotHead, 6, 0, 4, frame.slotHead.nameHit)
-  -- ⚠️ WHITE OVER BLUSH HERE, the opposite way round from the rail's cards. Read
-  -- off the node rather than from a rule about which kind of thing it is.
-  -- Indented with the name it sits under, not with the icon beside it.
-  frame.slotHead.slot = at(text(frame, "light", "head", "white"),
-    SL.paneX + SL.textX, SL.headSlotY, SL.paneW - SL.textX)
-  frame.slotHead.slot:SetHeight(SL.headKindH)
-  frame.slotHead.slot:SetJustifyV("TOP")
 
   frame.slotPanel = CreateFrame("Frame", nil, frame)
   frame.slotPanel:SetPoint("TOPLEFT", SL.panelX, -SL.panelY)
@@ -2400,16 +2518,18 @@ local function buildDetailPane()
   -- The crop trims 2.6px per edge at 32px, then the mask rounds what is left.
   -- Both live in buildItemIcon now, shared with the two Slots surfaces.
 
-  -- ⚠️ THE NAME IS BLUSH AND THE SLOT LINE IS WHITE — the OPPOSITE of the left
-  -- rail's cards, and read off the node rather than reasoned about. See the note
-  -- on Style.COLOR.body.
-  -- Centred against the icon: the icon spans iconY..iconY+40, the block is 34,
-  -- so the block's top is iconY + 3.
+  -- ⚠️ BOTH LINES ARE WHITE (Session 262, corrected from the node). The earlier
+  -- note here said the name was BLUSH and read it as a deliberate inversion of
+  -- the left rail; node 577:880 paints the whole block white and colours only
+  -- the "•" separators (#606060). What separates the two lines is WEIGHT AND
+  -- SIZE — 14 Medium over 11 Light — not colour.
+  -- Centred against the icon: the icon spans iconY..iconY+32 and the block is
+  -- 28, so the block's top is iconY + 2.
   local blockTop = DET.iconY + math.floor((DET.icon - (DET.nameH + DET.line2H)) / 2)
-  frame.itemName = at(text(frame, "regular", "detail", "body"), DET.nameX, blockTop, 300)
+  frame.itemName = at(text(frame, "medium", "item", "white"), DET.nameX, blockTop, 300)
   frame.itemName:SetHeight(DET.nameH)
   frame.itemName:SetJustifyV("TOP")
-  frame.itemSub  = at(text(frame, "light", "row", "white"), DET.nameX,
+  frame.itemSub  = at(text(frame, "light", "small", "white"), DET.nameX,
     blockTop + DET.nameH, 300)
   frame.itemSub:SetHeight(DET.line2H)
   frame.itemSub:SetJustifyV("TOP")
@@ -2458,11 +2578,11 @@ local function buildDetailPane()
   local stackH = DET.badgeLine1H + DET.badgeGap + DET.badgeLine2H
   local stackTop = math.floor((DET.badgeH - stackH) / 2 + 0.5)
 
-  frame.hUpgrade = text(frame.badgeBox, "bold", "badge", "major", "RIGHT")
+  frame.hUpgrade = text(frame.badgeBox, "bold", "item", "major", "RIGHT")
   frame.hUpgrade:SetPoint("TOPRIGHT", -DET.badgePadX, -stackTop)
   frame.hUpgrade:SetHeight(DET.badgeLine1H)
   frame.hUpgrade:SetJustifyV("MIDDLE")
-  frame.hUpgradeWord = text(frame.badgeBox, "light", "label", "white", "RIGHT")
+  frame.hUpgradeWord = text(frame.badgeBox, "light", "chip", "white", "RIGHT")
   frame.hUpgradeWord:SetPoint("TOPRIGHT", -DET.badgePadX,
     -(stackTop + DET.badgeLine1H + DET.badgeGap))
   frame.hUpgradeWord:SetHeight(DET.badgeLine2H)
@@ -2524,21 +2644,27 @@ local function buildDetailPane()
   -- statement — and it drifts the moment a size or a rule moves. Given the
   -- height of the band it lives in and JustifyV MIDDLE, the client centres it
   -- and the two dividers are the only numbers that decide where it sits.
+  -- ⚠️ THE TAGS ARE THE ANCHOR NOW, NOT THE PLAIN HALF (Session 262). The line
+  -- is RIGHT-aligned to the rules' own right edge, so the pair has to grow
+  -- LEFTWARD: the tag run is pinned to that edge and the plain run hangs off its
+  -- left. Anchored once here rather than at fill time, so the three fill sites
+  -- that write only one half cannot leave the other pointing at a stale x.
   local FACTS_BAND = DIV2_Y - DIV1_Y
-  frame.facts = text(frame, "light", "label", "white")
-  frame.facts:SetPoint("TOPLEFT", FACTS_X, -DIV1_Y)
-  frame.facts:SetSize(DIV_W - 20, FACTS_BAND)
-  frame.facts:SetJustifyV("MIDDLE")
-  frame.factTags = text(frame, "bold", "label", "body")
-  frame.factTags:SetPoint("TOPLEFT", FACTS_X, -DIV1_Y)
-  frame.factTags:SetSize(DIV_W - 20, FACTS_BAND)
+  local FACTS_W = DIV_W - DET.factsInset * 2
+  frame.factTags = text(frame, "bold", "label", "body", "RIGHT")
+  frame.factTags:SetPoint("TOPRIGHT", frame, "TOPLEFT", DET.factsR, -DIV1_Y)
+  frame.factTags:SetSize(FACTS_W, FACTS_BAND)
   frame.factTags:SetJustifyV("MIDDLE")
+  frame.facts = text(frame, "light", "label", "white", "RIGHT")
+  frame.facts:SetPoint("TOPRIGHT", frame.factTags, "TOPLEFT", 0, 0)
+  frame.facts:SetSize(FACTS_W, FACTS_BAND)
+  frame.facts:SetJustifyV("MIDDLE")
   frame.div2 = divider(frame, DIV_X, DIV2_Y, DIV_W)
 
   -- ⚠️ UPPERCASE, 11px LIGHT, BLUSH — the node's own treatment, not a grey
   -- sentence. Centred across the detail column at the y both empty-state frames
   -- put it (314 in one, 319 in the other; they are the same line to the eye).
-  frame.paneEmpty = text(frame, "light", "name", "body", "CENTER")
+  frame.paneEmpty = text(frame, "light", "small", "body", "CENTER")
   frame.paneEmpty:SetPoint("TOP", frame, "TOPLEFT", DIV_X + DIV_W / 2, -314)
   frame.paneEmpty:Hide()
 
@@ -2546,8 +2672,14 @@ local function buildDetailPane()
   -- right end where nothing else sits. It states who actually received a drop,
   -- which the panel is the only surface to show during a raid; deleting a fact
   -- because a mock did not draw it is a scope decision, not a styling one.
-  frame.wonLabel = atRight(text(frame, "light", "label", "body", "RIGHT"),
-    DIV_X + DIV_W, FACTS_Y, 150)
+  -- ⚠️ IT MOVED TO THE BAND'S LEFT END (Session 262). It used to sit right-
+  -- aligned at 760 while the facts line ran from the left; the facts line is
+  -- right-aligned to that same 760 now, so the two would have drawn through
+  -- each other. The left half of the band is the space the refresh freed.
+  frame.wonLabel = at(text(frame, "light", "label", "body", "LEFT"),
+    DIV_X + DET.factsInset, DIV1_Y, 150)
+  frame.wonLabel:SetHeight(DIV2_Y - DIV1_Y)
+  frame.wonLabel:SetJustifyV("MIDDLE")
   frame.wonBy = frame.wonLabel
 
   -- The ranked table's column headings.
@@ -3120,7 +3252,7 @@ end
 --- outlive the list it came from.
 function Panel.CurrentItemID()
   if state.tab ~= "Loot" then return nil end
-  local e = Panel._entries and Panel._entries[state.sel]
+  local e = state.sel and Panel._entries and Panel._entries[state.sel]
   return e and e.itemID or nil
 end
 
@@ -3348,7 +3480,13 @@ local function renderColumn(items)
       nextItem = nextItem + 1
       fillItemRow(row, en.entry, en.index)
       row:ClearAllPoints()
-      row:SetPoint("TOPLEFT", frame.col, "TOPLEFT", 0, -y)
+      -- ⚠️ CARD.x, NOT 0 (Session 262, Jason: "the loot items box inset isn't
+      -- here"). The builder anchors each card at the indent and this loop's
+      -- ClearAllPoints throws that away — so the cards filled the column from
+      -- its own left edge, under the boss ICONS, instead of lining up under the
+      -- boss NAME they belong to. The indent has to be re-stated here because
+      -- the accordion re-anchors every row on every refresh.
+      row:SetPoint("TOPLEFT", frame.col, "TOPLEFT", CARD.x, -y)
     end
     y = y + h
   end
@@ -3573,10 +3711,12 @@ local function renderFacts(entry, ranked)
   end
   if entry.targeted then tags[#tags + 1] = "TARGETED" end
 
-  -- ⚠️ ONE SPACE EITHER SIDE, NOT TWO. The mock's separator is " | " and the
-  -- doubled version left gaps wide enough to read as column breaks.
-  local sepPlain = " " .. BAR .. " "
-  local sep = S and (S.code(S.COLOR.accent) .. sepPlain .. "|r") or sepPlain
+  -- ⚠️ "•" IN TRASH GREY, NOT A PIPE IN THE ACCENT (Session 262). This line was
+  -- still drawing the pre-refresh separator while every other tag line in the
+  -- panel had moved to the bullet — node 577:890 uses the same "•" at #606060
+  -- the item cards and the ranking column do. One separator, one colour.
+  local sepPlain = " " .. DOT .. " "
+  local sep = S and (S.code(S.COLOR.grey) .. sepPlain .. "|r") or sepPlain
 
   if #parts == 0 and #tags == 0 then
     frame.facts:SetText(entry.reason or "")
@@ -3599,14 +3739,14 @@ local function renderFacts(entry, ranked)
   -- bundled TTF rather than guessed.
   local SPACE_ADV = 2
   if left ~= "" and right ~= "" then
-    right = (S and (S.code(S.COLOR.accent) .. BAR .. "|r") or BAR) .. " " .. right
+    right = (S and (S.code(S.COLOR.grey) .. DOT .. "|r") or DOT) .. " " .. right
   end
 
   frame.facts:SetText(left)
   frame.factTags:SetText(right)
-  frame.factTags:ClearAllPoints()
-  frame.factTags:SetPoint("TOPLEFT", frame.facts, "TOPLEFT",
-    (frame.facts:GetStringWidth() or 0) + ((left ~= "" and right ~= "") and SPACE_ADV or 0), 0)
+  -- Only the GAP moves at fill time; the anchor itself is set once in build().
+  frame.facts:SetPoint("TOPRIGHT", frame.factTags, "TOPLEFT",
+    -((left ~= "" and right ~= "") and SPACE_ADV or 0), 0)
 end
 
 --- The selected item's identity row, and who won it.
@@ -3921,7 +4061,9 @@ local function renderLoot()
 
   renderColumn(entries)
 
-  local entry = entries[state.sel]
+  -- state.sel is nil until a card is clicked (Session 262), so this is guarded
+  -- rather than leaning on Lua answering nil for a nil key.
+  local entry = state.sel and entries[state.sel]
 
   -- NO SELECTION MEANS NO PANE, exactly as the empty-state mocks draw it. The
   -- whole right-hand side goes away rather than standing there empty.
@@ -4183,7 +4325,12 @@ local function pickTags(pick)
       tags[#tags + 1] = { text = ns.BIS_CHIP[view.key], color = "bis" }
     end
   end
-  if pick.tierPiece then
+  -- kindTag lets an OBTAINED BY route reuse this whole function: its trailing
+  -- tag is TIER TOKEN or CATALYZE TARGET rather than TIER PIECE, and everything
+  -- before it is identical (Session 262).
+  if pick.kindTag then
+    tags[#tags + 1] = { text = pick.kindTag, color = "tier" }
+  elseif pick.tierPiece then
     tags[#tags + 1] = { text = "TIER PIECE", color = "tier" }
   elseif pick.crafted then
     tags[#tags + 1] = { text = "CRAFTED", color = "crafted" }
@@ -4238,16 +4385,27 @@ local function renderSlots()
     local data = report.rows[i]
     row.bg:SetShown(i == state.slotIndex)
     setTextForce(row.label, data and data.label or "")
-    if data and data.check ~= "none" then
-      row.check:Show()
-      -- PARTIAL is the one-of-two case, drawn at the same hue and half the
-      -- alpha rather than as a second icon.
-      row.check:SetAlpha(data.check == "full" and 1 or 0.4)
-      if ns.Style then
-        row.check:SetVertexColor(ns.Style.rgb(ns.Style.COLOR.accent))
+    -- ⚠️ A CHECK PER SOCKET, ALWAYS DRAWN (Session 262). Every row shows its
+    -- sockets whether or not anything is owned — grey for an empty one, green
+    -- once it is filled — so the rail reads as a checklist rather than as a
+    -- sparse set of marks. This REPLACES the single violet check that was
+    -- hidden at "none" and drawn at 0.4 alpha for the one-of-two case.
+    local sockets = (data and data.sockets) or 1
+    local owned   = (data and data.owned) or 0
+    for c, chk in ipairs(row.checks) do
+      if data and c <= sockets then
+        chk:Show()
+        -- Filled from the OUTSIDE in, so checks[1] — the rightmost — is the
+        -- one that turns green first.
+        local got = c <= owned
+        chk:SetAlpha(got and 1 or 0.5)
+        if ns.Style then
+          chk:SetVertexColor(ns.Style.rgb(got and ns.Style.COLOR.green
+                                              or ns.Style.COLOR.grey))
+        end
+      else
+        chk:Hide()
       end
-    else
-      row.check:Hide()
     end
   end
 
@@ -4277,7 +4435,6 @@ local function renderSlots()
   local useSingle = (#routes > 0)
 
   frame.slotHead:SetShown(useSingle)
-  frame.slotHead.slot:SetShown(useSingle)
   frame.slotPanel:SetShown(useSingle)
   frame.slotList:SetShown(not useSingle)
 
@@ -4291,11 +4448,11 @@ local function renderSlots()
     ITEM.SetIcon(frame.slotHead.icon, single.itemID, single.icon)
     ITEM.FitTip(frame.slotHead.nameHit, frame.slotHead.name, single.itemID,
       SL.headNameH)
+    -- ⚠️ THE KIND LINE IS GONE (Session 262). It read "Tier Piece" under the
+    -- name while the tag run beside the name already said TIER PIECE — the same
+    -- fact printed twice, once as a tag and once as a sentence. The node draws
+    -- one line.
     frame.slotHead.tagLine:Set("", pickTags(single))
-    -- ⚠️ THE KIND ALONE. The mock's second line reads "Tier Piece"; naming the
-    -- slot again repeats what the selected rail row already says, an arm's
-    -- length to the left.
-    setTextForce(frame.slotHead.slot, single.tierPiece and "Tier Piece" or sel.label)
 
     local shown = 0
     for i, r in ipairs(frame.slotRoutes) do
@@ -4309,11 +4466,20 @@ local function renderSlots()
         -- Shown BEFORE anything is written into it — see setTextForce (S254).
         r:Show()
         setTextForce(r.name, ns.NonEmpty(route.name) or ns.LOADING_NAME)
+        ITEM.SetIcon(r.icon, route.itemID, route.icon)
+        ITEM.FitTip(r.nameHit, r.name, route.itemID, SL.headNameH)
         -- ⚠️ THE ROUTE'S KIND FLOWS AFTER ITS NAME NOW, not right-aligned in
         -- the panel. The mock reads "Venomwoven Idol • O-BIS • M-BIS • TIER
         -- TOKEN" on one line, so the kind is the last tag rather than a box
         -- pinned to the far edge.
-        r.tagLine:Set("", { { text = route.kind, color = "tier" } })
+        --
+        -- ⚠️ AND THE BIS CONTEXTS COME FIRST (Session 262). The kind was the
+        -- only tag a route drew; the node draws the item's BIS listings ahead
+        -- of it, in the same order pickTags uses for an ordinary pick, so a
+        -- route and a pick read identically. See ns.ObtainRoutes for the rule
+        -- this reverses.
+        r.tagLine:Set("", pickTags({ contexts = route.contexts,
+                                     kindTag = route.kind }))
         r.source:Set(route.source)
       else
         r:Hide()
@@ -4338,6 +4504,9 @@ local function renderSlots()
         -- 16, not the row's 55: the name is one line of 13 Regular, and the
         -- source line 18px below it is a different item's worth of nothing.
         ITEM.FitTip(row.nameHit, row.name, pick.itemID, 16)
+        -- The tags have to be written BEFORE the tick is placed: the tick
+        -- anchors to whichever run the line ended on.
+        row.tagLine:Set("", pickTags(pick))
         row.check:SetShown(pick.owned)
         if pick.owned then
           row.check:ClearAllPoints()
@@ -4350,12 +4519,14 @@ local function renderSlots()
           -- ALREADY measured that string to size the hit area directly above,
           -- so the tick now rides that one result. One measurement, and the
           -- tick cannot drift away from the region the tooltip covers.
-          row.check:SetPoint("LEFT", row.nameHit, "RIGHT", 6, 0)
+          -- ⚠️ AFTER THE TAGS, NOT AFTER THE NAME (Session 262). Both used to
+          -- anchor 6px past nameHit, so the tick drew through the first tag.
+          row.check:SetPoint("LEFT", row.tagLine:Tail(), "RIGHT", 10, 0)
           if ns.Style then
-            row.check:SetVertexColor(ns.Style.rgb(ns.Style.COLOR.accent))
+            -- Green, like the rail's: the refresh makes green mean acquired.
+            row.check:SetVertexColor(ns.Style.rgb(ns.Style.COLOR.green))
           end
         end
-        row.tagLine:Set("", pickTags(pick))
         row.source:Set(pick.source)
         -- Last visible row drops its rule, the same tell the rail uses.
         if row.rule then row.rule:SetShown(picks[i + 1] ~= nil) end
@@ -4702,7 +4873,6 @@ function Panel.Refresh()
   if not onSlots then
     frame.slotMenu:Hide()
     frame.slotHead:Hide()
-    frame.slotHead.slot:Hide()
     frame.slotPanel:Hide()
     frame.slotList:Hide()
     frame.slotNote:Hide()
@@ -4899,7 +5069,7 @@ function Panel.Show()
   -- drop, since nothing ever will. Re-evaluated on every open, so a toggle made
   -- during a session sticks until the panel is closed.
   state.source = ns.DefaultLootSource()
-  state.sel, state.colScroll, state.rankScroll = 1, 0, 0
+  state.sel, state.colScroll, state.rankScroll = nil, 0, 0
   -- Collapsed on every open, for the same reason the source is re-evaluated
   -- here: the panel should present the same starting state each time rather
   -- than resuming a selection made before whatever just happened.

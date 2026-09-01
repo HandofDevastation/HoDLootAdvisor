@@ -286,22 +286,52 @@ local frame
 -- next row's control.
 -- ── Geometry, read off node 591:2403 (600x760) ─────────────────────────────
 --
--- ⚠️ THE ROW PITCH IS NOT CONSTANT. The mock's rows sit at 0, 50, 100, 150,
--- 214, 264, 314, 364, 428 and 478 — a 50 pitch for a row whose help fits one
--- line, and 64 where it wraps to two. A single pitch would either crush the
+-- ⚠️ THE ROW PITCH IS NOT CONSTANT. The mock's rows sit at 0, 55, 110, 165,
+-- 236, 291, 346, 401, 472 and 527 — a 55 pitch for a row whose help fits one
+-- line, and 71 where it wraps to two. A single pitch would either crush the
 -- long rows or leave a gap under every short one, so the layout MEASURES which
 -- it is rather than assuming.
+--
+-- ⚠️ RE-READ SESSION 262 (Jason: "the line heights seem wrong as compared to
+-- the Figma design"). These were 30 and 44 against a 20 gap, i.e. a 50/64
+-- pitch — the numbers in the note above before the mock was revised. Node
+-- 591:2402 measures its rows at 35 and 51, so every row in the window was four
+-- to seven pixels tight and the whole list crept upward as it went down.
 local FRAME_W  = 600
 -- The panel's own height. The settings window may be shorter than this and must
 -- never be taller.
 local FRAME_H_MAX = 600
 local HEADER_H = 128            -- the first row's top; lockup and title sit above
-local ROW_H    = 30             -- a one-line row; a wrapping one is ROW_H_TALL
-local ROW_H_TALL = 44
+-- ⚠️ THE STORED VALUE IS SHOUTED; THE LABEL IS NOT (Session 262). The choices
+-- are stored as RAID_WARNING / AUTO / MPLUS and were printed straight onto the
+-- control, so the window read as a row of shouting where the mock draws
+-- "Raid_Warning" and "Auto". Only the DISPLAY changes — the values these map
+-- from are settings keys and are untouched.
+local CHOICE_LABEL = { MPLUS = "Dungeons" }
+-- The width a fitted control must gain to clear its own caret: the mock's box
+-- is the label plus the control's padding plus a 14px gap before the triangle.
+local CARET_ALLOW = 14
+
+local function setChoiceLabel(btn, value)
+  local shown = CHOICE_LABEL[value]
+  if not shown then
+    -- Capitalises each word, so an underscore-joined value keeps both halves.
+    shown = (tostring(value):lower():gsub("(%a)(%w*)",
+      function(a, rest) return a:upper() .. rest end))
+  end
+  btn:SetText(shown)
+  if btn.FitToLabel then
+    btn:FitToLabel()
+    btn:SetWidth(btn:GetWidth() + CARET_ALLOW)
+  end
+end
+
+local ROW_H    = 35             -- a one-line row; a wrapping one is ROW_H_TALL
+local ROW_H_TALL = 51
 local ROW_GAP  = 20
 local SET_X    = 40             -- the window's own margin, both sides
-local SET_LABEL_Y = 0           -- label at the row's top, help 16 beneath it
-local SET_HELP_Y  = 16
+local SET_LABEL_Y = 0           -- label at the row's top, help 17 beneath it
+local SET_HELP_Y  = 17
 -- The controls, each right-aligned to its own edge as the mock places them.
 local SET_CHECK_X, SET_CHECK_SZ = 496, 24
 local SET_INPUT_X, SET_INPUT_W, SET_INPUT_H = 440, 80, 30
@@ -401,7 +431,10 @@ end
 local function build()
   local height = Settings.WindowHeight()
 
-  frame = CreateFrame("Frame", "HoDLootAdvisorConfigFrame", UIParent, "BasicFrameTemplateWithInset")
+  -- ⚠️ NO BLIZZARD TEMPLATE (Jason, Session 262). Same reason as the Loot Log:
+  -- the template was here for its CloseButton alone and brought the gold rim
+  -- and inset with it. Style.CloseButton supplies the design's own X.
+  frame = CreateFrame("Frame", "HoDLootAdvisorConfigFrame", UIParent)
   frame:SetSize(FRAME_W, height)
   frame:SetPoint("CENTER")
   frame:SetMovable(true)
@@ -424,6 +457,7 @@ local function build()
     -- No rim: the fill is the window, exactly as on the panel.
     S.Surface(frame, S.COLOR.windowGround, 1)
     S.Lockup(frame, SET_X, 30)
+    frame.close = S.CloseButton(frame)
   end
 
   frame.heading = S and S.Text(frame, "light", "title", S.COLOR.white, "LEFT")
@@ -528,8 +562,12 @@ local function build()
       -- control's gradient rim and the mock's 10x7 tick, which is what
       -- Style.Check already draws for the Loot tab's Vault control. Passing an
       -- EMPTY label because this row has drawn its own above the help text.
-      control = S and S.Check(frame.content, "", SET_CHECK_SZ)
-        or CreateFrame("CheckButton", nil, frame.content, "UICheckButtonTemplate")
+      -- Node 591:2365's own SVG: a #0c0721 fill with a FLAT rule-blush rim at
+      -- 30% — not the control-rim gradient the Loot tab's Vault box carries.
+      -- The two boxes genuinely differ; see the note on Style.Check.
+      control = S and S.Check(frame.content, "", SET_CHECK_SZ,
+          { fill = S.COLOR.ground, rim = S.COLOR.rule, rimAlpha = 0.3 })
+        or CreateFrame("CheckButton", nil, frame.content)
       control:SetSize(SET_CHECK_SZ, SET_CHECK_SZ)
       control:SetPoint("TOPLEFT", SET_CHECK_X, -(y + 4))
       control:SetScript("OnClick", function(self)
@@ -571,9 +609,13 @@ local function build()
       end
 
     elseif spec.kind == "number" then
-      control = CreateFrame("EditBox", nil, frame.content, "InputBoxTemplate")
+      -- ⚠️ THE DESIGN'S FIELD, NOT InputBoxTemplate (Jason, Session 262). See
+      -- Style.Input — the template's gold beading was the last piece of game
+      -- chrome in this window.
+      control = S and S.Input(frame.content, SET_INPUT_W, SET_INPUT_H)
+        or CreateFrame("EditBox", nil, frame.content)
       control:SetSize(SET_INPUT_W, SET_INPUT_H)
-      control:SetPoint("TOPLEFT", SET_INPUT_X, -y)
+      control:SetPoint("TOPLEFT", SET_INPUT_X, -(y + 2))
       control:SetAutoFocus(false)
       control:SetNumeric(true)
       -- Committed on ENTER *and* on losing focus. Enter-only is why "Close"
@@ -607,16 +649,34 @@ local function build()
       -- a stock button. Still a CYCLER underneath — five values, one click each.
       control = S and S.Control(frame.content, "", "head")
         or CreateFrame("Button", nil, frame.content, "UIPanelButtonTemplate")
-      control:SetSize(SET_DROP_W, SET_INPUT_H)
-      control:SetPoint("TOPLEFT", FRAME_W - SET_X - SET_DROP_W - 26, -y)
+      control:SetHeight(SET_INPUT_H)
+      -- ⚠️ RIGHT-ALIGNED AND SIZED TO ITS OWN LABEL (Session 262, node
+      -- 591:2346 / 591:2372). It was pinned at a fixed 131 wide and a derived
+      -- left edge, so "Auto" sat in a box built for "Raid_Warning" and the two
+      -- dropdowns' right edges did not line up with each other or with the
+      -- checkboxes above them. The mock draws 131 and 81 ending on the SAME
+      -- edge, which is what a fit-to-label control does for free.
+      control:SetPoint("TOPRIGHT", frame.content, "TOPRIGHT", -2, -(y + 2))
       if control.SetActive then control:SetActive(true) end
+      -- ⚠️ THE CARET IS DRAWN (Session 262). A control that cycles on click
+      -- with nothing to say so reads as a label; the mock puts the panel's own
+      -- 6px triangle 20 in from the right edge, exactly like the difficulty
+      -- picker on the Loot tab.
+      if S then
+        control.caret = control:CreateTexture(nil, "OVERLAY")
+        control.caret:SetSize(6, 6)
+        control.caret:SetPoint("RIGHT", -14, 0)
+        control.caret:SetTexture("Interface\\AddOns\\HoDLootAdvisor\\Media\\ui\\caret.png")
+        -- The control's own text colour, matching both dropdowns on the panel.
+        control.caret:SetVertexColor(S.rgb(S.COLOR.controlText))
+      end
       control:SetScript("OnClick", function(self)
         local cur = Settings.Get(spec.key)
         local idx = 1
         for i, c in ipairs(spec.choices) do if c == cur then idx = i end end
         local nextChoice = spec.choices[(idx % #spec.choices) + 1]
         Settings.Set(spec.key, nextChoice)
-        self:SetText(nextChoice)
+        setChoiceLabel(self, nextChoice)
       end)
     end
 
@@ -658,7 +718,20 @@ local function build()
   -- matter of taste when it is in fact an arithmetic question with one answer.
   -- ns.DisplayReport does the arithmetic (Core.lua, inside the harness's reach);
   -- this only prints it.
-  frame.display = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  -- ⚠️ SAIRA, SMALL AND MUTED — NOT GameFontDisableSmall (Jason, Session 262:
+  -- "it needs to be a smaller font size and use Saira, rather than whatever
+  -- this blizz default font is"). It was the one piece of text in the addon
+  -- still set in the game's own face, which is exactly why it read as debug
+  -- output rather than as part of the window.
+  --
+  -- KEPT RATHER THAN DELETED, and this is a judgement call Jason left open. It
+  -- is the only thing that answers "why is my window the wrong size": the panel
+  -- size is a SETTING precisely because the client cannot see the monitor's own
+  -- scaling (Core §1.1, S257), and this readout is the only feedback anyone has
+  -- while turning that dial. Say the word and it goes.
+  frame.display = S2 and S2.Text(frame, "light", "chip", S2.COLOR.textDim, "LEFT")
+    or frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  frame.display:ClearAllPoints()
   frame.display:SetPoint("BOTTOMLEFT", 18, FOOTER_H)
   frame.display:SetPoint("BOTTOMRIGHT", -18, FOOTER_H)
   frame.display:SetHeight(READOUT_H - 10)
@@ -724,7 +797,7 @@ function Settings.Refresh()
     elseif row.spec.kind == "number" then
       row.control:SetText(tostring(v))
     elseif row.spec.kind == "choice" then
-      row.control:SetText(tostring(v))
+      setChoiceLabel(row.control, v)
     end
   end
 end

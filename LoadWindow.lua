@@ -111,7 +111,14 @@ local function build()
   -- width: GetWidth() on the scroll frame returns 0 before the frame has been
   -- shown, which silently produces a zero-size box you cannot type into. That
   -- one has bitten HODLootTracker before.
-  local scroll = CreateFrame("ScrollFrame", "$parentScroll", box, "UIPanelScrollFrameTemplate")
+  -- ⚠️ NO TEMPLATE, BECAUSE THE TEMPLATE IS THE SCROLL BAR (Jason, Session 262:
+  -- "remove the scroll bars in the paste window. They're not necessary, plus
+  -- they're using the game's default styling"). UIPanelScrollFrameTemplate
+  -- brings Blizzard's own up/down/thumb artwork, which is the one piece of
+  -- game chrome left on this window. A bare ScrollFrame still holds the child
+  -- and still scrolls — and this box is written INTO, never read out of, so
+  -- there is nothing to scroll back through.
+  local scroll = CreateFrame("ScrollFrame", nil, box)
   scroll:SetPoint("TOPLEFT", IW.boxPad, -IW.boxPad)
   scroll:SetPoint("BOTTOMRIGHT", -IW.boxPad, IW.boxPad)
 
