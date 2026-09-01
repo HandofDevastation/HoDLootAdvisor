@@ -299,7 +299,14 @@ local SL = {
   -- ⚠️ A ROUTE CARRIES ITS OWN ITEM ICON NOW (Session 262, Jason: "note the
   -- addition of the item icons"). 32px, the same icon every other surface
   -- draws, with the same 42 gutter the identity line opens.
-  headingH = 19, blockGap = 10, blockH = 32, routeLineY = 14,
+  -- ⚠️ THE TWO TEXT LINES CARRY EXPLICIT HEIGHTS AND THE PAIR IS CENTRED
+  -- AGAINST THE ICON (Jason, Session 262: "the item icons are not vertically
+  -- centered/lined up with the text"). Neither line had a height, so each drew
+  -- wherever its own line box landed and "centred against a 32px icon" was
+  -- never arithmetic anyone did. Two 14-tall lines stack to 28 inside the
+  -- block's 32, so the pair starts at 2 and both centres land on 16.
+  headingH = 19, blockGap = 10, blockH = 32,
+  routeLineH = 14, routeTextY = 2, routeLineY = 16,
 
   -- MULTI-ITEM: a flat list of candidates, each 55 tall with a 10px top inset.
   -- The icon sits at 11, one below the text block, on the same centre line.
@@ -331,7 +338,12 @@ local SL = {
   -- is the design's: the head is ONE line centred in 32, the list row is a TWO
   -- line block starting at its top. What does not move between them is the
   -- ICON, 141 against 142, which is the element the eye tracks.
-  listY = 141, listPitch = 52, listNameY = 0, listSourceY = 14, listIconY = 1,
+  -- ⚠️ THE LIST ROW IS THE SAME BLOCK AS AN OBTAINED BY ROUTE (Session 262).
+  -- Node 626:482 is `items-center` with a 32 icon and a two-line text block, so
+  -- it takes the identical arithmetic: icon at 0, two 14-tall lines starting at
+  -- 2, both centres on 16. It had no explicit heights at all, which is the same
+  -- fault Jason caught on the routes.
+  listY = 141, listPitch = 52, listNameY = 2, listSourceY = 16, listIconY = 0,
   listRows = 7, routeRows = 4,
 
   chipH = 15, chipGap = 6,
@@ -2104,7 +2116,12 @@ function ITEM.SetIcon(tex, itemID, icon)
   tex:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
 end
 
-local function buildSourceLine(parent, x, y, width)
+--- height (optional): give the line a KNOWN rect instead of its own line box.
+--- The boss and instance runs anchor to `pre`'s RIGHT, so they inherit whatever
+--- vertical centre it has — which with no height is wherever the font puts it
+--- (Core §1.1, S260). A caller aligning this line against anything passes the
+--- leading it laid out with.
+local function buildSourceLine(parent, x, y, width, height)
   local g = {}
   -- NO EXPLICIT WIDTH ON ANY RUN: each sizes itself to its own string, which is
   -- what makes the RIGHT-edge anchoring below exact.
@@ -2113,6 +2130,7 @@ local function buildSourceLine(parent, x, y, width)
   -- so the line was doing its emphasis with COLOUR as well as weight, where the
   -- design does it with weight alone and paints the whole line white.
   g.pre  = at(text(parent, "regular", "label", "white"), x, y)
+  if height then g.pre:SetHeight(height); g.pre:SetJustifyV("MIDDLE") end
   g.boss = text(parent, "black", "label", "white")
   g.rest = text(parent, "regular", "label", "white")
 
@@ -2204,12 +2222,21 @@ end
 --- this page is given a 300px ceiling to wrap against, so reading GetWidth would
 --- arm the tooltip across half a row of empty space — the item card would open
 --- with the cursor nowhere near the item.
+--- ⚠️ h IS NOT JUST THE HOVER TARGET'S HEIGHT — IT PLACES THE TAGS (Jason,
+--- Session 262: "the tag list isn't lined up with the item name … the tags are
+--- weirdly LOWER"). Every tag run anchors LEFT to this frame's RIGHT, which is
+--- its vertical CENTRE, so a hit frame taller than the name's own rect drops
+--- the whole tag line by half the difference. The OBTAINED BY routes passed 19
+--- against a 14-tall name and the tags sat two and a half pixels low.
+---
+--- The safe value is the height the NAME was laid out with. Passing nil now
+--- reads it off the fontstring rather than guessing, so the two cannot disagree.
 function ITEM.FitTip(hit, fs, itemID, h)
   if not hit then return end
   hit.itemID = itemID
   local w = itemID and (fs:GetStringWidth() or 0) or 0
   if w <= 0 then hit:Hide() return end
-  hit:SetSize(w, h)
+  hit:SetSize(w, h or fs:GetHeight())
   hit:Show()
 end
 
@@ -2224,7 +2251,13 @@ local function buildSlotListRow(parent, i)
 
   -- 13 Regular in the blush, exactly as the detail header's item name is — this
   -- IS that surface, one row per candidate instead of one item.
-  row.name = at(text(row, "medium", "detail", "body"), SL.textX, SL.listNameY, 300)
+  -- ⚠️ 12 MEDIUM WHITE, NOT 13 REGULAR BLUSH (Session 262, node 626:487). This
+  -- was the last surface still drawing the pre-refresh item name; the identity
+  -- header and the routes were corrected earlier in the same pass, which would
+  -- have left three names on one page in two treatments.
+  row.name = at(text(row, "medium", "row", "white"), SL.textX, SL.listNameY, 300)
+  row.name:SetHeight(SL.routeLineH)
+  row.name:SetJustifyV("MIDDLE")
 
   -- Anchored to the fontstring rather than to the row's own geometry, so the
   -- target follows the name if the name ever moves and there is no second copy
@@ -2249,7 +2282,8 @@ local function buildSlotListRow(parent, i)
   row.tagLine = buildTagLine(row, 6, 0, 4, row.nameHit)
 
   -- 10px, "From " light blush, the BOSS bold white, then the instance.
-  row.source = buildSourceLine(row, SL.textX, SL.listSourceY, SL.paneW - SL.textX)
+  row.source = buildSourceLine(row, SL.textX, SL.listSourceY, SL.paneW - SL.textX,
+    SL.routeLineH)
 
   row.rule = divider(row, 0, SL.listPitch - 1, SL.paneW)
 
@@ -2271,7 +2305,9 @@ local function buildSlotRoute(parent, i)
   r.icon = ITEM.BuildIcon(r, SL.itemIcon)
   r.icon:SetPoint("TOPLEFT", 0, 0)
 
-  r.name = at(text(r, "medium", "row", "white"), SL.textX, 0, 300)
+  r.name = at(text(r, "medium", "row", "white"), SL.textX, SL.routeTextY, 300)
+  r.name:SetHeight(SL.routeLineH)
+  r.name:SetJustifyV("MIDDLE")
   -- ⚠️ ANCHORED TO A FITTED HIT FRAME, NOT TO THE FONTSTRING (Session 262).
   -- r.name carries a 300px wrapping ceiling, so hanging the tags off its RIGHT
   -- edge started them at a fixed 306 — which is why the route kinds read as a
@@ -2282,7 +2318,7 @@ local function buildSlotRoute(parent, i)
   r.nameHit:Hide()
   r.tagLine = buildTagLine(r, 6, 0, 4, r.nameHit)
   r.source = buildSourceLine(r, SL.textX, SL.routeLineY,
-    SL.panelW - SL.panelPadX * 2 - SL.textX)
+    SL.panelW - SL.panelPadX * 2 - SL.textX, SL.routeLineH)
 
   r:Hide()
   return r
@@ -4467,7 +4503,7 @@ local function renderSlots()
         r:Show()
         setTextForce(r.name, ns.NonEmpty(route.name) or ns.LOADING_NAME)
         ITEM.SetIcon(r.icon, route.itemID, route.icon)
-        ITEM.FitTip(r.nameHit, r.name, route.itemID, SL.headNameH)
+        ITEM.FitTip(r.nameHit, r.name, route.itemID, SL.routeLineH)
         -- ⚠️ THE ROUTE'S KIND FLOWS AFTER ITS NAME NOW, not right-aligned in
         -- the panel. The mock reads "Venomwoven Idol • O-BIS • M-BIS • TIER
         -- TOKEN" on one line, so the kind is the last tag rather than a box
@@ -4503,7 +4539,7 @@ local function renderSlots()
         ITEM.SetIcon(row.icon, pick.itemID, pick.icon)
         -- 16, not the row's 55: the name is one line of 13 Regular, and the
         -- source line 18px below it is a different item's worth of nothing.
-        ITEM.FitTip(row.nameHit, row.name, pick.itemID, 16)
+        ITEM.FitTip(row.nameHit, row.name, pick.itemID, SL.routeLineH)
         -- The tags have to be written BEFORE the tick is placed: the tick
         -- anchors to whichever run the line ended on.
         row.tagLine:Set("", pickTags(pick))

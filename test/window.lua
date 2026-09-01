@@ -797,8 +797,14 @@ do
       check("...sized to the string, not to the 300px wrapping ceiling",
             hit and strW > 0 and hit:GetWidth() == strW and hit:GetWidth() < 300,
             ("hit %s vs string %s"):format(tostring(hit and hit:GetWidth()), tostring(strW)))
-      check("...and only as tall as the one line it covers, not the 55px row",
-            hit and hit:GetHeight() == 16, hit and hit:GetHeight())
+      -- ⚠️ 14 — THE NAME'S OWN LEADING, AND NOT AN ARBITRARY HOVER SIZE
+      -- (Session 262). Every tag run anchors LEFT to this frame's RIGHT, which
+      -- is its vertical CENTRE, so a hit frame taller than the name it covers
+      -- drops the whole tag line by half the difference. It was 16 against a
+      -- 14-tall name here and 19 on the OBTAINED BY routes, which is what
+      -- Jason saw as "the tags are weirdly LOWER than the item name".
+      check("...and exactly the name's own line height, which places the tags",
+            hit and hit:GetHeight() == 14, hit and hit:GetHeight())
 
       GameTooltip.calls = { lines = {} }
       drive("hovering a BIS name", function() hit.scripts.OnEnter(hit) end)
@@ -951,17 +957,36 @@ do
 
   local lr = panel.slotListRows and panel.slotListRows[1]
   if lr then
-    -- Node 626:507 (Session 262): icon 1 down, name at the row's own top, the
-    -- source 14 under it — a 14 leading, the same the routes use.
+    -- ⚠️ THE ICON AND THE TEXT PAIR SHARE A CENTRE, BY ARITHMETIC (Session 262,
+    -- node 626:482 is `items-center`). Two 14-tall lines stack to 28 inside the
+    -- 32 icon, so the text starts at 2 and both centres land on 16. Nothing in
+    -- this block had an explicit height before, which is why "centred" was
+    -- emergent — and wrong.
     local _, ix, iy = pointOf(lr.icon)
-    check("a list row's icon sits one below the block's top", ix == 0 and iy == -1,
+    check("a list row's icon sits at the block's top", ix == 0 and iy == 0,
           ("%s,%s"):format(ix, iy))
     local _, nx, ny = pointOf(lr.name)
-    check("...its name is in the gutter at 42", nx == 42 and ny == 0,
-          ("%s,%s"):format(nx, ny))
+    check("...its name is in the gutter at 42, dropped 2 to centre the pair",
+          nx == 42 and ny == -2, ("%s,%s"):format(nx, ny))
     local _, px, py = pointOf(lr.source.pre)
-    check("...and so is its source line, on the same left edge",
-          px == 42 and py == -14, ("%s,%s"):format(px, py))
+    check("...and its source line 14 under that, on the same left edge",
+          px == 42 and py == -16, ("%s,%s"):format(px, py))
+    check("...both lines carrying the leading they were laid out with",
+          lr.name._heightSet and lr.name:GetHeight() == 14
+            and lr.source.pre._heightSet and lr.source.pre:GetHeight() == 14,
+          ("name %s/%s source %s/%s"):format(tostring(lr.name._heightSet),
+            lr.name:GetHeight(), tostring(lr.source.pre._heightSet),
+            lr.source.pre:GetHeight()))
+    -- ⚠️ COMPUTED FROM THE WIDGETS, NOT FROM THE CONSTANTS. Written first as
+    -- arithmetic on literals, which is a check that cannot fail (S259) — it
+    -- would have passed with every offset above reverted.
+    local iconTop, iconH = -iy, lr.icon:GetHeight()
+    local textTop = -ny
+    local textH   = lr.name:GetHeight() + lr.source.pre:GetHeight()
+    check("...so the icon's centre and the text pair's centre agree",
+          math.abs((iconTop + iconH / 2) - (textTop + textH / 2)) <= 1,
+          ("icon %d..%d, text %d..%d"):format(iconTop, iconTop + iconH,
+            textTop, textTop + textH))
   end
 
   -- ── THE RAIL READS LEFT TO RIGHT NOW (Session 262) ────────────────────
@@ -1035,6 +1060,24 @@ do
     check("...with its name in the same 42 gutter the icon opens",
           r and select(2, pointOf(r.name)) == 42,
           r and select(2, pointOf(r.name)))
+    -- The same centring the list rows get, and for the same reason: neither
+    -- line had a height, so the icon and the text were never aligned by
+    -- anything (Jason, Session 262).
+    if r then
+      local _, _, riy = pointOf(r.icon)
+      local _, _, rny = pointOf(r.name)
+      local rTextH = r.name:GetHeight() + r.source.pre:GetHeight()
+      check("...and its icon and text pair share a centre",
+            math.abs(((-riy) + r.icon:GetHeight() / 2) - ((-rny) + rTextH / 2)) <= 1,
+            ("icon %s+%s, text %s+%s"):format(-riy, r.icon:GetHeight(), -rny, rTextH))
+      check("...both route lines carrying an explicit 14 leading",
+            r.name._heightSet and r.name:GetHeight() == 14
+              and r.source.pre._heightSet and r.source.pre:GetHeight() == 14,
+            ("name %s source %s"):format(r.name:GetHeight(), r.source.pre:GetHeight()))
+      check("...and the tag run hanging off a hit frame the name's own height",
+            r.nameHit:GetHeight() == r.name:GetHeight(),
+            ("hit %s vs name %s"):format(r.nameHit:GetHeight(), r.name:GetHeight()))
+    end
   end
 
   -- ── The Loot header came down with it ─────────────────────────────────
