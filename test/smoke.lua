@@ -617,6 +617,103 @@ header("Weapon configuration — the pairing a two-hander cannot make")
   end
 end)()
 
+-- ── The PERSONAL column has to agree with the ranking beside it ─────────────
+--
+-- ⚠️ THIS SHIPPED BROKEN FOR ONE ROUND, and the screenshot is why the check
+-- exists. Loot.RankRaiders learned the weapon configuration and Loot.ScoreItem
+-- did not, so an off-hand's ranking row read NEEDS PAIRING while the item
+-- header above it still read MAJOR — two authorities disagreeing about one item
+-- inside ONE panel, which is the same failure the site/addon parity rule exists
+-- to prevent, reproduced on a single screen.
+--
+-- The two paths build their candidate tables SEPARATELY. Anything added to one
+-- has to be added to the other, and only a check that reads both catches it.
+
+;(function()
+  -- ⚠️ THE HARNESS PLAYER IS A HUNTER, AND A HUNTER HAS NO OFF-HAND SLOT — so
+  -- eligibility filtered every off-hand and this whole block skipped itself the
+  -- first time it ran. Stand up the class the bug was actually reported on: a
+  -- caster on a staff. Restored at the end, since everything after this reads
+  -- the same player.
+  local savedClass, savedSpec, savedTree =
+    stub.player.classToken, stub.player.specName, stub.player.heroTree
+  local savedSpecId = stub.player.specId
+  stub.player.classToken = "WARLOCK"
+  stub.player.className  = "Warlock"
+  stub.player.specName   = "Affliction"
+  stub.player.specId     = 265
+  stub.player.heroTree   = nil
+
+  local function restore()
+    stub.player.classToken = savedClass
+    stub.player.className  = ns.CLASS_NAME[savedClass or ""] or stub.player.className
+    stub.player.specName   = savedSpec
+    stub.player.specId     = savedSpecId
+    stub.player.heroTree   = savedTree
+  end
+
+  local char = ns.ResolveCharacter()
+  local function usableByMe(it)
+    return ns.CanUse({ slot = it.slot, name = it.name, classes = it.classes,
+                       primaryStat = it.primaryStat, tokenSlot = it.tokenSlot },
+                     char.className, char.specName)
+  end
+  local offHandId = findItem(function(_, it)
+    return it.slot == "OFF_HAND" and usableByMe(it)
+  end)
+  if not offHandId then
+    check("a personally-usable OFF_HAND exists to score", false,
+          "cannot exercise the personal column")
+    restore()
+    return
+  end
+
+  local savedMain = stub.player.equipped[INVSLOT_MAINHAND]
+  local savedOff  = stub.player.equipped[INVSLOT_OFFHAND]
+  local savedLoc  = stub.itemEquipLoc and stub.itemEquipLoc[990100]
+
+  -- A TWO-HANDER in the main hand and NOTHING in the off-hand: the exact state
+  -- that produced "+305 Item Levels · MAJOR" for a raider holding a staff.
+  stub.itemEquipLoc = stub.itemEquipLoc or {}
+  stub.itemEquipLoc[990100] = "INVTYPE_2HWEAPON"
+  stub.player.equipped[INVSLOT_MAINHAND] = { itemID = 990100, ilvl = 321 }
+  stub.player.equipped[INVSLOT_OFFHAND] = nil
+
+  check("the client answers YOUR weapon configuration directly",
+        ns.MyWeaponConfig() == "two_hand", tostring(ns.MyWeaponConfig()),
+        "read from the main hand's inventory type — never from whether the "
+        .. "off-hand slot happens to be filled")
+
+  local scored = ns.Loot.ScoreItem(offHandId, { difficulty = "h" })
+  check("the PERSONAL column marks an off-hand as needing a pairing",
+        scored.result ~= nil and scored.result.pairing_required == "main_hand",
+        scored.result and tostring(scored.result.pairing_required) or scored.reason)
+  check("...and it agrees with the ranking row beside it",
+        (function()
+          local _, all = ns.Loot.RankRaiders(offHandId, { difficulty = "h" })
+          for _, r in ipairs(all or {}) do
+            if (r.name or ""):lower() == (stub.player.name or ""):lower() then
+              return r.eligible and r.result.pairing_required
+                     == scored.result.pairing_required
+            end
+          end
+          return false
+        end)(),
+        "one item, one panel, one answer")
+
+  -- Put the two-hander back to a ONE-hander and the condition must lift.
+  stub.itemEquipLoc[990100] = "INVTYPE_WEAPONMAINHAND"
+  check("a one-handed main hand lifts the condition",
+        ns.MyWeaponConfig() == "one_hand"
+        and ns.Loot.ScoreItem(offHandId, { difficulty = "h" })
+              .result.pairing_required == nil)
+
+  stub.player.equipped[INVSLOT_MAINHAND] = savedMain
+  stub.player.equipped[INVSLOT_OFFHAND] = savedOff
+  stub.itemEquipLoc[990100] = savedLoc
+  restore()
+end)()
+
 -- A trinket ranks by TIER GROUP first, which is exactly the case where row
 -- order stops matching score order — so the gaps must be withheld.
 local trinketRanked = ns.Loot.RankRaiders(trinketId, { difficulty = "h" })

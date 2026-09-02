@@ -217,6 +217,14 @@ function Loot.ScoreItem(itemID, opts)
     bis            = quality and quality.bis or nil,
     already_owns   = owns,
     owned_ilvl     = ownedIlvl,
+    -- ⚠️ THE PERSONAL COLUMN NEEDS THIS TOO, and shipping it without was worse
+    -- than not shipping it at all: the ranking row read NEEDS PAIRING while the
+    -- item header beside it still read MAJOR, which is two authorities
+    -- disagreeing on one screen about one item — the exact failure the parity
+    -- rule exists to prevent, reproduced inside a single panel.
+    -- Read LIVE rather than from the export: this is you, and the client can
+    -- answer exactly what is in your hands right now.
+    weapon_config  = ns.MyWeaponConfig and ns.MyWeaponConfig() or nil,
   }
   local item = { slot = slot, is_tier = rec.tier == true, stats = rec.stats or {} }
 
@@ -252,7 +260,12 @@ function Loot.Report(out)
 
   local r = out.result
   local head = ("%s — %s"):format(itemLabel(out), badgeText(r.badge))
-  if not r.is_upgrade then
+  if r.pairing_required then
+    -- The condition, not a magnitude and not a number.
+    head = ("%s — %s |cff888899(%s)|r"):format(
+      itemLabel(out), badgeText(r.badge),
+      ns.PAIRING_LABEL[r.pairing_required] or "needs a weapon pairing")
+  elseif not r.is_upgrade then
     head = ("%s — |cff888899not an upgrade for you|r"):format(itemLabel(out))
   end
   ns.Print(head)

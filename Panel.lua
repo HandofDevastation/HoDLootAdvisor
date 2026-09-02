@@ -3101,7 +3101,15 @@ local function scoreEntry(e)
   if scored.result then
     e.badge = scored.result.badge
     e.isUpgrade = scored.result.is_upgrade
-    e.gain = (scored.candidateIlvl or 0) - ((scored.equipped or {}).ilvl or 0)
+    e.pairing = scored.result.pairing_required
+    -- ⚠️ NIL, NOT ZERO, FOR A CONDITIONAL — and this arithmetic is exactly why.
+    -- Your off-hand slot reads 0 because a two-hander leaves it EMPTY, so the
+    -- subtraction returns the whole candidate item level as a "gain". That is
+    -- the number the verdict exists to withhold, and it reached the header
+    -- badge as MAJOR while the ranking row beside it already said NEEDS
+    -- PAIRING: one panel, one item, two answers.
+    e.gain = (not e.pairing)
+      and ((scored.candidateIlvl or 0) - ((scored.equipped or {}).ilvl or 0)) or nil
   else
     e.gain = 0
   end
@@ -3726,6 +3734,10 @@ local function renderPaneHeader(entry)
     label, color = "NOT FOR YOU", S and S.COLOR.grey
   elseif entry.reason then
     label, color = "UNSCORED", S and S.COLOR.red
+  elseif entry.pairing then
+    -- BEFORE the is_upgrade test: a conditional IS an upgrade, and before the
+    -- badge fallthrough, so it can never be dressed as a magnitude.
+    label, color = "NEEDS PAIRING", S and S.COLOR.conditional
   elseif entry.isUpgrade == false then
     label, color = "NO UPGRADE", S and S.COLOR.grey
   else
@@ -3760,7 +3772,10 @@ local function renderFacts(entry, ranked)
   -- ⚠️ "ITEM LEVELS", NOT "ILVL" (the mock's own wording). This line is the one
   -- place the panel spells the measurement out; the abbreviation belongs in the
   -- table's column heading, where the space is genuinely tight.
-  if (entry.gain or 0) > 0 and not entry.ineligible then
+  if entry.pairing and not entry.ineligible then
+    -- NO NUMBER. The size of this upgrade depends on an item nobody can see.
+    parts[#parts + 1] = ns.PAIRING_LABEL[entry.pairing] or "Needs a weapon pairing"
+  elseif (entry.gain or 0) > 0 and not entry.ineligible then
     parts[#parts + 1] = ("+%d Item Levels"):format(entry.gain)
   end
 
