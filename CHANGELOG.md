@@ -1,5 +1,35 @@
 # Loot Advisor
 
+## v2026.09.02
+
+**Weapons are scored against the hand they would actually occupy**
+- An off-hand no longer shows as a huge upgrade for anyone using a two-handed
+  weapon. Their off-hand slot is empty, so the drop was being compared against
+  nothing and reported as the biggest gain on the list.
+- The same fault ran the other way: a one-handed weapon was compared against the
+  two-hander it cannot replace on its own.
+- Both now read "Needs Pairing" with no gain figure, ranked below everyone who
+  gains tonight. How big such an upgrade would be depends on an item nobody can
+  see, so no number is invented for it — the condition is named instead, on the
+  row and in the tooltip.
+- A one-handed weapon is now compared only against the hand it can actually go
+  in. For anyone holding a shield or a tome it can only replace the main hand,
+  and comparing it against the off-hand was overstating every one-handed drop.
+- Dual-wielding is unaffected, including Titan's Grip.
+
+**Scoring matches the website**
+- Items are now scored at the level they upgrade to, as the website has always
+  done. On Heroic that is ten item levels higher, and it was enough to empty
+  whole rankings in game while the same item listed several raiders on the site.
+- The item line and the GP cost still show the level that actually drops.
+
+**Eligibility now asks the game**
+- The addon reads Blizzard's own per-spec loot filter, so an item your spec
+  cannot equip is no longer offered to you just because your class can. A
+  Protection Warrior is no longer shown two-handers, and a Beast Mastery Hunter
+  is no longer shown one-handed weapons.
+- Items nobody has checked are still shown rather than hidden.
+
 ## v2026.09.01.1
 
 **When a boss dies**
