@@ -1729,6 +1729,42 @@ end
 --- upgrade at all. Bonus IDs only break a tie between two tracks that share an
 --- item level.
 ---
+--- The FULLY-UPGRADED item level for a track — what the piece becomes once its
+--- crests are spent. Mirrors getMaxIlvl()/trackCeilingIlvl() in
+--- app/lib/gear-tracks.ts, and the mirroring is the point.
+---
+--- ⚠️ SCORING IS ABOUT POTENTIAL, AND THE ADDON DID NOT DO THIS (Session 264,
+--- Jason). The website has scored candidates at their track ceiling since
+--- Session 98 — a deliberate decision, recorded — while the addon scored the
+--- level that literally dropped. On Heroic that is 311 against 321, and the ten
+--- levels decided whole rows: an off-hand that the site listed four raiders for
+--- came back "not an upgrade for anyone" in game. The two surfaces answered the
+--- same question differently in front of the raid, which is the one failure this
+--- system is built to prevent.
+---
+--- ⚠️ THE PARITY HARNESS COULD NOT HAVE CAUGHT IT. Fixtures hand the scorer a
+--- candidate item level as a GIVEN, so both sides agreed perfectly about what to
+--- do with a number they were never asked to derive. The divergence lived in the
+--- INPUT. test/parity.lua now carries a `candidates` block for exactly this.
+---
+--- HIGHEST RUNG, NOT RANK 6, because Myth runs to rank 9 (344) and a rank-6
+--- lookup would report a ceiling BELOW the as-dropped level of an ascended item.
+--- Never returns less than the level it was given.
+function ns.MaxIlvlForTrack(track, fallback)
+  fallback = fallback or 0
+  if not track then return fallback end
+  local data = ns.Data()
+  local ladder = ((data or {}).tracks or {}).ladder
+  if not ladder then return fallback end
+  local best
+  for _, e in ipairs(ladder) do
+    -- Matched on the ladder's RAW track name, exactly as trackCeilingIlvl does.
+    if e.track == track and (not best or e.ilvl > best) then best = e.ilvl end
+  end
+  if not best or best < fallback then return fallback end
+  return best
+end
+
 --- Returns scoringTrack, rank, rawTrack — or nil when the item level is not on
 --- this season's ladder at all (off-season or crafted gear).
 function ns.ResolveTrack(ilvl, bonusIDs)

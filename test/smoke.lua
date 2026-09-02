@@ -4231,10 +4231,27 @@ header("Dungeons as a content mode — tiles, pooled loot, and scoring")
   local rankVault = ns.Loot.RankRaiders(chestId, { difficulty = "h", vault = true })
   local rankDrop  = ns.Loot.RankRaiders(chestId, { difficulty = "h" })
   if rankVault and rankDrop and rankVault[1] and rankDrop[1] then
+    -- ⚠️ MATCH THE RAIDER, NEVER THE ROW NUMBER. This compared rankVault[1]
+    -- against rankDrop[1] and passed only because the same person happened to
+    -- lead both lists. Scoring at the upgraded level reordered them, and the
+    -- check failed while vault mode was working perfectly — it was comparing two
+    -- different people's gains. The two lists are independently sorted; nothing
+    -- has ever guaranteed they agree on who is first.
+    local vaultByName = {}
+    for _, r in ipairs(rankVault) do vaultByName[r.name] = r end
+    local compared, better, worseName = 0, 0, nil
+    for _, d in ipairs(rankDrop) do
+      local v = vaultByName[d.name]
+      if v and d.ilvlGain and v.ilvlGain then
+        compared = compared + 1
+        if v.ilvlGain > d.ilvlGain then better = better + 1
+        else worseName = worseName or d.name end
+      end
+    end
     check("the roster ranking honours vault mode too",
-          (rankVault[1].ilvlGain or 0) > (rankDrop[1].ilvlGain or 0),
-          ("vault gain %s vs drop gain %s"):format(tostring(rankVault[1].ilvlGain),
-                                                   tostring(rankDrop[1].ilvlGain)))
+          compared > 0 and better == compared,
+          ("%d of %d raiders gained more from the vault level%s"):format(
+            better, compared, worseName and (" — %s did not"):format(worseName) or ""))
   else
     check("a roster is loaded so the two scorers can be compared",
           rankVault ~= nil and rankDrop ~= nil,
@@ -4501,6 +4518,49 @@ header("Roll states — read from the client's names, never from numbers")
   local liveSource = ns.RollStateSource()
   check("the map's source is queryable for the UI to report",
         liveSource == "enum" or liveSource == "inherited", tostring(liveSource))
+end)()
+
+header("Candidate item level — what the badge is scored against")
+
+-- ⚠️ THE CHECK THAT WOULD HAVE CAUGHT A SEASON-LONG DISAGREEMENT (Session 264).
+-- test/parity.lua proves the two scorers agree about a candidate item level they
+-- are both HANDED. It cannot prove they agree about how to DERIVE one — and they
+-- did not: the website took a candidate to its track's fully-upgraded ceiling
+-- (Session 98, "scoring is about potential") and the addon used the level that
+-- dropped. Ten levels on Heroic, and it decided whole rows.
+--
+-- The expected values come from the WEBSITE'S OWN getMaxIlvl, shipped in the
+-- fixture's `candidates` block. Lives here rather than in parity.lua because it
+-- needs the namespace and the emitted ladder — same reason as the prices block.
+;(function()
+  local ok, fx = pcall(dofile, "test/fixtures.lua")
+  local cases = ok and type(fx) == "table" and fx.candidates or nil
+  if not cases then
+    -- A LOUD SKIP. test/fixtures.lua is gitignored and absent in CI; failing here
+    -- would break every weekly release for a file that is not meant to be in the
+    -- repo. Passing quietly would be worse. Same shape as the price check below.
+    io.write("\n  SKIP candidate-level parity — test/fixtures.lua is absent.\n")
+    io.write("       Locally:  curl -s localhost:3000/api/loot-advisor/parity-fixtures -o test/fixtures.lua\n\n")
+    return
+  end
+
+  local mismatch, compared, raised = nil, 0, 0
+  for _, c in ipairs(cases) do
+    local got = ns.MaxIlvlForTrack(c.track, c.drop)
+    compared = compared + 1
+    if got > c.drop then raised = raised + 1 end
+    if got ~= c.max then
+      mismatch = mismatch or ("%s %s drop=%d: website says %d, addon says %s")
+        :format(c.difficulty, c.track, c.drop, c.max, tostring(got))
+    end
+  end
+
+  check(("the addon scores at the same item level as the website (%d cases)")
+        :format(compared), mismatch == nil, mismatch)
+  -- NOT VACUOUS: if the ceiling never actually raised anything, this would pass
+  -- with the whole rule deleted.
+  check("...and the ceiling really does raise a dropped level", raised > 0,
+        ("%d of %d cases were raised"):format(raised, compared))
 end)()
 
 header("GP cost — the price the panel puts beside an item")

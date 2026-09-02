@@ -192,6 +192,16 @@ function Loot.ScoreItem(itemID, opts)
   local track, rank = ns.ResolveTrack(candidateIlvl, bonusIDs)
   out.candidateTrack, out.candidateRank = track, rank
 
+  -- ⚠️ TWO ITEM LEVELS, AND THEY ARE NOT INTERCHANGEABLE (Session 264).
+  --   candidateIlvl — what DROPS. Displayed, tooltipped and PRICED.
+  --   scoreIlvl     — what it BECOMES once upgraded. Scored, and the gain.
+  -- The website has always kept this split (drop level in the item list,
+  -- "Candidate (Max)" in the comparison) and the addon had only the first, so
+  -- every score in game was ten levels short of the site's on Heroic. Scoring is
+  -- about potential; display is about what dropped. Keep them apart.
+  local scoreIlvl = ns.MaxIlvlForTrack(track, candidateIlvl)
+  out.scoreIlvl = scoreIlvl
+
   local equipped = ns.EquippedSlotState(slot) or { ilvl = 0, track = nil, empty = true }
   out.equipped = equipped
 
@@ -228,7 +238,7 @@ function Loot.ScoreItem(itemID, opts)
   }
   local item = { slot = slot, is_tier = rec.tier == true, stats = rec.stats or {} }
 
-  out.result = ns.Scoring.scoreCandidate(candidate, item, spec, candidateIlvl, track)
+  out.result = ns.Scoring.scoreCandidate(candidate, item, spec, scoreIlvl, track)
   return out
 end
 
@@ -353,6 +363,11 @@ function Loot.RankRaiders(itemID, opts)
     candidateTrack = ns.ResolveTrack(candidateIlvl, bonusIDs)
   end
 
+  -- The level the ranking SCORES against — the upgraded ceiling, matching the
+  -- website. candidateIlvl stays the dropped level for the item line and the GP
+  -- price. See ns.MaxIlvlForTrack.
+  local scoreIlvl = ns.MaxIlvlForTrack(candidateTrack, candidateIlvl)
+
   local rows = {}
   -- The EXPORT's roster plus anyone in the instance it has never heard of —
   -- alts, trials, pugs. See Payload.EffectiveRoster.
@@ -407,7 +422,7 @@ function Loot.RankRaiders(itemID, opts)
           weapon_config  = weaponConfig,
         },
         { slot = slot, is_tier = rec.tier == true, stats = rec.stats or {} },
-        spec, candidateIlvl, candidateTrack
+        spec, scoreIlvl, candidateTrack
       )
 
       -- ── The spec they are ACTUALLY in, when it is not the one they are
@@ -458,8 +473,10 @@ function Loot.RankRaiders(itemID, opts)
         -- reads 0 and produced "+305 Item Levels · MAJOR" for a raider holding
         -- a two-hander. The size of the real gain depends on an item nobody can
         -- see, so there is no honest number to print.
+        -- Measured from the UPGRADED level, which is what the row's badge was
+        -- scored against and what the website's own gain column shows.
         ilvlGain = (result.pairing_required == nil)
-          and (candidateIlvl - (state.ilvl or 0)) or nil,
+          and (scoreIlvl - (state.ilvl or 0)) or nil,
         pairing = result.pairing_required,
         pr = r.pr, rank = r.rank,
         adhoc = r.adhoc,
@@ -533,7 +550,10 @@ function Loot.RankRaiders(itemID, opts)
   end
 
   return ranked, rows, {
-    slot = slot, ilvl = candidateIlvl, track = candidateTrack, rec = rec,
+    -- `ilvl` is the DROPPED level: it feeds the item line and the GP price.
+    -- `scoreIlvl` is what the badges were computed against.
+    slot = slot, ilvl = candidateIlvl, scoreIlvl = scoreIlvl,
+    track = candidateTrack, rec = rec,
     -- The two halves of "N of M raiders can use it". Carried on meta because a
     -- ranking that arrived over comms has no `rows` to count.
     usable = #ranked, total = #rows,

@@ -3108,8 +3108,12 @@ local function scoreEntry(e)
     -- the number the verdict exists to withhold, and it reached the header
     -- badge as MAJOR while the ranking row beside it already said NEEDS
     -- PAIRING: one panel, one item, two answers.
+    -- From scoreIlvl, the UPGRADED level the badge was computed against — the
+    -- website's gain column is measured the same way. e.candidateIlvl stays the
+    -- dropped level, for the item line and the GP price.
     e.gain = (not e.pairing)
-      and ((scored.candidateIlvl or 0) - ((scored.equipped or {}).ilvl or 0)) or nil
+      and ((scored.scoreIlvl or scored.candidateIlvl or 0)
+           - ((scored.equipped or {}).ilvl or 0)) or nil
   else
     e.gain = 0
   end
