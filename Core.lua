@@ -2079,6 +2079,35 @@ function ns.EquippedSlotState(lootSlot)
   return { ilvl = worstIlvl, track = track, link = worstLink, empty = false }
 end
 
+--- The inventory type of what is in one of YOUR equipment slots, or nil.
+--- Blizzard's own values, read from the game's generated API documentation
+--- rather than recalled: the nine that can occupy a weapon slot are WEAPON,
+--- SHIELD, RANGED, 2HWEAPON, WEAPONMAINHAND, WEAPONOFFHAND, HOLDABLE, THROWN
+--- and RANGEDRIGHT.
+local function myInvType(invSlot)
+  local link = GetInventoryItemLink("player", invSlot)
+  if not link then return nil end
+  local fn = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+  if not fn then return nil end
+  local ok, _, _, _, invType = pcall(fn, link)
+  if not ok or type(invType) ~= "string" then return nil end
+  return invType
+end
+
+--- Is it a WEAPON, whichever hand it is in?
+--- ⚠️ INCLUDES 2HWEAPON. A Fury Warrior with Titan's Grip carries a two-hander
+--- in EACH hand; testing only for INVTYPE_WEAPON called them not-dual-wielding
+--- AND called them two-handed, so a one-hander would have told them "needs an
+--- off-hand" while they were holding one.
+local WEAPON_INVTYPES = {
+  INVTYPE_WEAPON = true, INVTYPE_WEAPONMAINHAND = true,
+  INVTYPE_WEAPONOFFHAND = true, INVTYPE_2HWEAPON = true,
+}
+
+function ns.AmDualWielding()
+  return WEAPON_INVTYPES[myInvType(INVSLOT_OFFHAND) or ""] == true
+end
+
 --- YOUR OWN weapon configuration, read live from your own main hand.
 ---
 --- Everyone ELSE's answer arrives in the payload (`wc`), resolved server-side
@@ -2096,12 +2125,15 @@ end
 --- answer — UNKNOWN, which the scorer treats as "no condition applies" rather
 --- than guessing either way.
 function ns.MyWeaponConfig()
-  local link = GetInventoryItemLink("player", INVSLOT_MAINHAND)
-  if not link then return nil end
-  local fn = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
-  if not fn then return nil end
-  local ok, _, _, _, invType = pcall(fn, link)
-  if not ok or type(invType) ~= "string" then return nil end
+  local invType = myInvType(INVSLOT_MAINHAND)
+  if not invType then return nil end
+
+  -- ⚠️ CHECKED BEFORE THE TWO-HANDER TEST. "two_hand" means BOTH HANDS TAKEN BY
+  -- ONE WEAPON — a two-hander AND an empty off-hand. Titan's Grip puts a
+  -- two-hander in each hand, and reading the main hand alone declared the
+  -- off-hand slot free.
+  if ns.AmDualWielding() then return "dual_wield" end
+
   if invType == "INVTYPE_2HWEAPON" then return "two_hand" end
   if invType == "INVTYPE_RANGED" or invType == "INVTYPE_RANGEDRIGHT"
      or invType == "INVTYPE_THROWN" then
@@ -2120,16 +2152,6 @@ end
 ---
 --- An EMPTY off-hand needs no answer either way: there is nothing there to
 --- compare against, so both readings produce the same comparison.
-function ns.AmDualWielding()
-  local link = GetInventoryItemLink("player", INVSLOT_OFFHAND)
-  if not link then return false end
-  local fn = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
-  if not fn then return false end
-  local ok, _, _, _, invType = pcall(fn, link)
-  if not ok or type(invType) ~= "string" then return false end
-  return invType == "INVTYPE_WEAPON" or invType == "INVTYPE_WEAPONOFFHAND"
-    or invType == "INVTYPE_WEAPONMAINHAND"
-end
 
 --- The inventory slots a loot slot competes with FOR THIS PLAYER. Everything is
 --- fixed except ONE_HAND — see ns.AmDualWielding.
