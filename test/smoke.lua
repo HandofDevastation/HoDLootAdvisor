@@ -511,19 +511,24 @@ header("Weapon configuration — the pairing a two-hander cannot make")
     if r.wc == "one_hand" then oneHanded = r.n break end
   end
 
-  -- ⚠️ THE ITEMS ARE PICKED FOR THE TWO-HANDED RAIDER'S CLASS, not the player's.
-  -- Picking the first item of a slot gave a weapon that raider cannot use, so
-  -- the row came back ineligible and three checks SKIPPED IN SILENCE while the
-  -- section still printed green. Eligibility is emitted per item as `classes`.
-  local function usableBy(it, className)
-    return type(it.classes) ~= "table" or it.classes[className] == true
+  -- ⚠️ PICKED THROUGH THE REAL GATE — CLASS AND SPEC — not `classes` alone.
+  -- Twice now these pickers have chosen an item the raider cannot use and the
+  -- checks SKIPPED IN SILENCE while the section printed green: first against the
+  -- player's class instead of the raider's, then against the class gate after
+  -- Blizzard's per-spec verdict started filtering. ns.CanUse is the gate the
+  -- code itself uses; asking anything else is asking a different question.
+  local twoHandedSpec
+  for _, r in ipairs(roster) do
+    if r.n == twoHanded then twoHandedSpec = r.s end
+  end
+  local function usableByThem(it)
+    return ns.CanUse(it, twoHandedClass, twoHandedSpec) == true
   end
   local offHandId = twoHandedClass and findItem(function(_, it)
-    return it.slot == "OFF_HAND" and usableBy(it, twoHandedClass)
+    return it.slot == "OFF_HAND" and usableByThem(it)
   end)
   local oneHandId = twoHandedClass and findItem(function(_, it)
-    return (it.slot == "ONE_HAND" or it.slot == "MAIN_HAND")
-       and usableBy(it, twoHandedClass)
+    return (it.slot == "ONE_HAND" or it.slot == "MAIN_HAND") and usableByThem(it)
   end)
 
   check("the season's loot table carries both halves of a pairing",
@@ -653,10 +658,11 @@ end)()
   end
 
   local char = ns.ResolveCharacter()
+  -- ⚠️ THE WHOLE RECORD, not a rebuilt copy. This handed ns.CanUse a table it
+  -- had assembled field by field, which silently DROPPED `sp` — so the picker
+  -- was asking a question the real gate no longer asks.
   local function usableByMe(it)
-    return ns.CanUse({ slot = it.slot, name = it.name, classes = it.classes,
-                       primaryStat = it.primaryStat, tokenSlot = it.tokenSlot },
-                     char.className, char.specName)
+    return ns.CanUse(it, char.className, char.specName) == true
   end
   local offHandId = findItem(function(_, it)
     return it.slot == "OFF_HAND" and usableByMe(it)
@@ -4267,12 +4273,18 @@ header("Dungeons as a content mode — tiles, pooled loot, and scoring")
   end
 
   -- An ordinary mythic item DOES move up to the vault rung.
-  local plainMythic = nil
-  for id, it in pairs(ns.Data().items or {}) do
-    if it.ilvl and it.ilvl.m and it.ilvl.m < 334 and usable(it) and it.slot ~= "TOKEN" then
-      plainMythic = id; break
-    end
-  end
+  --
+  -- ⚠️ PICKED DETERMINISTICALLY, AND THROUGH THE REAL GATE. This walked
+  -- `pairs()` and broke on the first match — and pairs() order is UNSPECIFIED,
+  -- so Lua 5.4 and LuaJIT chose DIFFERENT items and this check passed under one
+  -- interpreter and failed under the other. The same trap the parity harness
+  -- documents at the top of Scoring.lua. findItem sorts the ids; ns.CanUse is
+  -- the gate the code itself uses, so a spec-ineligible item is never chosen.
+  local me = ns.ResolveCharacter()
+  local plainMythic = findItem(function(_, it)
+    return it.ilvl and it.ilvl.m and it.ilvl.m < 334 and it.slot ~= "TOKEN"
+       and ns.CanUse(it, me.className, me.specName) == true
+  end)
   if plainMythic then
     local pm = ns.Loot.ScoreItem(plainMythic, { difficulty = "m", vault = true })
     check("an ordinary mythic item vaults up to Myth 6/6 (334)",
