@@ -3008,10 +3008,12 @@ SlashCmdList["HODLOOTADVISOR"] = function(msg)
   elseif cmd == "help" then
     cmdHelp()
   elseif cmd == "eligibility" then
-    -- ⚠️ NO UI PATH, AND THAT IS A GAP WORTH NAMING. Everything else the panel
-    -- can do has a button; this does not, because it is a once-a-season officer
-    -- action whose output is read by a script rather than by a person. If it
-    -- ever becomes routine it belongs in Settings.
+    -- NO BUTTON, AND THAT IS THE DECISION (Jason, Session 264). Everything else
+    -- the panel can do has one; this deliberately does not. It is run once a
+    -- season, by one officer, and its output is read by a script rather than by
+    -- a person — a control in Settings would be a permanent affordance for
+    -- something nobody does twice a year. Whoever needs it is told to type it.
+    -- Do not "fix" this by adding a button.
     ns.Print("walking the Adventure Guide for every spec — this reads the whole season...")
     local h, why = ns.StoreEligibilityHarvest()
     if not h then
