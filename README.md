@@ -8,11 +8,23 @@ have to decide, without alt-tabbing.
 
 ## Installing
 
-**From a release:** unzip into `<WoW>/_retail_/Interface/AddOns/`. It must end
-up as `Interface/AddOns/HoDLootAdvisor/HoDLootAdvisor.toc`. Restart WoW — a
-`/reload` will not pick up a newly added addon.
+**Install it from CurseForge**, through WoWUp's addon search or the CurseForge
+app. That is the source that can also UPDATE it.
+
+> ⚠️ Do not install from this repo's URL, and do not unzip a GitHub release by
+> hand. WoWUp can install a GitHub-sourced addon but cannot update one — its
+> update path fetches the release asset without the right header and saves
+> GitHub's JSON metadata as the .zip. Anyone who installed either of those ways
+> should uninstall and reinstall once from CurseForge.
+
+Releases are still cut on GitHub as well; CurseForge is simply the one players
+should track. If you do place a build by hand, it must end up as
+`Interface/AddOns/HoDLootAdvisor/HoDLootAdvisor.toc`, and WoW has to be
+restarted — a `/reload` will not pick up a newly added addon.
 
 ## Using it
+
+Click the minimap button to open the panel. There are also slash commands:
 
 | | |
 |---|---|
@@ -52,6 +64,7 @@ right now" and "what a snapshot said this morning" are different claims.
 lua test/smoke.lua      # the whole addon end to end, no game
 lua test/comms.lua      # two clients in one process, no game
 lua test/roster.lua     # a raid full of strangers, no game
+lua test/window.lua     # builds and drives the panel, no game
 lua test/parity.lua     # the scorer against the website, 276,480 cases
 ./package.sh && lua test/package.lua dist/HoDLootAdvisor
 ```
@@ -77,7 +90,7 @@ The other harnesses already run under both and should be run both ways too.
 `app/lib/loot-advisor.ts`. Any change to scoring is a change to both
 implementations, plus a fixture regeneration and a parity re-run.
 
-## Licence
+## License
 
 Fonts in `Media/fonts` ship under the SIL Open Font License; see `OFL.txt` and
 `FONT-LICENSES.md` beside them. General Sans is by the Indian Type Foundry.
