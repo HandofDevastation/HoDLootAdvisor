@@ -2053,7 +2053,10 @@ end
 --- An empty slot is ilvl 0 with no track, which the scorer reads as "anything is
 --- an upgrade" — correct, and the same thing the site does with a missing piece.
 function ns.EquippedSlotState(lootSlot)
-  local invSlots = ns.SLOT_INV[lootSlot]
+  -- ⚠️ NOT ns.SLOT_INV DIRECTLY. ONE_HAND competes with both hands only when a
+  -- weapon can actually go in the off-hand; for a caster it was scoring a
+  -- one-handed drop against a held off-hand it could never replace.
+  local invSlots = ns.CompetingInvSlots(lootSlot)
   if not invSlots then return nil end
 
   local worstIlvl, worstLink
@@ -2105,6 +2108,39 @@ function ns.MyWeaponConfig()
     return "ranged"
   end
   return "one_hand"
+end
+
+--- Is the player dual-wielding right now?
+---
+--- ⚠️ READ, NEVER LOOKED UP — the same call as resolveWeaponConfig on the site.
+--- A table of which specs can dual-wield is a WoW fact that changes with the
+--- game and goes stale in silence; the off-hand answers it directly. A WEAPON in
+--- the off-hand means a one-hander can go there. A shield or a held off-hand
+--- means it cannot, and the drop can only replace the MAIN hand.
+---
+--- An EMPTY off-hand needs no answer either way: there is nothing there to
+--- compare against, so both readings produce the same comparison.
+function ns.AmDualWielding()
+  local link = GetInventoryItemLink("player", INVSLOT_OFFHAND)
+  if not link then return false end
+  local fn = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+  if not fn then return false end
+  local ok, _, _, _, invType = pcall(fn, link)
+  if not ok or type(invType) ~= "string" then return false end
+  return invType == "INVTYPE_WEAPON" or invType == "INVTYPE_WEAPONOFFHAND"
+    or invType == "INVTYPE_WEAPONMAINHAND"
+end
+
+--- The inventory slots a loot slot competes with FOR THIS PLAYER. Everything is
+--- fixed except ONE_HAND — see ns.AmDualWielding.
+function ns.CompetingInvSlots(lootSlot)
+  if lootSlot == "ONE_HAND" then
+    if ns.AmDualWielding() then
+      return { INVSLOT_MAINHAND, INVSLOT_OFFHAND }
+    end
+    return { INVSLOT_MAINHAND }
+  end
+  return ns.SLOT_INV[lootSlot]
 end
 
 --- Does the player already have this exact item equipped in the given slot, and

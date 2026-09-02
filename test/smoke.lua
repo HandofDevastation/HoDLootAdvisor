@@ -4520,6 +4520,67 @@ header("Roll states — read from the client's names, never from numbers")
         liveSource == "enum" or liveSource == "inherited", tostring(liveSource))
 end)()
 
+header("Dual wield — which hand a one-hander can actually replace")
+
+-- ⚠️ A ONE-HANDER DOES NOT COMPETE WITH BOTH HANDS FOR EVERYONE (Session 264).
+-- The rule was "worst of main hand and off-hand", which is true only of somebody
+-- already dual-wielding. A caster holds a TOME in the off-hand and cannot put a
+-- dagger there, so the drop can only replace the MAIN hand — and scoring it
+-- against the off-hand overstated the gain by the gap between the two. Live: a
+-- Warlock's dagger read +13 against her 308 off-hand instead of +3 against her
+-- 318 main hand, and it put her top of a ranking she was second in.
+--
+-- ⚠️ READ, NEVER LOOKED UP. A table of which specs can dual-wield is a WoW fact
+-- that goes stale in silence. The off-hand's own inventory type answers it.
+;(function()
+  local savedMain = stub.player.equipped[INVSLOT_MAINHAND]
+  local savedOff  = stub.player.equipped[INVSLOT_OFFHAND]
+  stub.itemEquipLoc = stub.itemEquipLoc or {}
+  local savedM, savedO = stub.itemEquipLoc[990200], stub.itemEquipLoc[990201]
+
+  stub.player.equipped[INVSLOT_MAINHAND] = { itemID = 990200, ilvl = 318 }
+  stub.player.equipped[INVSLOT_OFFHAND]  = { itemID = 990201, ilvl = 308 }
+  stub.itemEquipLoc[990200] = "INVTYPE_WEAPONMAINHAND"
+
+  -- A HELD off-hand: a weapon cannot go there.
+  stub.itemEquipLoc[990201] = "INVTYPE_HOLDABLE"
+  check("a held off-hand is not a dual wield", ns.AmDualWielding() == false)
+  local held = ns.EquippedSlotState("ONE_HAND")
+  check("...so a one-hander is compared against the MAIN hand",
+        held and held.ilvl == 318, held and tostring(held.ilvl),
+        "scoring it against the 308 off-hand is a gain that cannot be taken")
+
+  -- A SHIELD: likewise.
+  stub.itemEquipLoc[990201] = "INVTYPE_SHIELD"
+  check("a shield is not a dual wield either", ns.AmDualWielding() == false)
+  check("...and the main hand is still the comparison",
+        (ns.EquippedSlotState("ONE_HAND") or {}).ilvl == 318)
+
+  -- A WEAPON in the off-hand: now both hands genuinely compete, and the WORSE
+  -- of them is the one being replaced.
+  stub.itemEquipLoc[990201] = "INVTYPE_WEAPONOFFHAND"
+  check("a weapon in the off-hand IS a dual wield", ns.AmDualWielding() == true)
+  local dw = ns.EquippedSlotState("ONE_HAND")
+  check("...so the WORSE of the two hands is what gets replaced",
+        dw and dw.ilvl == 308, dw and tostring(dw.ilvl))
+
+  -- Nothing else moves: the two-handed and off-hand slots are unaffected.
+  check("the main-hand slot is untouched by any of this",
+        (ns.EquippedSlotState("MAIN_HAND") or {}).ilvl == 318)
+  check("...and so is the off-hand slot",
+        (ns.EquippedSlotState("OFF_HAND") or {}).ilvl == 308)
+
+  -- An EMPTY off-hand needs no answer: there is nothing to compare against, so
+  -- both readings agree and neither has to be right.
+  stub.player.equipped[INVSLOT_OFFHAND] = nil
+  check("an empty off-hand gives the same answer either way",
+        (ns.EquippedSlotState("ONE_HAND") or {}).ilvl == 318)
+
+  stub.player.equipped[INVSLOT_MAINHAND] = savedMain
+  stub.player.equipped[INVSLOT_OFFHAND]  = savedOff
+  stub.itemEquipLoc[990200], stub.itemEquipLoc[990201] = savedM, savedO
+end)()
+
 header("Candidate item level — what the badge is scored against")
 
 -- ⚠️ THE CHECK THAT WOULD HAVE CAUGHT A SEASON-LONG DISAGREEMENT (Session 264).
