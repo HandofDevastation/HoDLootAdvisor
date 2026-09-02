@@ -21,7 +21,19 @@ package.path = "./?.lua;./test/?.lua;" .. package.path
 local stub = require("wow-stub")
 
 local failures, checks = {}, 0
+-- ⚠️ "SKIP" IS A RESERVED WORD IN A CHECK LABEL, and this is not pedantry.
+-- CI greps every harness's OUTPUT for it and fails the run — deliberately,
+-- because a skipped check that reads as a pass is how the price-parity check
+-- quietly stopped existing. A check NAMED "...is SKIPPED, by name" therefore
+-- failed a release while passing perfectly. The guard is right; the label was
+-- wrong, and nothing but this would have caught it before a tag went out.
 local function check(label, ok, detail)
+  if tostring(label):upper():find("SKIP", 1, true) then
+    io.write("\n  HARNESS FAULT: a check label contains \"SKIP\":\n    ", label, "\n")
+    io.write("  CI greps harness output for that word and fails the run.\n")
+    io.write("  Rename it — EXCLUDED, REFUSED and IGNORED all read fine.\n\n")
+    os.exit(3)
+  end
   checks = checks + 1
   if not ok then
     failures[#failures + 1] = label .. (detail and ("  — " .. tostring(detail)) or "")
@@ -4660,7 +4672,7 @@ header("Eligibility harvest — Blizzard's verdict, per spec")
   stub.journal.loot[coldEnc] = { { itemID = 279001, icon = 9, itemQuality = 4 } }
   ns.Journal.Invalidate()
   local h2 = ns.HarvestEligibility()
-  check("a boss the client cannot read is SKIPPED, by name",
+  check("a boss the client cannot read is EXCLUDED, by name",
         h2 ~= nil and #h2.skippedBosses > 0, h2 and tostring(#h2.skippedBosses))
   check("...and its items never enter the universe",
         h2 ~= nil and (function()
