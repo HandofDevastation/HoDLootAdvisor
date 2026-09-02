@@ -296,6 +296,43 @@ function stub.Install()
     if key == "Version" then return "test" end
   end }
 
+  -- ── Classes and specs, as the client enumerates them ──────────────────────
+  --
+  -- Small on purpose — three classes, seven specs — but SHAPED like the real
+  -- thing: Blizzard's own class ids, and specs that differ WITHIN a class,
+  -- which is the entire point of harvesting per spec rather than per class.
+  stub.classes = {
+    [1] = { name = "Warrior", specs = {
+      { id = 71, name = "Arms" }, { id = 72, name = "Fury" },
+      { id = 73, name = "Protection" } } },
+    [3] = { name = "Hunter", specs = {
+      { id = 253, name = "Beast Mastery" }, { id = 255, name = "Survival" } } },
+    [9] = { name = "Warlock", specs = {
+      { id = 265, name = "Affliction" }, { id = 266, name = "Demonology" } } },
+  }
+  -- ⚠️ REAL CLASS IDS, WITH GAPS, AND GetNumClasses IS THE HIGHEST ID.
+  -- That is how the live API behaves: GetClassInfo takes a CLASS ID, not an
+  -- index into a list, and ids run 1..13 whether or not this fixture models
+  -- them. A first version of this double keyed on an index and the addon read
+  -- it as an id — the harness then "proved" a harvest that would have asked the
+  -- game about the wrong classes.
+  _G.GetNumClasses = function() return 13 end
+  _G.GetClassInfo = function(classID)
+    local c = stub.classes[classID]
+    if not c then return nil end
+    return c.name, c.name:upper(), classID
+  end
+  _G.GetNumSpecializationsForClassID = function(classID)
+    local c = stub.classes[classID]
+    return c and #c.specs or 0
+  end
+  _G.GetSpecializationInfoForClassID = function(classID, i)
+    local c = stub.classes[classID]
+    local sp = c and c.specs[i]
+    if not sp then return nil end
+    return sp.id, sp.name
+  end
+
   -- The THIRD return is the numeric classID, which is what EJ_SetLootFilter
   -- takes. The addon reads it as select(3, UnitClass("player")).
   _G.UnitClass = function(unit)
@@ -478,6 +515,13 @@ function stub.Install()
           armorType = "Plate", itemQuality = 4, classID = 1 },
         { itemID = 270162, name = "Tidecaller's Band", icon = 3, slot = "Finger",
           itemQuality = 4, displayAsVeryRare = true },
+        -- ⚠️ RESTRICTED TO ONE SPEC OF ITS CLASS — a shield, which only
+        -- Protection among the Warrior specs can use. This is the case a
+        -- CLASS-level gate cannot express and the whole reason eligibility is
+        -- harvested per spec. Without it the harness could differentiate
+        -- classes and call the job done.
+        { itemID = 270163, name = "Bulwark of the Deep", icon = 4, slot = "Off Hand",
+          armorType = "Shield", itemQuality = 4, classID = 1, specIDs = { [73] = true } },
       },
       [2894] = {},
       [2900] = {},
@@ -650,6 +694,14 @@ function stub.Install()
       local ok = true
       -- The class/spec filter, unchanged.
       if f and f.classID and it.classID ~= nil and it.classID ~= f.classID then
+        ok = false
+      end
+      -- ⚠️ AND THE SPEC, which the real filter narrows by and this double did
+      -- not model at all — so a harvest could differentiate CLASSES and the
+      -- harness would call it proven. An entry naming specIDs is visible only
+      -- to those specs; one naming none is visible to every spec of its class,
+      -- which is the ordinary case.
+      if f and f.specID and it.specIDs ~= nil and not it.specIDs[f.specID] then
         ok = false
       end
       -- ⚠️ THE SLOT FILTER NARROWS TO ONE SLOT, and an entry with no slot is

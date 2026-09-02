@@ -1751,8 +1751,14 @@ local encounters = J.CachedEncounters(1317)
 check("an instance enumerates its encounters", #encounters == 2,
       ("%d encounters"):format(#encounters))
 
+-- ⚠️ COUNTS COME FROM THE FIXTURE, NEVER A LITERAL. These were written as
+-- `== 3` and three of them broke the moment the fixture gained a fourth item —
+-- the same brittleness as hardcoding a fixture's NAME in an assertion, which
+-- this file already has a rule about. What is being tested is that the read
+-- returns the encounter's loot, not that the encounter has three pieces.
+local FIXTURE_2849 = #stub.journal.loot[2849]
 local unfiltered = J.CachedLoot(2849)
-check("an encounter's full loot table reads back", #unfiltered == 3,
+check("an encounter's full loot table reads back", #unfiltered == FIXTURE_2849,
       ("%d items"):format(#unfiltered))
 check("a loot entry carries what a browse list needs",
       unfiltered[1].name and unfiltered[1].slot and unfiltered[1].itemID)
@@ -1772,7 +1778,9 @@ check("...and it kept the item this class can use",
 
 -- Two different lists must not share one cache slot, or whoever asked last wins.
 check("filtered and unfiltered results are cached separately",
-      #J.CachedLoot(2849) == 3 and #J.CachedLoot(2849, { classID = 3 }) == 2)
+      #J.CachedLoot(2849) == FIXTURE_2849
+      and #J.CachedLoot(2849, { classID = 3 }) < FIXTURE_2849,
+      "the filtered list must be a strict subset, and neither may overwrite the other")
 
 -- BROWSING MUST NOT DEGRADE AS YOU CLICK THROUGH IT. This is the Session 244
 -- live bug, reproduced: the loot read relied on the instance already being
@@ -1804,7 +1812,7 @@ stub.journal.selectedInstance = 1304          -- a DIFFERENT instance
 stub.journal.selectedEncounter = nil
 local crossed = J.CachedLoot(2849)            -- an encounter of 1317
 check("a loot read selects its own instance instead of trusting what is selected",
-      #crossed == 3,
+      #crossed == FIXTURE_2849,
       ("%d items read while the journal pointed at another instance"):format(#crossed))
 
 -- The specific corruption behind the live failure: an id guessed from a call
@@ -4579,6 +4587,132 @@ header("Dual wield — which hand a one-hander can actually replace")
   stub.player.equipped[INVSLOT_MAINHAND] = savedMain
   stub.player.equipped[INVSLOT_OFFHAND]  = savedOff
   stub.itemEquipLoc[990200], stub.itemEquipLoc[990201] = savedM, savedO
+end)()
+
+header("Eligibility harvest — Blizzard's verdict, per spec")
+
+-- ⚠️ WHY THIS IS HARVESTED AND NOT WRITTEN DOWN (Session 264). The emitted
+-- `classes` set answers "can a WARRIOR use this", and Arms and Protection are
+-- the same Warrior. A table of spec weapon rules was considered and rejected: it
+-- turns a fail-OPEN gate into a fail-CLOSED one, and a wrong entry HIDES loot
+-- silently. EJ_SetLootFilter(classID, specID) is the game's own answer and it
+-- already runs for the local player; this walks it for every spec.
+;(function()
+  local specs = ns.AllClassSpecs()
+  check("the client enumerates classes and specs", specs ~= nil and #specs == 7,
+        specs and tostring(#specs))
+
+  local h, why = ns.HarvestEligibility()
+  check("the harvest returns a verdict", h ~= nil, why)
+  if not h then return end
+
+  local function usable(key, itemID) return (h.specs[key] or {})[itemID] == true end
+
+  -- The stub's first boss carries four items: a Hunter chest, a Warrior plate
+  -- piece, a ring for everybody, and a shield only PROTECTION can use.
+  check("the universe is every item considered, from readable bosses only",
+        #h.items >= 4, tostring(#h.items))
+
+  check("a class-restricted item reaches only that class",
+        usable("Hunter/Beast Mastery", 270160)
+        and not usable("Warlock/Affliction", 270160)
+        and not usable("Warrior/Arms", 270160))
+
+  check("an unrestricted item reaches everyone",
+        usable("Hunter/Beast Mastery", 270162)
+        and usable("Warlock/Affliction", 270162)
+        and usable("Warrior/Protection", 270162))
+
+  -- THE ONE THAT MATTERS. A class gate cannot express this, and it is the shape
+  -- of every live mis-offer on the roster.
+  check("a SPEC-restricted item reaches only that spec",
+        usable("Warrior/Protection", 270163)
+        and not usable("Warrior/Arms", 270163)
+        and not usable("Warrior/Fury", 270163),
+        "Arms and Protection are the same class — only the spec filter separates them")
+
+  check("...while its class-mates still get the class's other loot",
+        usable("Warrior/Arms", 270161) and usable("Warrior/Protection", 270161))
+
+  -- Coverage is reported, never assumed.
+  check("the harvest reports how much it answered",
+        h.answered > 0 and (h.answered + h.warming) > 0,
+        ("%d answered, %d warming"):format(h.answered, h.warming))
+
+  -- ⚠️ THE COLD-BOSS GUARD. A warming read comes back UNFILTERED, so recording
+  -- it marks everything usable for everybody — and putting its items in the
+  -- universe while no spec claims them marks them usable by NOBODY, which is
+  -- the silent hiding this approach exists to avoid. Both halves are excluded.
+  local coldEnc = 2894
+  local saved = stub.journal.loot[coldEnc]
+  stub.journal.loot[coldEnc] = { { itemID = 279001, icon = 9, itemQuality = 4 } }
+  ns.Journal.Invalidate()
+  local h2 = ns.HarvestEligibility()
+  check("a boss the client cannot read is SKIPPED, by name",
+        h2 ~= nil and #h2.skippedBosses > 0, h2 and tostring(#h2.skippedBosses))
+  check("...and its items never enter the universe",
+        h2 ~= nil and (function()
+          for _, id in ipairs(h2.items) do if id == 279001 then return false end end
+          return true
+        end)(),
+        "an item in the universe that no spec claims imports as usable by nobody")
+  stub.journal.loot[coldEnc] = saved
+  ns.Journal.Invalidate()
+
+  -- Persisted for the importer, coverage and all.
+  local stored = ns.StoreEligibilityHarvest()
+  check("the harvest persists to SavedVariables for the importer",
+        stored ~= nil and stored.version == 1
+        and type(stored.items) == "table" and type(stored.specs) == "table")
+  check("...carrying its coverage, so a partial harvest cannot import as whole",
+        stored ~= nil and stored.answered ~= nil and stored.warming ~= nil
+        and type(stored.skipped) == "table")
+  check("...and the same spec-level verdict the harvest made",
+        stored ~= nil and (function()
+          for _, id in ipairs(stored.specs["Warrior/Protection"] or {}) do
+            if id == 270163 then return true end
+          end
+          return false
+        end)()
+        and (function()
+          for _, id in ipairs(stored.specs["Warrior/Arms"] or {}) do
+            if id == 270163 then return false end
+          end
+          return true
+        end)())
+
+  -- ── The addon's side of the contract ─────────────────────────────────────
+  -- The harvest is only worth anything if ns.CanUse actually reads it back.
+  local base = { classes = { Warrior = true }, armor = "Plate" }
+  local harvested = {
+    classes = { Warrior = true }, armor = "Plate",
+    sp = { ["Warrior/Arms"] = true, ["Warrior/Fury"] = true },
+  }
+  check("an emitted spec verdict narrows within a class",
+        ns.CanUse(harvested, "Warrior", "Arms")
+        and not (ns.CanUse(harvested, "Warrior", "Protection")),
+        "Arms and Protection are the same class — this is the gap `classes` cannot express")
+  check("...and an item with NO verdict still falls through to the class gate",
+        ns.CanUse(base, "Warrior", "Protection") == true,
+        "absent must mean NOT ASKED, never 'nobody can use this'")
+  check("...while an EMPTY verdict means the game said nobody",
+        not ns.CanUse({ classes = { Warrior = true }, sp = {} }, "Warrior", "Arms"))
+  check("...and a verdict cannot WIDEN past the class gate",
+        not ns.CanUse({ classes = { Warrior = true }, sp = { ["Mage/Frost"] = true } },
+                      "Mage", "Frost"))
+
+  -- The export the site imports.
+  local text = ns.EligibilityExport()
+  check("the export names its version, universe and coverage",
+        type(text) == "string"
+        and text:match("^LAE1\n") ~= nil
+        and text:match("\nitems=") ~= nil
+        and text:match("\ncoverage=") ~= nil
+        and text:match("\nskipped=") ~= nil)
+  check("...and carries one line per spec",
+        type(text) == "string" and text:match("\nWarrior/Protection=") ~= nil)
+  check("...with no pipe characters, which an EditBox would zero",
+        type(text) == "string" and not text:find("|", 1, true))
 end)()
 
 header("Candidate item level — what the badge is scored against")

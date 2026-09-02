@@ -1839,6 +1839,29 @@ function ns.CanUse(rec, className, specName)
       rec.armor and (" (" .. rec.armor .. ")") or "")
   end
 
+  -- ── BLIZZARD'S OWN PER-SPEC VERDICT, where it has been harvested ─────────
+  --
+  -- `sp` is the set of "Class/Spec" keys the GAME says can use this item,
+  -- harvested from EJ_SetLootFilter for every spec (ns.HarvestEligibility) and
+  -- emitted back by the site. It closes the gap the class gate below cannot
+  -- express: Arms and Protection are the same Warrior, and only one of them can
+  -- use a two-hander.
+  --
+  -- ⚠️ PRESENCE IS THE CONTRACT. `sp` present means the list is COMPLETE, so a
+  -- spec's absence from it is a verdict — including an EMPTY table, which means
+  -- the game said nobody. `sp` absent means nobody asked, and this falls through
+  -- to the class gate. Treating an absent field as an empty one would hide every
+  -- item on any payload that predates the harvest.
+  --
+  -- ⚠️ IT NARROWS, NEVER WIDENS. Being listed here is not permission to skip the
+  -- checks below; a bad harvest must not be able to hand somebody an item their
+  -- class cannot wear.
+  if type(rec.sp) == "table" and className and specName then
+    if not rec.sp[className .. "/" .. specName] then
+      return false, "your spec cannot use this"
+    end
+  end
+
   -- Fail OPEN on a payload that predates the field. An over-broad list is
   -- visibly wrong and fixable; an empty one reads as the addon being broken.
   if type(rec.classes) == "table" then
@@ -3442,4 +3465,244 @@ function ns.BossIndexForEncounter(encounterID)
     if ids and ids[encounterID] then return i, b end
   end
   return nil
+end
+
+-- ---------------------------------------------------------------------------
+-- Per-spec eligibility — HARVESTED FROM THE GAME, never authored
+-- ---------------------------------------------------------------------------
+--
+-- ⚠️ WHY THIS EXISTS, AND WHY IT IS NOT A TABLE (Session 264, Jason's call).
+--
+-- The emitted `classes` set answers "can a WARLOCK use this", which is as far
+-- as the site can go: it runs canUseItem() per CLASS. Specs inside a class
+-- differ, and the gap is visible on our own roster — a Protection Warrior
+-- offered two-handers he cannot tank with, a Beast Mastery Hunter offered a
+-- one-handed dagger, a dual-wielding Frost Death Knight offered a shield.
+--
+-- THREE WAYS TO CLOSE IT WERE CONSIDERED AND TWO WERE KILLED:
+--
+--   · Author a spec -> weapon table. It converts a fail-OPEN gate into a
+--     fail-CLOSED one: an over-broad list shows somebody an item they will not
+--     take, which is visible and harmless, while a wrong table HIDES an item,
+--     which is silent. And it is easy to get wrong — "Hunter: ranged only"
+--     would have broken a Survival Hunter dual-wielding daggers on this very
+--     roster.
+--   · Derive it from what people are WEARING. The data disproves it: across the
+--     guild the audit shows a Retribution Paladin in a shield, three casters
+--     holding wands and a Balance Druid in fist weapons. characters.spec is a
+--     stale snapshot and so is gear; combining two snapshots to derive a RULE
+--     produces garbage. Reading gear is sound for "what do I compare against"
+--     and unsound for "what can this spec ever use".
+--
+--   · ASK BLIZZARD. EJ_SetLootFilter(classID, specID) is the game's own
+--     eligibility filter, it already runs for the local player in
+--     ns.DungeonUsable, and it knows every rule we would otherwise be guessing
+--     at. This walks it for EVERY spec and exports the answer so the site can
+--     store it and emit it back — the same shape as the BIS harvest, and it
+--     makes eligibility something we READ rather than model.
+--
+-- ⚠️ A COLD READ COMES BACK UNFILTERED, which would mark everything usable for
+-- everybody. Warming encounters are counted and EXCLUDED, and the export
+-- carries the coverage so a partial harvest is visibly partial rather than
+-- quietly wrong. Run it again once the cache is warm.
+
+--- Every class/spec the client knows, as { classID, specID, class, spec }.
+--- Enumerated from the game rather than from a list of forty names that would
+--- need editing every time Blizzard adds a spec — Midnight added one.
+function ns.AllClassSpecs()
+  local numClasses = GetNumClasses and GetNumClasses()
+  local classInfo  = GetClassInfo
+  local numSpecs   = GetNumSpecializationsForClassID
+  local specInfo   = GetSpecializationInfoForClassID
+  if not (numClasses and classInfo and numSpecs and specInfo) then return nil end
+
+  local out = {}
+  for i = 1, numClasses do
+    -- ⚠️ THE CLASS ID COMES FROM THE ANSWER, NOT THE LOOP. GetClassInfo takes a
+    -- class id and the ids are not guaranteed to be a dense 1..N list; reading
+    -- the loop counter as the id is how you end up asking the game about a
+    -- different class than the one you are recording. Its THIRD return is the
+    -- id, the same field ns.DungeonUsable reads off UnitClass.
+    local ok, className, _, realID = pcall(classInfo, i)
+    local classID = realID or i
+    if ok and className then
+      local okN, n = pcall(numSpecs, classID)
+      for i = 1, (okN and n or 0) do
+        local okS, specID, specName = pcall(specInfo, classID, i)
+        if okS and specID and specName then
+          out[#out + 1] = {
+            classID = classID, specID = specID,
+            class = className, spec = specName,
+          }
+        end
+      end
+    end
+  end
+  if #out == 0 then return nil end
+  return out
+end
+
+--- Walk this season's raid bosses once per spec and record what Blizzard says
+--- each one can use.
+---
+--- Returns a table, or nil plus a reason when the client cannot answer:
+---   items    — every item id CONSIDERED (the unfiltered read). Absence from a
+---              spec's list then means "not eligible", never "not looked at".
+---   specs    — ["Class/Spec"] = { [itemID] = true }
+---   warming  — how many (boss, spec) reads came back cold and were skipped
+---   answered — how many answered
+function ns.HarvestEligibility()
+  local data = ns.Data()
+  if not (data and data.bosses) then return nil, "no season data loaded" end
+  if not ns.Journal then return nil, "the Encounter Journal reader is unavailable" end
+
+  local specs = ns.AllClassSpecs()
+  if not specs then return nil, "the client did not enumerate classes and specs" end
+
+  local bossIds = {}
+  for id in pairs(data.bosses) do bossIds[#bossIds + 1] = id end
+  table.sort(bossIds)
+  if #bossIds == 0 then return nil, "this season has no bosses" end
+
+  local out = {
+    items = {}, specs = {}, warming = 0, answered = 0,
+    bosses = #bossIds, skippedBosses = {},
+  }
+  local seen, readable = {}, {}
+
+  -- PASS ONE — which bosses can be read at all, and the item UNIVERSE.
+  --
+  -- ⚠️ A WARMING BOSS IS EXCLUDED FROM THE UNIVERSE, NOT JUST FROM THE SPEC
+  -- LISTS, and getting that wrong is worse than not harvesting. A cold read
+  -- comes back unfiltered, so its items would enter the universe while no spec
+  -- could claim them — and since absence from a spec's list MEANS "not
+  -- eligible", they would import as usable by NOBODY. A boss nobody can loot is
+  -- exactly the silent hiding this whole approach exists to avoid.
+  --
+  -- So the universe is only ever built from bosses that answered, and the ones
+  -- that did not are NAMED in the export.
+  -- ⚠️ CachedLoot's SECOND RETURN IS A BOOLEAN, not a count of unresolved
+  -- entries — that is Journal.Loot's contract, and using the wrong one compared
+  -- a number with a boolean and threw. ns.DungeonUsable reads it as a boolean;
+  -- so does this.
+  for _, encID in ipairs(bossIds) do
+    local list, warming = ns.Journal.CachedLoot(encID, {})
+    if warming then
+      out.skippedBosses[#out.skippedBosses + 1] = encID
+    else
+      readable[#readable + 1] = encID
+      for _, e in ipairs(list or {}) do
+        if e.itemID and not seen[e.itemID] then
+          seen[e.itemID] = true
+          out.items[#out.items + 1] = e.itemID
+        end
+      end
+    end
+  end
+  table.sort(out.items)
+  table.sort(out.skippedBosses)
+
+  if #readable == 0 then
+    return nil, "the Adventure Guide has not loaded this season's loot yet"
+  end
+
+  -- PASS TWO — Blizzard's verdict per spec, over the readable bosses only.
+  for _, sp in ipairs(specs) do
+    local key = sp.class .. "/" .. sp.spec
+    local set = {}
+    for _, encID in ipairs(readable) do
+      local list, warming = ns.Journal.CachedLoot(encID, {
+        classID = sp.classID, specID = sp.specID,
+      })
+      -- The same trap one level down: a pair that went cold between passes is
+      -- skipped rather than recorded as "everything usable".
+      if warming then
+        out.warming = out.warming + 1
+      else
+        out.answered = out.answered + 1
+        for _, e in ipairs(list or {}) do
+          if e.itemID and seen[e.itemID] then set[e.itemID] = true end
+        end
+      end
+    end
+    out.specs[key] = set
+  end
+
+  return out
+end
+
+--- The harvest as the text an officer pastes into the site.
+---
+--- Plain text, not base64: it contains no item links, so there are no pipes to
+--- zero an EditBox, and a human being able to read it is worth more than the
+--- bytes. One line per spec, listing what that spec CAN use.
+---
+--- ⚠️ THE HEADER CARRIES THE UNIVERSE AND THE COVERAGE. Without the universe
+--- the site cannot tell "not eligible" from "never looked at", and without the
+--- coverage a half-warm harvest would import as a confident answer.
+function ns.EligibilityExport(harvest)
+  harvest = harvest or ns.HarvestEligibility()
+  if not harvest then return nil end
+
+  local L = { "LAE1" }
+  L[#L + 1] = ("season=%s"):format((ns.Data().meta or {}).seasonId or "")
+  L[#L + 1] = ("coverage=%d/%d"):format(harvest.answered,
+                                        harvest.answered + harvest.warming)
+  -- Named, not just counted: the site refuses a harvest that could not read
+  -- every boss rather than importing a partial verdict as a complete one.
+  L[#L + 1] = "skipped=" .. table.concat(harvest.skippedBosses, ",")
+  L[#L + 1] = "items=" .. table.concat(harvest.items, ",")
+
+  local keys = {}
+  for k in pairs(harvest.specs) do keys[#keys + 1] = k end
+  table.sort(keys)
+  for _, k in ipairs(keys) do
+    local ids = {}
+    for _, id in ipairs(harvest.items) do
+      if harvest.specs[k][id] then ids[#ids + 1] = id end
+    end
+    L[#L + 1] = k .. "=" .. table.concat(ids, ",")
+  end
+  return table.concat(L, "\n")
+end
+
+--- Run the harvest and PERSIST it, so a script on the same machine can read it
+--- straight out of SavedVariables.
+---
+--- ⚠️ NO NEW WINDOW, DELIBERATELY. This is a once-a-season officer action and it
+--- follows the BIS harvest's shape exactly: the game writes a file, a script
+--- imports it. Building an export window here would be a second paste box for a
+--- thing nobody does twice a season, and pasting 40 specs by hand is worse than
+--- reading the file.
+---
+--- ⚠️ SavedVariables ONLY WRITE ON /reload OR LOGOUT, so the caller is told to
+--- reload. Without that the file on disk is from the last session and a script
+--- would import a harvest that looks current and is not.
+function ns.StoreEligibilityHarvest()
+  local h, why = ns.HarvestEligibility()
+  if not h then return nil, why end
+
+  local specs = {}
+  for key, set in pairs(h.specs) do
+    local ids = {}
+    for _, id in ipairs(h.items) do
+      if set[id] then ids[#ids + 1] = id end
+    end
+    specs[key] = ids
+  end
+
+  ns.db.eligibility = {
+    version  = 1,
+    seasonId = (ns.Data().meta or {}).seasonId,
+    stamp    = time and time() or 0,
+    items    = h.items,
+    specs    = specs,
+    -- Coverage travels WITH the data, so an importer can refuse a partial
+    -- harvest rather than having to trust that whoever ran it checked.
+    answered = h.answered,
+    warming  = h.warming,
+    skipped  = h.skippedBosses,
+    bosses   = h.bosses,
+  }
+  return ns.db.eligibility
 end
