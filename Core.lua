@@ -2973,6 +2973,8 @@ local function cmdHelp()
   ns.Line("     |cff888888/la loot status · scan · clear [guild|personal]|r")
   ns.Line("     |cff888888/la loot fake|r — pretend a drop landed HERE, through the real path")
   ns.Line("|cffF3C56B/la post <itemID|itemLink>|r — post one item's ranking to chat")
+  ns.Line("|cffF3C56B/la eligibility|r — ask the game which specs can use this season's loot")
+  ns.Line("     |cff888888once a season, for an officer: writes a harvest the website imports|r")
   ns.Line("|cffF3C56B/la config|r — settings (names per line, channel, auto-open)")
   ns.Line("|cffF3C56B/la set <key> <value>|r — change one setting; |cffF3C56B/la set|r lists them")
   ns.Line("|cffF3C56B/la targets|r — what this character is going after (|cff888888clear|r empties it)")
@@ -3005,6 +3007,32 @@ SlashCmdList["HODLOOTADVISOR"] = function(msg)
     cmdStatus()
   elseif cmd == "help" then
     cmdHelp()
+  elseif cmd == "eligibility" then
+    -- ⚠️ NO UI PATH, AND THAT IS A GAP WORTH NAMING. Everything else the panel
+    -- can do has a button; this does not, because it is a once-a-season officer
+    -- action whose output is read by a script rather than by a person. If it
+    -- ever becomes routine it belongs in Settings.
+    ns.Print("walking the Adventure Guide for every spec — this reads the whole season...")
+    local h, why = ns.StoreEligibilityHarvest()
+    if not h then
+      ns.Warn(why or "the harvest could not run.")
+      return
+    end
+    ns.Line(("%d items across %d bosses, %d specs"):format(
+      #h.items, h.bosses, (function()
+        local n = 0; for _ in pairs(h.specs) do n = n + 1 end; return n
+      end)()))
+    ns.Line(("coverage: %d answered, %d cold"):format(h.answered, h.warming))
+    if #h.skipped > 0 then
+      ns.Warn(("%d boss(es) could not be read: %s"):format(
+        #h.skipped, table.concat(h.skipped, ", ")))
+      ns.Line("Open the Adventure Guide on this season's raid so the client loads")
+      ns.Line("its loot, then run this again. A partial harvest is refused on import.")
+    else
+      ns.Line("|cff20ba56complete.|r Now |cffF3C56B/reload|r — SavedVariables only")
+      ns.Line("write on reload or logout, so the file on disk is stale until you do.")
+    end
+
   elseif cmd == "diag" then
     if ns.Diagnostics then
       local sub, arg = rest:match("^(%S*)%s*(%S*)$")

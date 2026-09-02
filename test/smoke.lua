@@ -4701,6 +4701,13 @@ header("Eligibility harvest — Blizzard's verdict, per spec")
         not ns.CanUse({ classes = { Warrior = true }, sp = { ["Mage/Frost"] = true } },
                       "Mage", "Frost"))
 
+  -- ⚠️ AND IT MUST BE REACHABLE. A harvest nobody can invoke is dead code that
+  -- passes every test.
+  ns.db.eligibility = nil
+  stub.Slash("eligibility")
+  check("the harvest can actually be run from the command router",
+        ns.db.eligibility ~= nil and ns.db.eligibility.version == 1)
+
   -- The export the site imports.
   local text = ns.EligibilityExport()
   check("the export names its version, universe and coverage",
