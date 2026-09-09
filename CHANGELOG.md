@@ -1,5 +1,14 @@
 # Loot Advisor
 
+## v2026.09.09
+
+**Fixed an error when moving the mouse off the Loot Log**
+- Moving the cursor away from the item list could raise a Lua error. It needed
+  the mouse to leave the list in one motion, so it tended to appear mid-raid
+  rather than while reading down the list.
+- The row highlight now clears correctly whichever part of a row the cursor
+  leaves from.
+
 ## v2026.09.02
 
 **Weapons are scored against the hand they would actually occupy**

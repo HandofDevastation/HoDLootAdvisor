@@ -201,11 +201,20 @@ local function buildItemRow(parent, i)
   -- Leaving a CHILD of the row is not leaving the row. Every OnLeave in here
   -- routes through this, so crossing from the item button to the delete button
   -- does not flicker the highlight off and snatch the button away mid-reach.
-  local function hoverOff(self)
-    local r = self:GetParent() or self
-    if r.IsMouseOver and r:IsMouseOver() then return end
-    r.hl:Hide()
-    if r.del then r.del:Hide() end
+  -- ⚠️ THE ROW COMES FROM THE CLOSURE, NEVER FROM self:GetParent(). This is
+  -- wired as the OnLeave of the row's CHILDREN *and* of the row itself, and
+  -- deriving the row from the handler's own frame is only correct for the
+  -- first: called on the row, GetParent() climbs one level too far and returns
+  -- the item-list container, which has no `hl` and no `del`.
+  --
+  -- IT NEEDED THE CURSOR TO LEAVE THE WHOLE LIST IN ONE MOVE, which is why it
+  -- survived to a raid night. Moving between rows kept the mouse over that
+  -- container, so the guard below returned early and the nil index was never
+  -- reached; flicking the mouse off the list entirely is what threw.
+  local function hoverOff()
+    if row:IsMouseOver() then return end
+    row.hl:Hide()
+    if row.del then row.del:Hide() end
   end
 
   -- The expand marker sits on the ROW, not on the item button, so reaching for
@@ -241,9 +250,9 @@ local function buildItemRow(parent, i)
     GameTooltip:SetHyperlink(link)
     GameTooltip:Show()
   end)
-  row.item:SetScript("OnLeave", function(self)
+  row.item:SetScript("OnLeave", function()
     GameTooltip:Hide()
-    hoverOff(self)
+    hoverOff()
   end)
   -- Clicking the item expands too — the row is one thing, and only the HOVER
   -- behaviour differs across it.
@@ -275,7 +284,7 @@ local function buildItemRow(parent, i)
   row.del:SetScript("OnLeave", function(self)
     self.x:SetTextColor(unpack(MUTED))
     ns.Tip:Hide()
-    hoverOff(self)
+    hoverOff()
   end)
   row.del:SetScript("OnClick", function(self)
     RecordWindow.ConfirmDeleteItem(self:GetParent().itemKey)

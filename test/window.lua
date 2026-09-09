@@ -63,6 +63,22 @@ function real.CreateFontString(self) local t = newWidget("FontString", nil, self
   self._children[#self._children + 1] = t; return t end
 function real.CreateMaskTexture(self) return real.CreateTexture(self) end
 
+-- ⚠️ REAL, BECAUSE THE INVENTED VERSION HID A LIVE BUG (raid night, Sep 2026).
+-- GetParent fell through to the invented-method path and answered NIL, so
+-- `local r = self:GetParent() or self` quietly took the `or self` branch and
+-- came out CORRECT in the harness — while in the client GetParent answered the
+-- real parent and handed back a container with no `hl`, and the row's OnLeave
+-- threw. The double was more forgiving than the client in exactly the S257
+-- sense: it reported green on the one line that could not work.
+-- The parent is already recorded at construction; this just returns it.
+function real.GetParent(self) return self._parent end
+
+-- Headless, so nothing is under the mouse. FALSE is the honest answer and it is
+-- also the branch that matters: every hover-off guard exists to skip its work
+-- while the cursor is still inside, so a stub answering true would step over
+-- the body of every handler it is meant to exercise.
+function real.IsMouseOver(self) return false end
+
 --- Is this region actually on screen — it AND every ancestor shown?
 local function visibleChain(w)
   local n = w
@@ -1713,6 +1729,49 @@ do
       local now = marked()
       check(("...and pressing %s moves the mark onto it"):format(b._label or i),
             #now == 1 and now[1] == b._label, table.concat(now, ", "))
+    end
+
+    ns.RecordWindow.Toggle()
+  end
+
+  -- ⚠️ HOVERING OFF A ROW, FROM EVERY FRAME THAT CAN FIRE IT. A raid night hit
+  -- "attempt to index field 'hl' (a nil value)" on an item row's OnLeave. One
+  -- handler is wired to three frames — the row, its item button, its delete
+  -- button — and it derived the row from the frame it was handed. That is right
+  -- for the two CHILDREN and wrong for the ROW, where GetParent() climbs past
+  -- it to the item-list container, which has no highlight to hide.
+  --
+  -- Two out of three call sites working is what kept it alive: it also needed
+  -- the cursor to leave the whole list in one motion, because moving between
+  -- rows left the mouse over that container and the guard returned early.
+  -- So fire ALL THREE, and never assume the one that surfaced is the only one.
+  do
+    local log = _G.HoDLootAdvisorLootLog
+    ns.RecordWindow.Toggle()
+    ns.RecordWindow.Refresh()
+
+    local row = log and log.itemRows and log.itemRows[1]
+    check("the Loot Log built an item row to hover off", row ~= nil)
+    if row then
+      local function leaving(what, frame)
+        local fn = frame and frame.scripts and frame.scripts.OnLeave
+        if not fn then
+          check(("%s has an OnLeave to fire"):format(what), false)
+          return
+        end
+        local ok, err = pcall(fn, frame)
+        check(("leaving %s does not error"):format(what), ok, err)
+      end
+      leaving("the item row itself", row)
+      leaving("the row's item button", row.item)
+      leaving("the row's delete button", row.del)
+
+      -- Not merely "it did not throw" — the handler's whole job is to take the
+      -- highlight down, and a version that returned early would also not throw.
+      row.hl:Show()
+      if row.scripts.OnLeave then pcall(row.scripts.OnLeave, row) end
+      check("...and leaving the row actually hides its highlight",
+            row.hl._shown == false, tostring(row.hl._shown))
     end
 
     ns.RecordWindow.Toggle()
