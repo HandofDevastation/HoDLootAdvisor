@@ -3239,6 +3239,111 @@ header("A raid that runs past midnight is still one run")
   db.loot, stub.instance, stub.epoch = saved, savedInstance, savedEpoch
 end)()
 
+header("A bonus roll is recorded — yours from the event, everyone else's from chat")
+
+;(function()
+  -- ⚠️ ENCOUNTER_LOOT_RECEIVED DOES NOT FIRE FOR A BONUS ROLL. Measured across a
+  -- raid night's 3,000-event diagnostic log: two coin drops (one Jason's own,
+  -- one another player's) and neither produced that event, while ordinary
+  -- personal drops around the same kills did. The client reports the local
+  -- player's coin through BONUS_ROLL_RESULT — the event Blizzard's own roll
+  -- frame reads the result from — and everyone else's only as a chat line.
+  -- This block fires exactly what the log showed and nothing the log did not.
+  local db = _G.HoDLootAdvisorDB
+  local saved, savedInstance, savedRaid, savedGroup = db.loot, stub.instance, stub.inRaid, stub.inGroup
+  db.loot = { sessions = {} }
+  -- A unique instance, so a stale run pointer from this block can never match
+  -- a later scenario's kill.
+  stub.instance = { name = "Bonus Roll Chamber", difficultyID = 15,
+                    difficultyName = "Heroic (Raid)", instanceID = 99917 }
+  stub.inRaid, stub.inGroup = true, true
+  stub.Fire("PLAYER_ENTERING_WORLD")   -- forget the previous block's run
+
+  stub.items[270170] = { name = "Vexhul's Everflowing Gland", quality = 4, ilvl = 311, itemType = "Armor" }
+  stub.items[268242] = { name = "Errant Scrollsage's Hood",   quality = 4, ilvl = 311, itemType = "Armor" }
+  local myLink    = stub.link(270170, "Vexhul's Everflowing Gland", { 6652, 13334, 12849 })
+  local theirLink = stub.link(268242, "Errant Scrollsage's Hood",   { 6652, 13696 })
+
+  -- The kill itself hands out no group drops in this scenario: the point is
+  -- what the coin adds to a run, not what the roll window does.
+  stub.Fire("ENCOUNTER_END", 3421, "The Twin Fangs", 15, 20, 1)
+  stub.RunTimers(300)
+
+  -- ── Your own coin ──
+  local refusal = "bonus roll paid out something other than an item"
+  local refusedBefore = R.declined[refusal] or 0
+  -- Payload order from Blizzard_APIDocumentationGenerated/LootDocumentation.lua:
+  -- typeIdentifier, itemLink, quantity, specID, sex, personalLootToast,
+  -- currencyID, isSecondaryResult, corrupted.
+  stub.Fire("BONUS_ROLL_RESULT", "item", myLink, 1, 254, 0, false, nil, false, false)
+
+  local run  = db.loot.sessions[1]
+  local mine = run and run.items[1]
+  check("your own bonus roll is recorded", mine ~= nil,
+        ("%d runs"):format(#db.loot.sessions))
+  check("...attributed to you, realm-qualified like every chat winner",
+        mine and mine.winnerFull == "Gloomrift-Stormrage", mine and mine.winnerFull)
+  check("...and the short name the roll-window path records",
+        mine and mine.winner == "Gloomrift", mine and mine.winner)
+  check("...against the boss that just died",
+        mine and mine.boss == "The Twin Fangs", mine and mine.boss)
+  check("...as PERSONAL loot — the exact word the site's charge guard keys on",
+        mine and mine.winRollType == "personal", mine and mine.winRollType)
+  check("...marked as a bonus roll for the log", mine and mine.bonusRoll == true)
+  check("...with the bonus IDs read off the link",
+        mine and mine.bonusIDs == "6652:13334:12849", mine and mine.bonusIDs)
+  check("...and never as a roll", mine and mine.isGroupLoot == false and next(mine.rolls) == nil)
+
+  -- The client ALSO prints "You receive bonus loot" for that same item. One
+  -- person, one source: that line is recognised and deliberately ignored.
+  stub.Fire("CHAT_MSG_LOOT", ("You receive bonus loot: %s"):format(myLink))
+  check("the matching 'You receive bonus loot' line does not record it a second time",
+        run and #run.items == 1, run and #run.items)
+
+  -- ── Everyone else's coin ──
+  stub.Fire("CHAT_MSG_LOOT", ("%s receives bonus loot: %s."):format("Pryome-Darkspear", theirLink))
+  local theirs = run and run.items[2]
+  check("another player's bonus roll is recorded from the chat line",
+        theirs ~= nil, run and ("%d items"):format(#run.items))
+  check("...with the name exactly as the line carried it, realm included",
+        theirs and theirs.winnerFull == "Pryome-Darkspear", theirs and theirs.winnerFull)
+  check("...with the bonus IDs off the link", theirs and theirs.bonusIDs == "6652:13696")
+  check("...marked as a bonus roll too", theirs and theirs.bonusRoll == true)
+  check("...and as personal loot", theirs and theirs.winRollType == "personal")
+
+  stub.Fire("CHAT_MSG_LOOT", ("%s receives bonus loot: %s."):format("Pryome-Darkspear", theirLink))
+  check("the same line twice records once", run and #run.items == 2, run and #run.items)
+
+  stub.Fire("CHAT_MSG_LOOT", ("%s receives bonus loot: %sx%d."):format("Dåmir-Stormrage", theirLink, 2))
+  check("the 'xN' form of the line is read as well", run and #run.items == 3, run and #run.items)
+  check("...and its quantity does not leak into the name or the link",
+        run and run.items[3] and run.items[3].itemID == 268242 and run.items[3].winner == "Dåmir")
+
+  stub.Fire("CHAT_MSG_LOOT", ("%s receives loot: %s."):format("Corvá-Stormrage", theirLink))
+  check("an ordinary 'receives loot' line is NOT read — that path is the event's",
+        run and #run.items == 3, run and #run.items)
+
+  -- ── A coin that paid out no item ──
+  stub.Fire("BONUS_ROLL_RESULT", "currency", "", 500, 254, 0, false, 3008, false, false)
+  check("a coin that paid out currency is COUNTED as a refusal, not dropped in silence",
+        (R.declined[refusal] or 0) == refusedBefore + 1,
+        ("%d before, %d after"):format(refusedBefore, R.declined[refusal] or 0))
+  check("...and recorded nothing", run and #run.items == 3, run and #run.items)
+
+  -- ── What reaches the site ──
+  for _, r in ipairs(R.Sessions()) do R.SetKind(r.index, "guild") end
+  local text = R.Export({ kind = "guild" })
+  check("a bonus roll exports as 'personal' — any other word and the site files it as group "
+        .. "loot, which EPGP charges for",
+        text and text:find("~Gloomrift-Stormrage~personal~0~", 1, true) ~= nil)
+  check("...for the other player too",
+        text and text:find("~Pryome-Darkspear~personal~0~", 1, true) ~= nil)
+  check("...with the export's own count agreeing",
+        select(2, R.Export({ kind = "guild" })) == 3)
+
+  db.loot, stub.instance, stub.inRaid, stub.inGroup = saved, savedInstance, savedRaid, savedGroup
+end)()
+
 header("The badge ramp — one table, three surfaces")
 
 ;(function()

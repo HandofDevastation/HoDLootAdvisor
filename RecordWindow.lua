@@ -846,7 +846,9 @@ local function refreshItems()
           row.right:SetText("all passed")
           row.right:SetTextColor(unpack(BLUE))
         elseif e.winRollType == "personal" then
-          row.right:SetText("personal")
+          -- A coin drop is personal loot to the site (never charged) but the
+          -- log says where it came from.
+          row.right:SetText(e.bonusRoll and "bonus roll" or "personal")
           row.right:SetTextColor(unpack(BLUE))
         elseif (e.winRollValue or 0) > 0 then
           row.right:SetText(tostring(e.winRollValue))

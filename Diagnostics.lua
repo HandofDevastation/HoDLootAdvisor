@@ -47,6 +47,7 @@ local WATCHED = {
   -- registered fine. This is precisely what the pcall guard is for.
   -- Award / receipt
   "ENCOUNTER_LOOT_RECEIVED",
+  "BONUS_ROLL_RESULT",   -- the local player's coin; documented in LootDocumentation.lua
   "CHAT_MSG_LOOT",
   -- Kill context, so a night's log can be split by pull
   "ENCOUNTER_START",

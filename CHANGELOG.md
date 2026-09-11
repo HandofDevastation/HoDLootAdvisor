@@ -1,5 +1,17 @@
 # Loot Advisor
 
+## Unreleased
+
+**Bonus rolls are recorded**
+- An item won on a bonus roll was not reaching the Loot Log — not your own, and
+  not anyone else's. The game reports a bonus roll differently from other loot
+  and the recorder was not listening for it.
+- Your own bonus roll is now recorded from the roll result itself; other
+  players' from the "receives bonus loot" line in chat. Both show as "bonus roll"
+  in the Loot Log.
+- A bonus roll is still personal loot as far as the website is concerned, so it
+  imports the same way a personal drop does.
+
 ## v2026.09.09
 
 **Fixed an error when moving the mouse off the Loot Log**

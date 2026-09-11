@@ -813,26 +813,51 @@ end
 -- Capture — personal loot
 -- ---------------------------------------------------------------------------
 --
--- ENCOUNTER_LOOT_RECEIVED fires for everything the server hands out, group loot
--- included, so it is the only path that sees personal/push loot at all.
+-- Three sources feed one record shape, and NONE of them covers the others.
 --
--- The de-duplication against a group drop is deliberately loose — same item, same
--- winner, this session — because it CANNOT be exact: our group entries are keyed
--- in C_LootHistory's encounter id space and this event reports the journal one.
--- Anything that slips through is absorbed by the site's own dedupe on
--- item_name|boss|character_name, which is precisely why that safety net is worth
--- leaning on rather than inventing a stricter key that could drop a real drop.
+--   ENCOUNTER_LOOT_RECEIVED — what the server hands out around a kill: personal
+--     drops, push loot, a raid's crafting reagents. ⚠️ MEASURED, NOT AS THE OLD
+--     COMMENT HERE CLAIMED: it does NOT fire for group-loot wins (those come from
+--     C_LootHistory) and it does NOT fire for a BONUS ROLL — not yours, not
+--     anyone's. A whole raid night's log (3,000 events) held two bonus rolls and
+--     neither produced this event. Jason's own coin drop went unrecorded.
+--   BONUS_ROLL_RESULT — YOUR OWN bonus roll. The game's own roll frame reads the
+--     result from this event and nothing else, so it is the one honest source
+--     for the local player. It carries no encounter id; the boss is the one
+--     that just died, which is exactly when a coin can be spent.
+--   CHAT_MSG_LOOT "X receives bonus loot" — EVERYONE ELSE'S bonus roll. There is
+--     no event for another player's coin, only the chat line, so it is parsed —
+--     with a pattern built from the client's OWN localized string, never from
+--     English. The matching "You receive bonus loot" line is deliberately
+--     IGNORED: the local player is already covered above, and two sources for
+--     one person is a dedupe problem waiting to happen.
+--
+-- A bonus roll STILL EXPORTS AS "personal". The site keys group-vs-personal on
+-- that exact word, and EPGP charges GP for anything it files as group loot — a
+-- free coin item must never be charged. The origin is kept on the entry
+-- (bonusRoll = true) for the Loot Log only.
+--
+-- The de-duplication is deliberately loose — same item, same winner, this
+-- session — because it CANNOT be exact: group entries are keyed in
+-- C_LootHistory's encounter id space, this event reports the journal one, and
+-- the roll window strips realms that the chat line keeps. Anything that slips
+-- through is absorbed by the site's own dedupe on item_name|boss|character_name,
+-- which is precisely why that safety net is worth leaning on rather than
+-- inventing a stricter key that could drop a real drop.
 
-local function alreadyRecordedAsGroupWin(s, itemID, winner)
+local function alreadyRecorded(s, itemID, winner)
   for _, e in ipairs(s.items) do
-    if e.isGroupLoot and e.itemID == itemID and e.winner and e.winner == winner then
+    if e.itemID == itemID and e.winner and e.winner == winner then
       return true
     end
   end
   return false
 end
 
-function Record.OnEncounterLoot(encounterID, itemID, itemLink, _quantity, playerName)
+--- Record one item handed to one person outside the roll system.
+--- `opts.bonusRoll` marks a coin drop; `opts.source` names which API answered.
+local function recordPersonal(encounterID, itemID, itemLink, playerName, opts)
+  opts = opts or {}
   itemID = asNumber(tonumber(itemID))
   itemLink = asString(itemLink)
   playerName = asString(playerName)
@@ -843,17 +868,18 @@ function Record.OnEncounterLoot(encounterID, itemID, itemLink, _quantity, player
   local meta = itemInfo(itemLink)
   if meta.quality and meta.quality < minQuality() then
     return decline("below the quality threshold",
-      { item = meta.name or itemID, quality = meta.quality, threshold = minQuality() })
+      { item = meta.name or itemID, quality = meta.quality, threshold = minQuality(),
+        source = opts.source })
   end
 
   local s = session()
   if not s then
     return decline("not somewhere loot is recorded",
-      { instanceType = currentInstanceType(), encounterID = encounterID })
+      { instanceType = currentInstanceType(), encounterID = encounterID, source = opts.source })
   end
 
   local short = stripRealm(playerName)
-  if alreadyRecordedAsGroupWin(s, itemID, short) then return false end
+  if alreadyRecorded(s, itemID, short) then return false end
 
   local key = ("p%s:%s:%s"):format(tostring(encounterID or 0), tostring(itemID), tostring(playerName))
   if findEntry(s, key) then return false end
@@ -882,11 +908,113 @@ function Record.OnEncounterLoot(encounterID, itemID, itemLink, _quantity, player
     winnerRealm  = qualifyName(playerName),
     winRollType  = "personal",
     winRollValue = 0,
+    bonusRoll    = opts.bonusRoll or nil,
     timestamp    = time(),
     boss         = bossNameFor(encounterID) or "Unknown",
     encounterID  = currentEncounterID or encounterID or 0,
   }
+  if ns.Diagnostics then
+    ns.Diagnostics.Note("lootPersonal", {
+      source = opts.source, bonusRoll = opts.bonusRoll or false,
+      item = meta.name or itemID, winner = playerName, encounterID = encounterID,
+    })
+  end
   return true
+end
+
+function Record.OnEncounterLoot(encounterID, itemID, itemLink, _quantity, playerName)
+  return recordPersonal(encounterID, itemID, itemLink, playerName, { source = "ENCOUNTER_LOOT_RECEIVED" })
+end
+
+--- The local player's own name, realm-qualified the way the chat line
+--- qualifies everyone else's, so a self entry and a chat entry for the same
+--- person read the same.
+local function myQualifiedName()
+  local name, realm = whoAmI()
+  if realm and realm ~= "" then
+    return name .. "-" .. (realm:gsub("%s+", ""))
+  end
+  return name
+end
+
+--- BONUS_ROLL_RESULT: rewardType, rewardLink, quantity, specID, sex,
+--- personalLootToast, currencyID, isSecondaryResult, corrupted — read off
+--- Blizzard_APIDocumentationGenerated/LootDocumentation.lua and the roll
+--- frame's own handler. A coin that pays out gold or currency is not loot, and
+--- is COUNTED as a refusal rather than dropped in silence.
+function Record.OnBonusRoll(rewardType, rewardLink, _quantity)
+  rewardType = asString(rewardType)
+  if rewardType ~= "item" then
+    return decline("bonus roll paid out something other than an item",
+      { rewardType = rewardType or "?", encounterID = currentEncounterID })
+  end
+  local parsed = ns.ParseItemLink(rewardLink)
+  if not parsed then
+    return decline("bonus roll result carried no item link",
+      { link = tostring(rewardLink), encounterID = currentEncounterID })
+  end
+  return recordPersonal(currentEncounterID, parsed.itemID, rewardLink, myQualifiedName(),
+    { bonusRoll = true, source = "BONUS_ROLL_RESULT" })
+end
+
+--- Turn one of the client's loot format strings ("%s receives bonus loot: %s.")
+--- into a Lua pattern. Built from the LOCALIZED global, so it matches whatever
+--- language the client speaks; nil when the client does not define it.
+local function chatPattern(globalName)
+  local fmt = _G[globalName]
+  if type(fmt) ~= "string" or fmt == "" then return nil end
+  -- Escape every magic character, then put the captures back.
+  local pat = fmt:gsub("%p", "%%%0")
+  pat = pat:gsub("%%%%s", "(.+)"):gsub("%%%%d", "(%%d+)")
+  return "^" .. pat .. "$"
+end
+
+local bonusPatterns
+local function bonusLootPatterns()
+  if bonusPatterns then return bonusPatterns end
+  bonusPatterns = {}
+  -- The MULTIPLE form first: its pattern is the single form plus a suffix, so
+  -- the single form would also match it and swallow the quantity into the link.
+  for _, name in ipairs({ "LOOT_ITEM_BONUS_ROLL_MULTIPLE", "LOOT_ITEM_BONUS_ROLL" }) do
+    local pat = chatPattern(name)
+    if pat then bonusPatterns[#bonusPatterns + 1] = { name = name, pat = pat, other = true } end
+  end
+  -- The self forms are recognized so they can be ignored ON PURPOSE, and so
+  -- the diagnostic log can say that is what happened.
+  for _, name in ipairs({ "LOOT_ITEM_BONUS_ROLL_SELF_MULTIPLE", "LOOT_ITEM_BONUS_ROLL_SELF" }) do
+    local pat = chatPattern(name)
+    if pat then bonusPatterns[#bonusPatterns + 1] = { name = name, pat = pat, other = false } end
+  end
+  if #bonusPatterns == 0 and ns.Diagnostics then
+    ns.Diagnostics.Note("lootChatPatterns", { defined = 0 })
+  end
+  return bonusPatterns
+end
+
+--- CHAT_MSG_LOOT. Only the bonus-roll lines are of interest; everything else
+--- the recorder learns from a structured event.
+function Record.OnLootMessage(msg)
+  msg = asString(msg)
+  if not msg or msg == "" then return false end
+  for _, p in ipairs(bonusLootPatterns()) do
+    local a, b = msg:match(p.pat)
+    if a then
+      if not p.other then
+        -- Our own roll arrives through BONUS_ROLL_RESULT; recording it from
+        -- chat as well would be a second source for one person.
+        return false
+      end
+      local playerName, link = a, b
+      local parsed = ns.ParseItemLink(link)
+      if not parsed then
+        return decline("bonus loot line carried no item link",
+          { line = msg:sub(1, 120), pattern = p.name })
+      end
+      return recordPersonal(currentEncounterID, parsed.itemID, link, playerName,
+        { bonusRoll = true, source = p.name })
+    end
+  end
+  return false
 end
 
 -- ---------------------------------------------------------------------------
@@ -970,6 +1098,8 @@ local frame = CreateFrame("Frame")
 local WATCHED = {
   "ENCOUNTER_END",
   "ENCOUNTER_LOOT_RECEIVED",
+  "BONUS_ROLL_RESULT",   -- your own coin; see "Capture — personal loot"
+  "CHAT_MSG_LOOT",       -- everyone else's coin; nothing else is read from chat
   "LOOT_HISTORY_UPDATE_DROP",
   "LOOT_HISTORY_UPDATE_ENCOUNTER",
   "LOOT_HISTORY_GO_TO_ENCOUNTER",
@@ -1065,6 +1195,16 @@ frame:SetScript("OnEvent", function(_, event, ...)
 
   if event == "ENCOUNTER_LOOT_RECEIVED" then
     Record.OnEncounterLoot(...)
+    return
+  end
+
+  if event == "BONUS_ROLL_RESULT" then
+    Record.OnBonusRoll(...)
+    return
+  end
+
+  if event == "CHAT_MSG_LOOT" then
+    Record.OnLootMessage(...)
     return
   end
 

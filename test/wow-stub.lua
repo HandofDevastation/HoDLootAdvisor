@@ -135,6 +135,7 @@ local KNOWN_EVENTS = {
   LOOT_HISTORY_GO_TO_ENCOUNTER = true, LOOT_HISTORY_CLEAR_HISTORY = true,
   LOOT_HISTORY_AUTO_SHOW = true, LOOT_HISTORY_FULL_UPDATE = true,
   ENCOUNTER_LOOT_RECEIVED = true, CHAT_MSG_LOOT = true,
+  BONUS_ROLL_RESULT = true,   -- Blizzard_APIDocumentationGenerated/LootDocumentation.lua
   ENCOUNTER_START = true, ENCOUNTER_END = true, BOSS_KILL = true,
   PLAYER_EQUIPMENT_CHANGED = true, PLAYER_ENTERING_WORLD = true,
   GET_ITEM_INFO_RECEIVED = true,
@@ -222,6 +223,13 @@ end
 
 function stub.Install()
   for name, value in pairs(SLOTS) do _G[name] = value end
+
+  -- The client's loot chat formats, copied from lines a real 12.1 client wrote
+  -- into the diagnostic log (the self form really has no trailing period).
+  _G.LOOT_ITEM_BONUS_ROLL               = "%s receives bonus loot: %s."
+  _G.LOOT_ITEM_BONUS_ROLL_MULTIPLE      = "%s receives bonus loot: %sx%d."
+  _G.LOOT_ITEM_BONUS_ROLL_SELF          = "You receive bonus loot: %s"
+  _G.LOOT_ITEM_BONUS_ROLL_SELF_MULTIPLE = "You receive bonus loot: %sx%d"
 
   -- The default client, built from whatever stub.player a scenario set before
   -- calling Install(). Single-client tests never mention clients at all — they
