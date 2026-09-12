@@ -1,6 +1,6 @@
 # Loot Advisor
 
-## Unreleased
+## v2026.09.12
 
 **Bonus rolls are recorded**
 - An item won on a bonus roll was not reaching the Loot Log — not your own, and
