@@ -3,7 +3,7 @@
 -- Game data only: no roster, no standings, no personal data.
 
 HoDLootAdvisorData = {
-  meta = { schema = 2, generatedAt = "2026-09-02T15:26:09.000Z", seasonId = "ad2b4991-46a1-444c-b09b-e0b4f5f72021", seasonName = "Midnight: Season 2" },
+  meta = { schema = 2, generatedAt = "2026-10-15T12:38:05.223Z", seasonId = "ad2b4991-46a1-444c-b09b-e0b4f5f72021", seasonName = "Midnight: Season 2" },
   bosses = {
     [2849] = { name = "Nymrissa Wavecaller", order = 1, enc = 3379 },
     [2888] = { name = "Nek'zali the Soulcoiler", order = 2, enc = 3470 },
@@ -14,6 +14,7 @@ HoDLootAdvisorData = {
     [2887] = { name = "The Twin Fangs", order = 7, enc = 3421 },
     [2883] = { name = "The Coiled Altar", order = 8, enc = 3429 },
     [2895] = { name = "Ula'tek", order = 9, enc = 3492 },
+    [2896] = { name = "Kith'ix", order = 10, enc = 3513 },
   },
   items = {
     [268196] = { name="Venom-Slashed Scuteward", slot="OFF_HAND", armor="Shield", dropRank=2, ilvl={n=295,h=308,m=321}, stats={["Haste"]=36,["Critical Strike"]=18}, primary={["Strength"]=32,["Intellect"]=99}, classes={["Death Knight"]=true,["Evoker"]=true,["Monk"]=true,["Paladin"]=true,["Shaman"]=true,["Warrior"]=true}, sp={["Paladin/Holy"]=true,["Paladin/Protection"]=true,["Shaman/Elemental"]=true,["Shaman/Restoration"]=true,["Warrior/Protection"]=true}, boss=2894 },
@@ -129,6 +130,16 @@ HoDLootAdvisorData = {
     [271875] = { name="Gaze of the Coiled Watcher", slot="HEAD", armor="Leather", dropRank=4, ilvl={n=302,h=315,m=344}, stats={["Haste"]=107}, primary={["Agility"]=65,["Intellect"]=65}, classes={["Demon Hunter"]=true,["Druid"]=true,["Monk"]=true,["Rogue"]=true}, sp={["Demon Hunter/Devourer"]=true,["Demon Hunter/Havoc"]=true,["Demon Hunter/Vengeance"]=true,["Druid/Balance"]=true,["Druid/Feral"]=true,["Druid/Guardian"]=true,["Druid/Restoration"]=true,["Monk/Brewmaster"]=true,["Monk/Mistweaver"]=true,["Monk/Windwalker"]=true,["Rogue/Assassination"]=true,["Rogue/Outlaw"]=true,["Rogue/Subtlety"]=true}, boss=2895 },
     [271876] = { name="Awoken Dreadfang Cuirass", slot="CHEST", armor="Mail", dropRank=4, ilvl={n=302,h=315,m=344}, stats={["Critical Strike"]=107}, primary={["Agility"]=65,["Intellect"]=65}, classes={["Evoker"]=true,["Hunter"]=true,["Shaman"]=true}, sp={["Evoker/Augmentation"]=true,["Evoker/Devastation"]=true,["Evoker/Preservation"]=true,["Hunter/Beast Mastery"]=true,["Hunter/Marksmanship"]=true,["Hunter/Survival"]=true,["Shaman/Elemental"]=true,["Shaman/Enhancement"]=true,["Shaman/Restoration"]=true}, boss=2895 },
     [271878] = { name="Chausses of Unbound Rancor", slot="LEGS", armor="Plate", dropRank=4, ilvl={n=302,h=315,m=344}, stats={["Mastery"]=107}, primary={["Strength"]=65,["Intellect"]=65}, classes={["Death Knight"]=true,["Paladin"]=true,["Warrior"]=true}, sp={["Death Knight/Blood"]=true,["Death Knight/Frost"]=true,["Death Knight/Unholy"]=true,["Paladin/Holy"]=true,["Paladin/Protection"]=true,["Paladin/Retribution"]=true,["Warrior/Arms"]=true,["Warrior/Fury"]=true,["Warrior/Protection"]=true}, boss=2895 },
+    [280617] = { name="Lightbearer's Shield Fragment", slot="TRINKET", dropRank=3, ilvl={n=298,h=311,m=324}, stats={}, primary={["Strength"]=61,["Agility"]=61}, classes={["Death Knight"]=true,["Demon Hunter"]=true,["Druid"]=true,["Evoker"]=true,["Hunter"]=true,["Mage"]=true,["Monk"]=true,["Paladin"]=true,["Priest"]=true,["Rogue"]=true,["Shaman"]=true,["Warlock"]=true,["Warrior"]=true}, boss=2896 },
+    [280799] = { name="Lu'selama, Light's Justice", slot="TWO_HAND", armor="Two-Handed Swords", dropRank=3, ilvl={n=298,h=311,m=324}, stats={}, primary={["Strength"]=65}, classes={["Death Knight"]=true,["Paladin"]=true,["Warrior"]=true}, primaryStat="str", boss=2896 },
+    [280835] = { name="Sigil of the Impending Eclipse", slot="TRINKET", dropRank=3, ilvl={n=298,h=311,m=324}, stats={}, primary={["Intellect"]=61}, classes={["Demon Hunter"]=true,["Druid"]=true,["Evoker"]=true,["Mage"]=true,["Monk"]=true,["Paladin"]=true,["Priest"]=true,["Shaman"]=true,["Warlock"]=true}, primaryStat="int", boss=2896 },
+    [281029] = { name="Band of the Swarmcaller", slot="FINGER", dropRank=3, ilvl={n=298,h=311,m=324}, stats={["Haste"]=43,["Mastery"]=115}, primary={}, classes={["Death Knight"]=true,["Demon Hunter"]=true,["Druid"]=true,["Evoker"]=true,["Hunter"]=true,["Mage"]=true,["Monk"]=true,["Paladin"]=true,["Priest"]=true,["Rogue"]=true,["Shaman"]=true,["Warlock"]=true,["Warrior"]=true}, boss=2896 },
+    [281056] = { name="Sanctified Knight's Phoenixblade", slot="ONE_HAND", armor="One-Handed Swords", dropRank=3, ilvl={n=298,h=311,m=324}, stats={["Critical Strike"]=24,["Mastery"]=29}, primary={["Intellect"]=188}, classes={["Demon Hunter"]=true,["Evoker"]=true,["Mage"]=true,["Monk"]=true,["Paladin"]=true,["Warlock"]=true}, primaryStat="int", boss=2896 },
+    [281215] = { name="Twisted Horror's Tendril", slot="TRINKET", dropRank=3, ilvl={n=298,h=311,m=324}, stats={}, primary={["Strength"]=61,["Agility"]=61,["Intellect"]=61}, classes={["Death Knight"]=true,["Demon Hunter"]=true,["Druid"]=true,["Evoker"]=true,["Hunter"]=true,["Mage"]=true,["Monk"]=true,["Paladin"]=true,["Priest"]=true,["Rogue"]=true,["Shaman"]=true,["Warlock"]=true,["Warrior"]=true}, boss=2896 },
+    [281235] = { name="Voidweaver's Leggings", slot="LEGS", armor="Cloth", dropRank=3, ilvl={n=298,h=311,m=324}, stats={["Critical Strike"]=32,["Mastery"]=75}, primary={["Intellect"]=65}, classes={["Mage"]=true,["Priest"]=true,["Warlock"]=true}, primaryStat="int", boss=2896 },
+    [281236] = { name="Chestwrap of Palpable Terror", slot="CHEST", armor="Leather", dropRank=3, ilvl={n=298,h=311,m=324}, stats={["Haste"]=76,["Critical Strike"]=31}, primary={["Agility"]=65,["Intellect"]=65}, classes={["Demon Hunter"]=true,["Druid"]=true,["Monk"]=true,["Rogue"]=true}, boss=2896 },
+    [281238] = { name="Aberrant Commander's Gauntlets", slot="HANDS", armor="Mail", dropRank=3, ilvl={n=298,h=311,m=324}, stats={["Critical Strike"]=56,["Mastery"]=24}, primary={["Agility"]=48,["Intellect"]=48}, classes={["Evoker"]=true,["Hunter"]=true,["Shaman"]=true}, boss=2896 },
+    [281239] = { name="Corroded Hulk's Skullcap", slot="HEAD", armor="Plate", dropRank=3, ilvl={n=298,h=311,m=324}, stats={["Haste"]=32,["Mastery"]=75}, primary={["Strength"]=65,["Intellect"]=65}, classes={["Death Knight"]=true,["Paladin"]=true,["Warrior"]=true}, boss=2896 },
   },
   rankings = {
     [158344] = {["Mage/Arcane"]={b="mplus",cat=271562},["Mage/Fire"]={b="mplus",cat=271562}},
