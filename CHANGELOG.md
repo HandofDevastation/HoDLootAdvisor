@@ -1,5 +1,14 @@
 # Loot Advisor
 
+## v2026.10.15
+
+**Kith'ix is in the loot table**
+- The Unbinding of Kith'ix, the new one-boss raid from patch 12.1.5, now appears
+  at the end of the boss strip with its portrait.
+- All ten pieces of gear it drops are scored: four armor pieces, the ring, the
+  three trinkets and both swords, at 298 on Normal, 311 on Heroic and 324 on
+  Mythic.
+
 ## v2026.09.12
 
 **Bonus rolls are recorded**
