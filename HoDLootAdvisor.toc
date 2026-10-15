@@ -1,4 +1,4 @@
-## Interface: 120100
+## Interface: 120100, 120105
 ## Title: Loot Advisor
 ## Notes: What dropped, how big an upgrade it is for everyone present, and what it would cost — at the moment the boss dies.
 ## Author: Gloom

@@ -1,5 +1,11 @@
 # Loot Advisor
 
+## v2026.10.15.1
+
+**Up to date for patch 12.1.5**
+- The addon no longer shows as "Out of date" on the AddOns screen. Nothing else
+  changes; everything in v2026.10.15 is included.
+
 ## v2026.10.15
 
 **Kith'ix is in the loot table**
